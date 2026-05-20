@@ -1,3 +1,18 @@
+<pdd-reason>Provides FastAPI REST API endpoints for executing and managing PDD commands, including job tracking and terminal spawning.</pdd-reason>
+<pdd-interface>
+{
+  "type": "module",
+  "module": {
+    "functions": [
+      {"name": "commands_router", "signature": "APIRouter"},
+      {"name": "get_server_port", "signature": "()", "returns": "int"},
+      {"name": "set_server_port", "signature": "(port: int)", "returns": "None"}
+    ]
+  }
+}
+</pdd-interface>
+<pdd-dependency>python_preamble.prompt</pdd-dependency>
+
 % You are an expert Python engineer. Your goal is to write `pdd/server/routes/commands.py`.
 
 % Role & Scope
@@ -35,7 +50,7 @@
 
   4. **Allowed commands** (ALLOWED_COMMANDS dict):
      - Basic: sync, update, bug, generate, test, example, fix, crash, verify
-     - Advanced: split, change, detect, auto-deps, conflicts, preprocess
+     - Advanced: split, change, detect, auto-deps, conflicts, preprocess, prompt
 
   5. **Error handling**: 400 invalid command, 404 unknown job, 409 conflicts
 
@@ -55,7 +70,7 @@
        - fix: ["prompt_file", "code_file", "unit_test_files", "error_file"]
        - crash: ["prompt_file", "code_file", "program_file", "error_file"]
        - verify: ["prompt_file", "code_file", "verification_program"]
-       - bug, update, detect: ["args"] (special: args contains positional list)
+       - bug, update, detect, prompt: ["args"] (special: args contains positional list)
        - split: ["input_prompt", "input_code", "example_code"]
        - change: ["change_prompt_file", "input_code", "input_prompt_file"]
        - auto-deps: ["prompt_file", "directory_path"]

@@ -28,7 +28,7 @@ You are an expert backend engineer implementing a CLI guard module for a Prompt-
 5. **Guard Logic**:
     - **Blocking**: In interactive TTY sessions, prompt the user for confirmation. In non-interactive/CI environments, block the execution with a `UsageError` or warning.
     - **Bypass**: Provide mechanisms to bypass the guard using a `--force` flag or environment variables (`PDD_ALLOW_DUPLICATE_RUN`).
-    - **Filtering**: Only guard a specific set of expensive subcommands (e.g., sync, generate, fix, bug, etc.).
+    - **Filtering**: Only guard a specific set of expensive subcommands (e.g., sync, generate, fix, bug, prompt, etc.).
     - **Dry-run policy**: Skip duplicate checking and skip recording when the argv contains `--dry-run`; read-only inventory commands must remain repeatable during audits and should not poison the expensive-run dedup store.
     - **Meaningful Signature Required**: If the argv tail is empty or unavailable, skip duplicate checking and skip recording rather than using an empty argv signature. An empty argv signature is too broad for programmatic/hosted invocation wrappers and can cause unrelated label-triggered jobs to block each other.
     - **Recording Policy**: Only persist a dedup record for *successful* invocations. Failed runs (exceptions, command returning a failure sentinel, or any reported non-success) must NOT be recorded, so the user can immediately retry the same command without waiting for the dedup window to expire or manually clearing state.

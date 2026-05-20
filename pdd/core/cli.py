@@ -107,6 +107,17 @@ class PDDCLI(click.Group):
             "Use `pdd generate --help` for details on this suite and common global flags.\n"
         )
 
+        with formatter.section("Prompt Management (related commands)"):
+            formatter.write_dl([
+                ("prompt",      "Interactive prompt authoring and management."),
+                ("preprocess",  "Expand includes and XML structure in a prompt."),
+                ("split",       "Split a complex prompt into modular sub-prompts."),
+                ("auto-deps",   "Automatically discover and include context files."),
+                ("change",      "Apply specific logic or requirement changes to a prompt."),
+                ("detect",      "Identify affected prompts from a change description."),
+                ("conflicts",   "Find conflicting requirements between two prompts."),
+            ])
+
         self.format_options(ctx, formatter)
 
     def invoke(self, ctx):

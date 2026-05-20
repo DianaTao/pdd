@@ -567,6 +567,16 @@ def get_pdd_command(command_name: str) -> Optional[click.Command]:
             _command_cache[command_name] = change
             return change
 
+        elif command_name == "detect":
+            from pdd.commands.analysis import detect_change
+            _command_cache[command_name] = detect_change
+            return detect_change
+
+        elif command_name == "split":
+            from pdd.commands.modify import split
+            _command_cache[command_name] = split
+            return split
+
         elif command_name == "crash":
             from pdd.commands.analysis import crash
             _command_cache[command_name] = crash
@@ -576,6 +586,15 @@ def get_pdd_command(command_name: str) -> Optional[click.Command]:
             from pdd.commands.utility import verify
             _command_cache[command_name] = verify
             return verify
+
+        elif command_name == "prompt":
+            try:
+                from pdd.commands.prompt import prompt_group
+                _command_cache[command_name] = prompt_group
+                return prompt_group
+            except ImportError:
+                # Handle case where pdd.commands.prompt is not yet available
+                return None
 
         else:
             return None

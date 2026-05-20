@@ -240,6 +240,8 @@ This rule is violated if the payment provider is called for an over-refund reque
 
 ### Vocabulary and Ambiguity Control
 
+*Tip: Use `pdd prompt lint --ambiguity` to automatically identify vague language in your prompts before you run `pdd sync`.*
+
 Define any term that could affect behavior. Common ambiguous terms include active user, valid request, duplicate record, safe HTML, recent transaction, successful import, authorized user, remaining balance, trusted input, and graceful error handling.
 
 Weak:

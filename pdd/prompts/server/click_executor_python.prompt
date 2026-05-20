@@ -1,3 +1,20 @@
+<pdd-reason>Programmatic Click command executor for PDD commands with output capture and lazy loading.</pdd-reason>
+<pdd-interface>
+{
+  "type": "module",
+  "module": {
+    "functions": [
+      {"name": "create_isolated_context", "signature": "(command, obj, color)", "returns": "click.Context"},
+      {"name": "get_pdd_command", "signature": "(command_name)", "returns": "Optional[click.Command]"}
+    ],
+    "classes": [
+      {"name": "ClickCommandExecutor", "methods": ["execute"]}
+    ]
+  }
+}
+</pdd-interface>
+<pdd-dependency>python_preamble.prompt</pdd-dependency>
+
 <include>context/python_preamble.prompt</include>
 
 % Goal
@@ -56,7 +73,7 @@ Click command executor providing programmatic execution of PDD CLI commands with
 9. **get_pdd_command(command_name) -> Optional[click.Command]**:
    - Uses module-level `_command_cache` dict for lazy caching
    - Individual lazy imports to avoid circular dependencies
-   - Supports: sync, update, generate, test, fix, example, bug, crash, verify
+   - Supports: sync, update, generate, test, fix, example, bug, change, detect, split, crash, verify, prompt
    - Returns None and logs warning for unknown/failed imports
 
 % Dependencies
@@ -67,6 +84,7 @@ Reference pdd.commands modules:
 - fix: fix
 - analysis: bug, crash
 - utility: verify
+- prompt: prompt_group
 
 % Deliverables
 - Code: `pdd/server/click_executor.py`

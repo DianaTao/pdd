@@ -1,0 +1,34 @@
+<pdd-reason>Implement the pdd prompt CLI command group and its lint subcommand.</pdd-reason>
+<pdd-interface>
+{
+  "type": "command",
+  "command": {
+    "commands": [
+      {"name": "prompt", "description": "Prompt management commands"},
+      {"name": "prompt lint", "description": "Lint PDD prompts and stories for ambiguity"}
+    ]
+  }
+}
+</pdd-interface>
+<pdd-dependency>python_preamble.prompt</pdd-dependency>
+
+<include>context/python_preamble.prompt</include>
+
+% Goal
+Implement the `pdd prompt` CLI command group and its `lint` subcommand.
+
+% Role & Scope
+You are an expert Python engineer implementing the `pdd prompt` command group. This module connects the `PromptLinter` engine to the Click-based CLI and handles user input and output formatting.
+
+% Requirements
+1. Define `prompt_group` (click.Group) and `lint` subcommand.
+2. Positional argument: `path` (the prompt file or directory to lint). Support options: `--ambiguity` (flag), `--stories` (directory path), `--json` (flag), `--llm` (flag), `--apply` (flag).
+3. Orchestration: Parse inputs, discover target files, invoke `PromptLinter`, and handle output formatting.
+4. Use `rich` for colorful and structured terminal output.
+
+% Dependencies
+<pdd.core.prompt_linter><include>context/core/prompt_linter_example.py</include></pdd.core.prompt_linter>
+<click><include>context/click_example.py</include></click>
+
+% Deliverables
+- Code: `pdd/commands/prompt.py`

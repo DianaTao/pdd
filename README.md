@@ -597,7 +597,6 @@ graph TB
 - **[`setup`](#post-installation-setup-required-first-step-after-installation)**: Configure API keys and shell completion
 
 ### Agentic Commands (Issue-Driven)
-- **[`change`](#8-change)**: Implement feature requests from GitHub issues (13-step workflow)
 - **[`bug`](#14-bug)**: Analyze bugs and create failing tests from GitHub issues
 - **[`checkup`](#17-checkup)**: Run automated project health checks from GitHub issues, or verify existing PRs against source issues
 - **[`fix`](#6-fix)**: Fix failing tests (supports issue-driven and manual modes)
@@ -614,6 +613,8 @@ graph TB
 - **[`crash`](#12-crash)**: Fixes errors in a code module and its calling program that caused a crash
 
 ### Prompt Management
+- **[`prompt lint`](#23-prompt-lint)**: Lints prompts and user stories for linguistic ambiguity
+- **[`change`](#8-change)**: Implement feature requests from GitHub issues (13-step workflow)
 - **[`preprocess`](#5-preprocess)**: Preprocesses prompt files, handling includes, comments, and other directives
 - **[`split`](#7-split)**: Splits large prompt files into smaller, more manageable ones
 - **[`extracts prune`](#21-extracts)**: Garbage-collect orphaned extracts cache entries
@@ -3016,6 +3017,26 @@ pdd firecrawl-cache check <url>        # Check if a URL is cached
 ```
 
 **When to use**: Caching is automatic. Use `stats` to check cache status, `info` to view configuration, `check` to verify if a URL is cached, or `clear` to force re-scraping all URLs.
+
+### 23. prompt lint
+
+The `prompt lint` command analyzes prompts and user stories to detect vague language, ensuring precision before generation.
+
+```bash
+pdd prompt lint prompts/foo_python.prompt
+pdd prompt lint --ambiguity prompts/foo_python.prompt
+pdd prompt lint --stories user_stories/
+pdd prompt lint --json prompts/foo_python.prompt
+```
+
+**Options:**
+- `--ambiguity`: Detect known vague terms in `<contract_rules>`, requirements, and story acceptance criteria.
+- `--stories`: Lint user stories in `user_stories/`.
+- `--json`: Emit results as structured JSON.
+- `--llm`: Enable the optional LLM-powered ambiguity review.
+- `--apply`: Automatically apply LLM suggestions to the `<vocabulary>` section (requires `--llm`).
+
+**When to use**: Run this command to identify vague language in your prompts before you run `pdd sync`.
 
 ## Example Review Process
 

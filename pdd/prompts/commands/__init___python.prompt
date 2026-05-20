@@ -35,6 +35,7 @@
     - `install_completion_cmd` (as `name="install_completion"`), `verify` (from `.utility`)
     - `which` (from `.which`)
     - `templates_group` (from `.templates`)
+    - `prompt_group` (as `name="prompt"`, from `.prompt`)
     - `connect` (from `.connect`)
     - `auth_group` (from `.auth`)
     - `sessions` (from `.sessions`)

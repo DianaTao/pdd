@@ -1,0 +1,43 @@
+<pdd-reason>Implement the core linguistic engine for linting PDD prompts and stories to detect ambiguity.</pdd-reason>
+<pdd-interface>
+{
+  "type": "module",
+  "module": {
+    "functions": [
+      {"name": "lint_file", "signature": "(file_path: str, ...)", "returns": "LintResult"},
+      {"name": "lint_content", "signature": "(content: str, ...)", "returns": "LintResult"}
+    ],
+    "classes": [
+      {"name": "PromptLinter", "methods": ["lint_file", "lint_content"]}
+    ]
+  }
+}
+</pdd-interface>
+<pdd-dependency>python_preamble.prompt</pdd-dependency>
+<pdd-dependency>content_selector_python.prompt</pdd-dependency>
+<pdd-dependency>llm_invoke_python.prompt</pdd-dependency>
+
+<include>context/python_preamble.prompt</include>
+
+% Goal
+Implement the core linguistic engine for linting PDD prompts and stories to detect ambiguity.
+
+% Role & Scope
+You are an expert Python engineer implementing the linguistic linter engine. This module provides the `PromptLinter` class which powers the `pdd prompt lint` CLI command and API endpoints.
+
+% Requirements
+1. Implement `PromptLinter` class with `lint_file` and `lint_content` methods.
+2. Deterministic pass: Keyword-based matching for common vague terms (e.g., *valid*, *safe*, *recent*, *graceful*, *active*, *duplicate*, *reasonable*, *authorized*, *trusted*, *complete*, *successful*). Support a configurable or extensible list of at least 50 such terms.
+3. Targeted Scope: In prompt files, the linter MUST specifically target text within the `<contract_rules>` tag and the `Requirements` section. In user stories, target the `Acceptance Criteria` sections.
+4. Vocabulary check: Extract `<vocabulary>` using `ContentSelector` and exempt flagged terms if they have a definition in the vocabulary section.
+5. Story support: Lint `## Acceptance Criteria` sections in Markdown files.
+6. LLM pass: Integration with `llm_invoke` to provide contextual interpretations and suggested definitions for ambiguous terms.
+7. Auto-fix (`--apply`): Append LLM-suggested definitions to the target file's vocabulary section (or create the section if it does not exist).
+8. Support for structured JSON output and Rich-formatted console output.
+
+% Dependencies
+<pdd.content_selector><include>context/content_selector_example.py</include></pdd.content_selector>
+<pdd.llm_invoke><include>context/llm_invoke_example.py</include></pdd.llm_invoke>
+
+% Deliverables
+- Code: `pdd/core/prompt_linter.py`
