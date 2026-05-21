@@ -27,6 +27,7 @@ from .prompt_block_writeback import (
     append_acceptance_tests,
     append_contract_rules,
 )
+from .prompt_lint import append_vocabulary_definitions
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +176,12 @@ def author_contracts(
         template = template_path.read_text(encoding="utf-8")
 
         context = _build_author_context(prompt_path, code_path, resolved_mode)
-        filled = template.replace("{author_context_json}", json.dumps(context, indent=2))
+        # Replace both placeholders before calling preprocess
+        filled = (
+            template
+            .replace("{mode}", resolved_mode)
+            .replace("{author_context_json}", json.dumps(context, indent=2))
+        )
         filled = preprocess(filled, recursive=False, double_curly_brackets=False)
 
         llm_result = llm_invoke(
@@ -187,7 +193,8 @@ def author_contracts(
             use_cloud=False,
         )
 
-        raw = llm_result.get("content", "") if isinstance(llm_result, dict) else str(llm_result)
+        # llm_invoke returns {"result": "...", ...} — "result" is the canonical key
+        raw = llm_result["result"] if isinstance(llm_result, dict) else str(llm_result)
         payload = _parse_author_response(raw)
 
         result.suggested_rules = payload.get("contract_rules", [])
@@ -202,12 +209,14 @@ def author_contracts(
     if dry_run or result.error:
         return result
 
-    # Write back
+    # Write back all three sections
     if result.suggested_rules:
         result.rules_written = append_contract_rules(prompt_path, result.suggested_rules)
     if result.suggested_acceptance_tests:
         result.acceptance_tests_written = append_acceptance_tests(
             prompt_path, result.suggested_acceptance_tests
         )
+    if result.suggested_vocabulary:
+        append_vocabulary_definitions(prompt_path, result.suggested_vocabulary)
 
     return result

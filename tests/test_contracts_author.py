@@ -35,8 +35,9 @@ def _prompt_with_rules(tmp_path: Path) -> Path:
 
 
 def _mock_llm_response(rules=None, vocab=None, tests=None) -> dict:
+    # llm_invoke returns {"result": "...", ...} — "result" is the canonical key
     return {
-        "content": json.dumps({
+        "result": json.dumps({
             "contract_rules": rules or ["R1 - Validate\nWhen input is str, MUST raise TypeError."],
             "vocabulary": vocab or ["invalid: a non-numeric token."],
             "acceptance_tests": tests or ["- R1: Given string input, when called, then raises TypeError."],

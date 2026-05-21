@@ -1,75 +1,102 @@
 % This prompt powers `pdd contracts author`.
-% It receives a JSON context describing a prompt file (and optionally its paired code)
-% and returns suggested <contract_rules>, <vocabulary>, and <acceptance_tests> blocks.
+% Placeholders: {mode}, {author_context_json}
 
-You are an expert software architect helping to formalize a prompt file into a
-verifiable specification using the PDD contract system.
+You are a senior software architect formalizing a module's requirements into a
+machine-verifiable contract using the PDD (Prompt-Driven Development) system.
 
-## Mode: {mode}
-
-- **greenfield**: The prompt describes requirements but has no implementation yet.
-  Design rules that are precise enough to drive code generation and test generation.
-- **retrofit**: A code implementation already exists.
-  Infer rules that describe what the code *actually does* so the prompt becomes
-  the source of truth for the existing behaviour.
-
-## Input context
+## Authoring mode: {mode}
 
 ```json
 {author_context_json}
 ```
 
-## Task
+---
 
-Produce `<contract_rules>`, `<vocabulary>`, and `<acceptance_tests>` for the prompt.
+## Your task
 
-### Rules for writing contract rules
+### What "greenfield" means
+The prompt has requirements but no implementation yet.
+Design rules that are **precise enough to drive both code generation and test generation**.
+A good greenfield rule answers: "If I gave only the rules to a code generator, would it
+produce the right function signatures, error handling, and return types?"
 
-- Each rule MUST have a stable ID: R1, R2, R3, … (sequential, no gaps).
-- Each rule MUST use exactly one of: MUST, MUST NOT, SHOULD, SHOULD NOT, MAY.
-- Each rule MUST have a "When …" condition (observable trigger).
-- Each rule MUST have at least one observable obligation:
-  - MUST return / raise / write / emit / call / reject
-  - MUST NOT call / write / read / access / mutate
-- Keep each rule to one or two sentences. Split complex rules.
-- Use terms from the `<vocabulary>` block for any ambiguous words.
+### What "retrofit" means
+Code already exists. Infer rules that describe what the code **actually does** so the
+prompt becomes the authoritative specification. Focus on observable behaviour — what the
+code returns, raises, writes, or rejects — not internal implementation details.
 
-### Rules for vocabulary
+---
 
-- Define every term used in a rule that has more than one plausible interpretation.
-- Format: `term: definition sentence.`
+## Contract rule format
 
-### Rules for acceptance tests
+Each rule MUST follow this exact structure:
 
-- One acceptance test per rule, tagged with its rule ID.
-- Format: `- R1: Given … when … then …`
+```
+R<N> - <Short title in 3-6 words>
+When <observable trigger/condition>, the <subject> MUST <observable obligation>.
+```
+
+**Mandatory requirements for every rule:**
+
+1. **Stable sequential ID**: R1, R2, R3, … no gaps, no letters after the number.
+2. **Exactly one modal verb**: MUST, MUST NOT, SHOULD, SHOULD NOT, or MAY.
+3. **A "When …" condition**: the observable state or input that triggers the rule.
+   - Good: `When token_count is negative`
+   - Bad: `The function should` (no When, no observable trigger)
+4. **An observable obligation** — at least one of:
+   - `MUST return <type or value>`
+   - `MUST raise <ExceptionType>`
+   - `MUST write <what> to <where>`
+   - `MUST emit <event>`
+   - `MUST NOT call <identifier>`
+   - `MUST NOT mutate <what>`
+   - `MUST reject <input type> with <status/exception>`
+5. **No vague terms** unless defined in vocabulary: avoid "valid", "invalid", "graceful",
+   "reasonable", "successful", "complete", "appropriate", "correct".
+
+**Rule count**: 3–8 rules for a typical module. Split complex behaviour into separate rules.
+Do not combine two independent obligations into one rule.
+
+---
+
+## Vocabulary format
+
+Define every term used in the rules that has more than one plausible interpretation.
+Format: `term: one-sentence precise definition that could be tested.`
+
+---
+
+## Acceptance tests format
+
+One acceptance test per rule, tagged with the rule ID.
+Format: `- R<N>: Given <setup state>, when <action>, then <observable outcome>.`
+
+Each test must name:
+- A **concrete setup** (specific input value or state)
+- A **specific action** (function call or operation)
+- A **measurable outcome** (return value, exception type, side effect)
+
+---
 
 ## Output format
 
-Return ONLY a JSON object with this exact structure:
+Return ONLY a valid JSON object — no markdown fences, no explanation text.
 
 ```json
 {
   "contract_rules": [
-    "R1 - Rule title\nWhen <condition>, the module MUST <obligation>.",
-    "R2 - Rule title\nWhen <condition>, the module MUST NOT <obligation>."
+    "R1 - Title\nWhen <condition>, the module MUST <obligation>.",
+    "R2 - Title\nWhen <condition>, the module MUST NOT <obligation>."
   ],
   "vocabulary": [
-    "invalid: a token count that is not a non-negative integer.",
-    "unknown model: a model string for which no family key matches."
+    "negative token count: a token_count argument whose integer value is less than zero.",
+    "unknown model: a model_name string that does not match any key in the pricing table."
   ],
   "acceptance_tests": [
-    "- R1: Given <condition>, when <trigger>, then <observable outcome>.",
-    "- R2: Given <condition>, when <trigger>, then <observable outcome>."
+    "- R1: Given token_count = -1, when calculate_cost is called, then ValueError is raised.",
+    "- R2: Given model_name = 'nonexistent', when calculate_cost is called, then KeyError is raised."
   ]
 }
 ```
 
-Rules:
-- Each element in `contract_rules` is the full text of one rule (may contain newlines).
-- Each element in `vocabulary` is one `term: definition` line.
-- Each element in `acceptance_tests` is one acceptance test bullet.
-- Produce 3–7 rules for a typical module.  More rules are better than vague rules.
-- Do not include rules that duplicate information already present in `existing_contract_rules`.
-
-Do not wrap the JSON in markdown code fences. Output the raw JSON object only.
+Do not output anything before or after the JSON object.

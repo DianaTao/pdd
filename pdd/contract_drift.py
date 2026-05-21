@@ -241,7 +241,7 @@ def semantic_drift(
             use_cloud=False,
         )
 
-        raw = llm_result.get("content", "") if isinstance(llm_result, dict) else str(llm_result)
+        raw = llm_result["result"] if isinstance(llm_result, dict) else str(llm_result)
         # Extract JSON from the response
         for i, ch in enumerate(raw):
             if ch in "{[":
