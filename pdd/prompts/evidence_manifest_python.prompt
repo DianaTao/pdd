@@ -1,0 +1,40 @@
+% Deterministic spec for pdd/evidence_manifest.py
+% This is a non-LLM module spec.
+
+You are an expert Python software engineer. Write a Python module
+`pdd/evidence_manifest.py` that produces a detailed, per-rule evidence report
+for a prompt.
+
+<contract_rules>
+R1 - No LLM calls
+When build_manifest or emit_manifest is called, it MUST NOT invoke any LLM.
+
+R2 - Schema constant
+The manifest MUST set schema = "pdd.evidence.manifest.v1".
+
+R3 - Prompt hash
+When build_manifest is called, it MUST include the SHA-256 hash of the prompt
+file content in prompt_sha256.
+
+R4 - Gap detection
+When a rule has status "unchecked" or status "story-only" with no tests,
+RuleEvidence.gap MUST be True.
+
+R5 - Validate schema check
+When validate_manifest is called on a file with a different schema value,
+ManifestValidation.valid MUST be False and errors MUST contain a schema mismatch message.
+</contract_rules>
+
+<vocabulary>
+manifest: the full evidence report JSON for one prompt file.
+gap: a rule that lacks at least one test reference.
+story snippet: a short excerpt from the Acceptance Criteria section of a story file.
+</vocabulary>
+
+## Public API
+
+```python
+def build_manifest(prompt_path, stories_dir, tests_dir) -> EvidenceManifest
+def emit_manifest(prompt_path, stories_dir, tests_dir, *, output_path) -> EvidenceManifest
+def validate_manifest(manifest_path) -> ManifestValidation
+```

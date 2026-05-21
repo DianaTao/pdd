@@ -11,6 +11,7 @@ from typing import Optional
 import click
 from rich.console import Console
 from rich.markup import escape
+from rich.table import Table
 
 from ..contract_check import (
     ContractIssue,
@@ -21,9 +22,12 @@ from ..contract_check import (
     run_llm_ambiguity_pass,
 )
 from ..contract_compile import ContractIR, compile_directory, compile_prompt
+from ..contract_drift import DriftFinding, DriftResult, structural_drift, semantic_drift
+from ..contract_gate_service import GateRun, StageResult, run_gate
 from ..contract_ir import parse_prompt_contracts
 from ..contract_review import ReviewFinding, ReviewResult, run_llm_review_pass
 from ..contract_review_pipeline import run_interactive_review
+from ..contracts_author import AuthorResult, author_contracts, MODE_GREENFIELD, MODE_RETROFIT
 
 _console = Console(highlight=False)
 
@@ -475,3 +479,323 @@ def contracts_review(  # pylint: disable=too-many-arguments,too-many-locals
     # Advisory command always exits 0 unless parse/file errors
     if any(r.error and not r.findings for r in all_reviews):
         raise click.exceptions.Exit(2)
+
+
+# ---------------------------------------------------------------------------
+# pdd contracts gate
+# ---------------------------------------------------------------------------
+
+def _render_gate_run(run: GateRun) -> None:
+    """Print a stage-by-stage gate table to the console."""
+    table = Table(show_header=True, header_style="bold", box=None, pad_edge=False)
+    table.add_column("status", width=6)
+    table.add_column("stage", width=20)
+    table.add_column("detail")
+
+    status_map = {0: "[green]pass[/green]", 1: "[yellow]warn[/yellow]", 2: "[red]fail[/red]"}
+
+    for stage in run.stages:
+        if stage.skipped:
+            status = "[dim]skip[/dim]"
+        else:
+            status = status_map.get(stage.exit_code, "[red]fail[/red]")
+        table.add_row(status, escape(stage.name), escape(stage.detail))
+
+    _console.print(table)
+    _console.print(
+        f"  exit [bold]{run.exit_code}[/bold]  "
+        f"([green]0=pass[/green] / [yellow]1=warn[/yellow] / [red]2=fail[/red])"
+    )
+
+
+@contracts_group.command("gate")
+@click.argument("target", type=click.Path(exists=True))
+@click.option("--stories-dir", "stories_dir", type=click.Path(exists=True, file_okay=False), default=None,
+              help="User-stories directory.")
+@click.option("--tests-dir", "tests_dir", type=click.Path(exists=True, file_okay=False), default=None,
+              help="Tests directory for coverage.")
+@click.option("--strict", is_flag=True, default=False,
+              help="Treat unchecked coverage rules as errors (exit 2).")
+@click.option("--skip-stories-lint", is_flag=True, default=False,
+              help="Skip user-story lint in stage 1 (faster).")
+@click.option("--json", "as_json", is_flag=True, default=False,
+              help="Output gate result as JSON.")
+@click.pass_context
+def contracts_gate(
+    ctx: click.Context,
+    target: str,
+    stories_dir: Optional[str],
+    tests_dir: Optional[str],
+    strict: bool,
+    skip_stories_lint: bool,
+    as_json: bool,
+) -> None:
+    """CI gate: run the full deterministic pipeline in one command. No LLM.
+
+    \b
+    Stages (in order, fail-fast):
+      1. prompt-lint     — deterministic lint only
+      2. contracts-check — structural authoring checks
+      3. contracts-compile — compile rules into IR
+      4. coverage        — rule-to-evidence matrix
+
+    \b
+    Exit codes:
+      0  all stages pass
+      1  warnings (no errors)
+      2  one or more errors
+
+    \b
+    Examples:
+      pdd contracts gate prompts/foo_python.prompt
+      pdd contracts gate --strict --stories-dir user_stories/ prompts/
+      pdd contracts gate --json prompts/foo_python.prompt
+    """
+    obj = ctx.obj or {}
+    quiet: bool = obj.get("quiet", False)
+
+    run = run_gate(
+        Path(target),
+        stories_dir=Path(stories_dir) if stories_dir else None,
+        tests_dir=Path(tests_dir) if tests_dir else None,
+        strict=strict,
+        skip_stories_lint=skip_stories_lint,
+    )
+
+    if as_json:
+        click.echo(_json.dumps(run.as_dict(), indent=2))
+    else:
+        if not quiet:
+            _render_gate_run(run)
+
+    raise click.exceptions.Exit(run.exit_code)
+
+
+# ---------------------------------------------------------------------------
+# pdd contracts drift
+# ---------------------------------------------------------------------------
+
+def _render_drift_result(result: DriftResult, *, quiet: bool = False) -> None:
+    """Print a DriftResult to the console."""
+    if result.error:
+        _console.print(f"[red]error:[/red] {escape(result.error)}")
+    if not result.has_drift:
+        if not quiet:
+            _console.print(f"[green]✓ no drift detected[/green]  "
+                           f"({escape(result.prompt_path)} ↔ {escape(result.code_path)})")
+        return
+    _console.print(
+        f"[bold]{escape(result.prompt_path)}[/bold] ↔ [bold]{escape(result.code_path)}[/bold]  "
+        f"[yellow]{result.finding_count} finding(s)[/yellow]"
+    )
+    for f in result.structural_findings:
+        _console.print(
+            f"  [red]structural[/red]  [magenta]{escape(f.rule_id)}[/magenta]  "
+            f"[dim]{escape(f.term)}[/dim]  {escape(f.message)}"
+        )
+        if f.line:
+            _console.print(f"    line {f.line_number}: [dim italic]{escape(f.line[:120])}[/dim italic]")
+    for f in result.semantic_findings:
+        _console.print(
+            f"  [yellow]semantic[/yellow]  [magenta]{escape(f.rule_id)}[/magenta]  "
+            f"[dim]{escape(f.confidence)}[/dim]  {escape(f.message)}"
+        )
+
+
+@contracts_group.command("drift")
+@click.argument("prompt_file", type=click.Path(exists=True))
+@click.argument("code_file", type=click.Path(exists=True), required=False, default=None)
+@click.option("--semantic", "use_semantic", is_flag=True, default=False,
+              help="Run LLM semantic drift check in addition to structural (advisory).")
+@click.option("--strict", is_flag=True, default=False,
+              help="Exit non-zero on any structural finding.")
+@click.option("--json", "as_json", is_flag=True, default=False,
+              help="Output findings as JSON.")
+@click.pass_context
+def contracts_drift(
+    ctx: click.Context,
+    prompt_file: str,
+    code_file: Optional[str],
+    use_semantic: bool,
+    strict: bool,
+    as_json: bool,
+) -> None:
+    """Detect drift between a prompt's contract rules and its paired code file.
+
+    \b
+    Two check types:
+      structural (default, deterministic): scans code for MUST NOT terms.
+      semantic   (--semantic, LLM):        checks whether MUST obligations
+                                           appear to be implemented.
+
+    Structural drift: exits non-zero with --strict.
+    Semantic drift:   always advisory (exits 0) unless --strict.
+
+    \b
+    Examples:
+      pdd contracts drift prompts/foo_python.prompt src/foo.py
+      pdd contracts drift --semantic prompts/foo_python.prompt src/foo.py
+      pdd contracts drift --strict --json prompts/foo_python.prompt src/foo.py
+    """
+    obj = ctx.obj or {}
+    quiet: bool = obj.get("quiet", False)
+    verbose: bool = obj.get("verbose", False)
+    strength: float = obj.get("strength", 0.5)
+    temperature: float = obj.get("temperature", 0.0)
+    time_val: Optional[float] = obj.get("time")
+
+    prompt_path = Path(prompt_file)
+    code_path = Path(code_file) if code_file else None
+
+    # Try to auto-detect code file from prompt name
+    if code_path is None:
+        # foo_python.prompt → pdd/foo.py or src/foo.py
+        stem = prompt_path.stem.replace("_python", "").replace("_typescript", "")
+        candidates = [
+            prompt_path.parent.parent / "pdd" / f"{stem}.py",
+            prompt_path.parent.parent / "src" / f"{stem}.py",
+            prompt_path.parent.parent / f"{stem}.py",
+        ]
+        for c in candidates:
+            if c.is_file():
+                code_path = c
+                if not quiet:
+                    _console.print(f"[dim]auto-detected code file: {c}[/dim]")
+                break
+        if code_path is None:
+            raise click.UsageError(
+                "CODE_FILE argument is required (auto-detection failed). "
+                "Usage: pdd contracts drift PROMPT_FILE CODE_FILE"
+            )
+
+    if use_semantic:
+        result = semantic_drift(
+            prompt_path,
+            code_path,
+            strength=strength,
+            temperature=temperature,
+            time=time_val,
+            verbose=verbose,
+        )
+    else:
+        findings = structural_drift(prompt_path, code_path)
+        from ..contract_drift import DriftResult  # pylint: disable=import-outside-toplevel
+        result = DriftResult(
+            prompt_path=str(prompt_path),
+            code_path=str(code_path),
+            structural_findings=findings,
+        )
+
+    if as_json:
+        click.echo(_json.dumps(result.as_dict(), indent=2))
+    else:
+        _render_drift_result(result, quiet=quiet)
+
+    if strict and result.has_drift:
+        raise click.exceptions.Exit(1)
+
+
+# ---------------------------------------------------------------------------
+# pdd contracts author
+# ---------------------------------------------------------------------------
+
+def _render_author_result(result: AuthorResult, *, quiet: bool = False) -> None:
+    """Print author suggestions to the console."""
+    if result.skipped:
+        _console.print(
+            "[yellow]<contract_rules> already present — use --force to overwrite.[/yellow]"
+        )
+        return
+    if result.error:
+        _console.print(f"[red]error:[/red] {escape(result.error)}")
+        return
+
+    _console.print(f"[bold]mode:[/bold] {escape(result.mode)}")
+
+    if result.suggested_rules:
+        _console.print("\n[bold cyan]Suggested <contract_rules>[/bold cyan]")
+        for rule in result.suggested_rules:
+            _console.print(f"  {escape(rule)}")
+
+    if result.suggested_vocabulary:
+        _console.print("\n[bold cyan]Suggested <vocabulary>[/bold cyan]")
+        for term in result.suggested_vocabulary:
+            _console.print(f"  {escape(term)}")
+
+    if result.suggested_acceptance_tests:
+        _console.print("\n[bold cyan]Suggested <acceptance_tests>[/bold cyan]")
+        for test in result.suggested_acceptance_tests:
+            _console.print(f"  {escape(test)}")
+
+    if not result.dry_run:
+        _console.print(
+            f"\n[green]wrote:[/green] "
+            f"{result.rules_written} rule(s), "
+            f"{result.acceptance_tests_written} acceptance test(s)"
+        )
+
+
+@contracts_group.command("author")
+@click.argument("prompt_file", type=click.Path(exists=True))
+@click.argument("code_file", type=click.Path(), required=False, default=None)
+@click.option("--mode", type=click.Choice(["greenfield", "retrofit"]), default=None,
+              help="Authoring mode (auto-detected if omitted).")
+@click.option("--dry-run", is_flag=True, default=False,
+              help="Print suggestions without writing to the prompt file.")
+@click.option("--force", is_flag=True, default=False,
+              help="Overwrite existing <contract_rules> if present.")
+@click.option("--json", "as_json", is_flag=True, default=False,
+              help="Output result as JSON.")
+@click.pass_context
+def contracts_author(
+    ctx: click.Context,
+    prompt_file: str,
+    code_file: Optional[str],
+    mode: Optional[str],
+    dry_run: bool,
+    force: bool,
+    as_json: bool,
+) -> None:
+    """LLM-assisted authoring of <contract_rules> for a prompt. Requires --llm via env.
+
+    \b
+    Modes:
+      greenfield  (default when no code file): design rules from requirements.
+      retrofit    (default when code file present): infer rules from existing code.
+
+    \b
+    Examples:
+      pdd contracts author prompts/foo_python.prompt
+      pdd contracts author --mode greenfield prompts/foo_python.prompt
+      pdd contracts author prompts/foo_python.prompt pdd/foo.py
+      pdd contracts author --dry-run prompts/foo_python.prompt
+      pdd contracts author --force prompts/foo_python.prompt
+    """
+    obj = ctx.obj or {}
+    quiet: bool = obj.get("quiet", False)
+    verbose: bool = obj.get("verbose", False)
+    strength: float = obj.get("strength", 0.5)
+    temperature: float = obj.get("temperature", 0.1)
+    time_val: Optional[float] = obj.get("time")
+
+    result = author_contracts(
+        Path(prompt_file),
+        code_path=Path(code_file) if code_file else None,
+        mode=mode,
+        strength=strength,
+        temperature=temperature,
+        time=time_val,
+        verbose=verbose,
+        dry_run=dry_run,
+        force=force,
+    )
+
+    if as_json:
+        click.echo(_json.dumps(result.as_dict(), indent=2))
+    else:
+        _render_author_result(result, quiet=quiet)
+
+    if result.error:
+        raise click.exceptions.Exit(2)
+    if result.skipped:
+        raise click.exceptions.Exit(1)

@@ -1,0 +1,75 @@
+% This prompt powers `pdd contracts author`.
+% It receives a JSON context describing a prompt file (and optionally its paired code)
+% and returns suggested <contract_rules>, <vocabulary>, and <acceptance_tests> blocks.
+
+You are an expert software architect helping to formalize a prompt file into a
+verifiable specification using the PDD contract system.
+
+## Mode: {mode}
+
+- **greenfield**: The prompt describes requirements but has no implementation yet.
+  Design rules that are precise enough to drive code generation and test generation.
+- **retrofit**: A code implementation already exists.
+  Infer rules that describe what the code *actually does* so the prompt becomes
+  the source of truth for the existing behaviour.
+
+## Input context
+
+```json
+{author_context_json}
+```
+
+## Task
+
+Produce `<contract_rules>`, `<vocabulary>`, and `<acceptance_tests>` for the prompt.
+
+### Rules for writing contract rules
+
+- Each rule MUST have a stable ID: R1, R2, R3, … (sequential, no gaps).
+- Each rule MUST use exactly one of: MUST, MUST NOT, SHOULD, SHOULD NOT, MAY.
+- Each rule MUST have a "When …" condition (observable trigger).
+- Each rule MUST have at least one observable obligation:
+  - MUST return / raise / write / emit / call / reject
+  - MUST NOT call / write / read / access / mutate
+- Keep each rule to one or two sentences. Split complex rules.
+- Use terms from the `<vocabulary>` block for any ambiguous words.
+
+### Rules for vocabulary
+
+- Define every term used in a rule that has more than one plausible interpretation.
+- Format: `term: definition sentence.`
+
+### Rules for acceptance tests
+
+- One acceptance test per rule, tagged with its rule ID.
+- Format: `- R1: Given … when … then …`
+
+## Output format
+
+Return ONLY a JSON object with this exact structure:
+
+```json
+{
+  "contract_rules": [
+    "R1 - Rule title\nWhen <condition>, the module MUST <obligation>.",
+    "R2 - Rule title\nWhen <condition>, the module MUST NOT <obligation>."
+  ],
+  "vocabulary": [
+    "invalid: a token count that is not a non-negative integer.",
+    "unknown model: a model string for which no family key matches."
+  ],
+  "acceptance_tests": [
+    "- R1: Given <condition>, when <trigger>, then <observable outcome>.",
+    "- R2: Given <condition>, when <trigger>, then <observable outcome>."
+  ]
+}
+```
+
+Rules:
+- Each element in `contract_rules` is the full text of one rule (may contain newlines).
+- Each element in `vocabulary` is one `term: definition` line.
+- Each element in `acceptance_tests` is one acceptance test bullet.
+- Produce 3–7 rules for a typical module.  More rules are better than vague rules.
+- Do not include rules that duplicate information already present in `existing_contract_rules`.
+
+Do not wrap the JSON in markdown code fences. Output the raw JSON object only.

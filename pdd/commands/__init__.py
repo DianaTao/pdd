@@ -22,6 +22,7 @@ from .firecrawl import firecrawl_cache
 from .prompt import prompt_group
 from .contracts import contracts_group
 from .coverage import coverage_cmd
+from .evidence import evidence_group
 
 def register_commands(cli: click.Group) -> None:
     """Register all subcommands with the main CLI group."""
@@ -61,3 +62,4 @@ def register_commands(cli: click.Group) -> None:
     cli.add_command(prompt_group)
     cli.add_command(contracts_group)
     cli.add_command(coverage_cmd, name="coverage")
+    cli.add_command(evidence_group)

@@ -1,0 +1,51 @@
+% This prompt powers `pdd contracts drift` semantic analysis.
+% It receives a JSON context with the compiled contract rules and a code snippet.
+% It returns a JSON list of drift findings.
+
+You are a senior software engineer reviewing whether the implementation in a code file
+faithfully satisfies the contract rules defined in its paired prompt file.
+
+## Input
+
+```json
+{drift_context_json}
+```
+
+## Task
+
+For each rule with modal "MUST" or "MUST NOT", determine whether the code:
+
+- **implements** the rule (or credibly appears to),
+- **violates** the rule (code does the opposite of what the rule says), or
+- **is missing** the rule (there is no corresponding logic at all).
+
+Only report findings for rules where you are confident there is a real gap or violation.
+Do not report findings for rules that appear satisfied or that cannot be assessed from
+the provided code snippet.
+
+## Output format
+
+Return ONLY a JSON object with this exact structure:
+
+```json
+{
+  "findings": [
+    {
+      "rule_id": "R1",
+      "message": "Rule R1 says MUST raise ValueError for negative inputs, but the code returns None instead.",
+      "term": "ValueError",
+      "confidence": "high"
+    }
+  ]
+}
+```
+
+Rules:
+- `rule_id`: exact rule ID from the input (e.g. "R1", "R2").
+- `message`: one sentence explaining the drift.
+- `term`: the specific term, function, or obligation that drifted (can be empty).
+- `confidence`: "high" | "medium" | "low" — only include findings where confidence >= medium.
+
+If there are no findings, return `{"findings": []}`.
+
+Do not wrap the JSON in markdown code fences. Output the raw JSON object only.

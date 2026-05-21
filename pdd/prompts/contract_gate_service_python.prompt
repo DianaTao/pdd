@@ -1,0 +1,76 @@
+% Deterministic spec for pdd/contract_gate_service.py
+% This is a non-LLM module spec.
+
+You are an expert Python software engineer. Write a Python module
+`pdd/contract_gate_service.py` that orchestrates the deterministic CI gate for
+prompt contracts.
+
+<contract_rules>
+R1 - No LLM calls
+When run_gate is called, it MUST NOT invoke any LLM. All stages must be
+deterministic and reproducible without network access.
+
+R2 - Fail-fast stage ordering
+When a stage exits with code 2 (error), run_gate MUST mark all subsequent
+stages as skipped and MUST NOT run them.
+
+R3 - Exit code rollup
+When all stages complete, GateRun.exit_code MUST return the maximum exit_code
+across all non-skipped stages.
+
+R4 - Coverage unchecked as warning
+When coverage finds unchecked rules and strict=False, the coverage stage MUST
+exit 1 (warning) not 2 (error).
+
+R5 - Strict mode escalation
+When strict=True and coverage finds unchecked rules, the coverage stage MUST
+exit 2 (error).
+</contract_rules>
+
+<vocabulary>
+gate: the full deterministic pipeline run for one prompt or directory.
+stage: one discrete check (prompt-lint, contracts-check, contracts-compile, coverage).
+fail-fast: stop running stages once any stage exits with code 2.
+</vocabulary>
+
+## Dependencies
+
+- `pdd.prompt_lint.scan_prompt` — deterministic only, no LLM flag
+- `pdd.contract_check.check_prompt`, `check_directory`
+- `pdd.contract_compile.compile_prompt`, `compile_directory`
+- `pdd.coverage_contracts.build_coverage`, `build_coverage_directory`
+
+## Data classes
+
+```python
+@dataclass
+class StageResult:
+    name: str        # "prompt-lint" | "contracts-check" | "contracts-compile" | "coverage"
+    exit_code: int   # 0=pass, 1=warn, 2=fail
+    error_count: int
+    warn_count: int
+    detail: str      # short human summary
+    skipped: bool = False
+
+@dataclass
+class GateRun:
+    target: Path
+    stages: list[StageResult]
+
+    @property
+    def exit_code(self) -> int: ...  # max across non-skipped stages
+```
+
+## Public entry point
+
+```python
+def run_gate(
+    target: Path,
+    *,
+    stories_dir: Optional[Path] = None,
+    tests_dir: Optional[Path] = None,
+    strict: bool = False,
+    skip_stories_lint: bool = False,
+) -> GateRun:
+    ...
+```
