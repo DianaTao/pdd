@@ -5,36 +5,69 @@
 # behavior, full E2E, and coverage evidence.
 #
 # Usage:
-#   bash demo.sh              # all experiments (requires PDD_API_KEY for B/C)
+#   bash demo.sh              # all experiments (requires PDD Cloud login for B/C)
 #   bash demo.sh --exp-a      # Experiment A only (deterministic, no LLM)
 #   bash demo.sh --exp-b      # Experiment B only (LLM: same code, two test prompts)
 #   bash demo.sh --exp-c      # Experiment C only (LLM: full E2E before/after)
 #   bash demo.sh --exp-d      # Experiment D only (deterministic coverage gate)
 #
-# Prerequisites:
-#   pip install -e /path/to/pdd   (editable install)
-#   export PDD_SKIP_UPDATE_CHECK=1
-#   # Optional for Z3 formal proof execution:
-#   pip install z3-solver
+# PDD Cloud authentication (required for experiments B, C):
+#   Option 1 — interactive login (stored in keyring):
+#     pdd auth login
+#
+#   Option 2 — inject token directly (CI / scripted runs):
+#     export PDD_JWT_TOKEN="<your-token>"   # from: pdd auth token
+#
+#   Option 3 — use PDD_CLOUD_URL to point at a custom endpoint:
+#     export PDD_CLOUD_URL="https://your-cloud-url"
+#     export PDD_JWT_TOKEN="<your-token>"
+#
+# Optional:
+#   pip install z3-solver    # to execute Z3 formal proof tests (not just generate)
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# Resolve the correct pdd binary: prefer the conda pdd env or any binary
-# that has the new commands (prompt lint, contracts, coverage) available.
+# ── Resolve pdd binary ─────────────────────────────────────────────────────
+# Prefer a binary that has the new commands (prompt lint, contracts, coverage).
 if [ -x "/opt/anaconda3/envs/pdd/bin/pdd" ]; then
     PDD="/opt/anaconda3/envs/pdd/bin/pdd"
-elif command -v pdd &>/dev/null && "$PDD" prompt lint --help &>/dev/null 2>&1; then
+elif command -v pdd &>/dev/null; then
     PDD="pdd"
 else
-    echo "ERROR: Could not find a pdd binary with 'prompt lint' support."
-    echo "Install from the repo root: pip install -e /path/to/pdd"
+    echo "ERROR: pdd not found. Install from the repo root: pip install -e /path/to/pdd"
     exit 1
 fi
 export PDD_SKIP_UPDATE_CHECK=1
-echo "Using pdd: $PDD ($("$PDD" --version 2>/dev/null | grep -v 'Checking' | head -1))"
+PDD_VERSION=$("$PDD" --version 2>/dev/null | grep -v 'Checking' | head -1)
+echo "Using pdd: $PDD ($PDD_VERSION)"
+
+# ── Cloud auth check ───────────────────────────────────────────────────────
+# Experiments B and C call pdd generate and pdd test, which require PDD Cloud.
+# Skip auth check for exp-a and exp-d only runs.
+_check_cloud_auth() {
+    if [ -n "${PDD_JWT_TOKEN:-}" ]; then
+        echo "  Cloud auth: PDD_JWT_TOKEN set (CI/injected mode)"
+        return 0
+    fi
+    local status
+    status=$("$PDD" auth status 2>/dev/null | grep -v 'Checking' || true)
+    if echo "$status" | grep -qi "authenticated\|logged in\|valid"; then
+        echo "  Cloud auth: logged in via keyring"
+        return 0
+    fi
+    echo ""
+    echo "  WARNING: PDD Cloud authentication not confirmed."
+    echo "  Experiments B and C (pdd generate, pdd test) require cloud access."
+    echo ""
+    echo "  To authenticate:"
+    echo "    pdd auth login              # interactive device flow"
+    echo "    export PDD_JWT_TOKEN=\$(pdd auth token)  # inject token for CI"
+    echo ""
+    echo "  Continuing — experiments will fail if cloud is unreachable."
+}
 
 PROMPTS="prompts"
 STORIES="user_stories"
@@ -190,6 +223,8 @@ if $RUN_B; then
     header "═══ Experiment B: Test generation contrast (same implementation) ═══"
     echo "Generates one implementation from the enriched prompt,"
     echo "then generates tests from each prompt. Isolates test-prompt effect."
+    echo "Requires PDD Cloud (pdd auth login or PDD_JWT_TOKEN)."
+    _check_cloud_auth
 
     echo ""
     echo "── B1: generate single implementation from enriched prompt ──"
@@ -276,6 +311,8 @@ if $RUN_C; then
     header "═══ Experiment C: Full E2E before/after ═══"
     echo "Generates separate implementations and tests from each prompt."
     echo "Tests the complete workflow: prompt → codegen → test → compile → pytest."
+    echo "Requires PDD Cloud (pdd auth login or PDD_JWT_TOKEN)."
+    _check_cloud_auth
 
     echo ""
     echo "── C1: before arm (plain prompt) ──"

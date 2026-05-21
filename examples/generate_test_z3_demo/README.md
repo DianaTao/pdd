@@ -29,17 +29,42 @@ prompt-as-source-of-truth pipeline:
 ```bash
 # Install from repo root
 pip install -e /path/to/pdd
-export PDD_SKIP_UPDATE_CHECK=1
+```
 
-# Experiment A only — no LLM, no API key
+**Experiment A** is fully deterministic — no cloud needed:
+```bash
 bash demo.sh --exp-a
+```
 
-# All experiments — requires LLM API key
+**Experiments B and C** call `pdd generate` and `pdd test`, which use PDD Cloud.
+Authenticate first using one of these options:
+
+```bash
+# Option 1 — interactive login (stored in system keyring)
+pdd auth login
+
+# Option 2 — inject token directly (best for CI / scripted runs)
+export PDD_JWT_TOKEN="$(pdd auth token)"
+
+# Option 3 — custom cloud endpoint
+export PDD_CLOUD_URL="https://your-cloud-url"
+export PDD_JWT_TOKEN="<your-token>"
+```
+
+Then run:
+```bash
+# All four experiments
 bash demo.sh
 
-# Optional: enable Z3 formal proof execution
+# Or just the LLM experiments
+bash demo.sh --exp-b
+bash demo.sh --exp-c
+```
+
+**Optional:** install `z3-solver` to execute Z3 formal proof tests rather than skip them:
+```bash
 pip install z3-solver
-bash demo.sh
+bash demo.sh --exp-d
 ```
 
 ---
@@ -251,6 +276,29 @@ examples/generate_test_z3_demo/
 pip install -e /path/to/pdd
 which pdd          # must point to editable install
 pdd --version      # should show 0.0.218.dev* not 0.0.243
+```
+
+**Cloud auth not confirmed (experiments B, C fail)**
+```bash
+# Check current status
+pdd auth status
+
+# Login interactively (device flow)
+pdd auth login
+
+# Or export a token for CI/scripted use
+export PDD_JWT_TOKEN="$(pdd auth token)"
+
+# For a custom cloud endpoint
+export PDD_CLOUD_URL="https://your-cloud-url"
+export PDD_JWT_TOKEN="<your-token>"
+```
+
+**Keyring times out (`auth status` hangs)**
+```bash
+# Bypass keyring entirely by injecting the token
+export PDD_JWT_TOKEN="<paste-token-here>"
+bash demo.sh --exp-b
 ```
 
 **Z3 proofs skipped**
