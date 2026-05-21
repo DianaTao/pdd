@@ -190,7 +190,7 @@ def author_contracts(
             temperature=temperature,
             time=time,
             verbose=verbose,
-            use_cloud=False,
+            use_cloud=True,
         )
 
         # llm_invoke returns {"result": "...", ...} — "result" is the canonical key

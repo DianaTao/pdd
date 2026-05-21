@@ -617,7 +617,7 @@ def run_llm_ambiguity_pass(  # pylint: disable=too-many-locals
             temperature=temperature,
             time=time,
             verbose=verbose,
-            use_cloud=False,
+            use_cloud=True,
         )
         response_text = result["result"]
 
@@ -685,7 +685,7 @@ def run_llm_guidance_pass(  # pylint: disable=too-many-locals
             temperature=temperature,
             time=time,
             verbose=verbose,
-            use_cloud=False,
+            use_cloud=True,
         )
         response_text = result["result"]
         json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response_text, re.DOTALL)
@@ -775,7 +775,7 @@ def run_llm_formalize_pass(  # pylint: disable=too-many-locals
             temperature=temperature,
             time=time,
             verbose=verbose,
-            use_cloud=False,
+            use_cloud=True,
         )
         response_text = result["result"]
         json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response_text, re.DOTALL)

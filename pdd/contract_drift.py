@@ -238,7 +238,7 @@ def semantic_drift(
             temperature=temperature,
             time=time,
             verbose=verbose,
-            use_cloud=False,
+            use_cloud=True,
         )
 
         raw = llm_result["result"] if isinstance(llm_result, dict) else str(llm_result)

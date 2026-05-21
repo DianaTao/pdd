@@ -155,7 +155,7 @@ def run_llm_review_pass(  # pylint: disable=too-many-locals
             temperature=temperature,
             time=time,
             verbose=verbose,
-            use_cloud=False,
+            use_cloud=True,
         )
         data = json.loads(llm_result["result"])
         if not isinstance(data, list):
