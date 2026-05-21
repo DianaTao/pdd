@@ -1,0 +1,4 @@
+prompts/cost_tracker_work_python.prompt
+.pdd/
+__pycache__/
+*.pyc

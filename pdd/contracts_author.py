@@ -26,8 +26,10 @@ from .contract_ir import extract_sections
 from .prompt_block_writeback import (
     append_acceptance_tests,
     append_contract_rules,
+    append_formalization,
 )
 from .prompt_lint import append_vocabulary_definitions
+from .prompt_lint_schemas import FormalizationCandidate
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +56,12 @@ class AuthorResult:
     skipped: bool = False          # True if <contract_rules> already present without --force
     dry_run: bool = False
     error: Optional[str] = None
+    # Post-write quality metrics (populated after writeback; 0/-1 when not applicable)
+    compile_errors: int = 0
+    new_lint_warnings: int = 0
+    quality_ok: bool = True
+    # Formalization block (populated only when --formalize is used)
+    formalization_written: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -67,6 +75,10 @@ class AuthorResult:
             "skipped": self.skipped,
             "dry_run": self.dry_run,
             "error": self.error,
+            "compile_errors": self.compile_errors,
+            "new_lint_warnings": self.new_lint_warnings,
+            "quality_ok": self.quality_ok,
+            "formalization_written": self.formalization_written,
         }
 
 
@@ -137,6 +149,7 @@ def author_contracts(
     verbose: bool = False,
     dry_run: bool = False,
     force: bool = False,
+    formalize: bool = False,
 ) -> AuthorResult:
     """
     Run LLM-assisted contract authoring.
@@ -147,6 +160,8 @@ def author_contracts(
         mode: "greenfield" | "retrofit" | None (auto-detect).
         dry_run: return suggestions without writing to the prompt file.
         force: overwrite existing <contract_rules> if present.
+        formalize: after writing rules, also invoke the formalize LLM to append
+                   a <formalization> block with Z3/SMT targets.
 
     Returns:
         AuthorResult with suggestions and write counts.
@@ -218,5 +233,68 @@ def author_contracts(
         )
     if result.suggested_vocabulary:
         append_vocabulary_definitions(prompt_path, result.suggested_vocabulary)
+
+    # Optional: invoke formalize LLM to append <formalization> block
+    if formalize:
+        try:
+            from .contract_compile import compile_prompt  # pylint: disable=import-outside-toplevel
+
+            formalize_template_path = (
+                Path(__file__).parent / "prompts" / "prompt_formalize_LLM.prompt"
+            )
+            formalize_template = formalize_template_path.read_text(encoding="utf-8")
+            enriched_prompt = prompt_path.read_text(encoding="utf-8")
+            ir = compile_prompt(prompt_path)
+            guidance_json = json.dumps(ir.as_dict(), indent=2)
+
+            filled_formalize = (
+                formalize_template
+                .replace("{prompt_content}", enriched_prompt)
+                .replace("{guidance_json}", guidance_json)
+            )
+
+            llm_formal = llm_invoke(
+                messages=[{"role": "user", "content": filled_formalize}],
+                strength=strength,
+                temperature=temperature,
+                time=time,
+                verbose=verbose,
+                use_cloud=True,
+            )
+            raw_formal = (
+                llm_formal["result"]
+                if isinstance(llm_formal, dict)
+                else str(llm_formal)
+            )
+            formal_payload = _parse_author_response(raw_formal)
+            candidates_raw = formal_payload.get("formalization", [])
+            candidates = []
+            for item in candidates_raw:
+                if isinstance(item, dict):
+                    try:
+                        candidates.append(FormalizationCandidate(**{
+                            k: v for k, v in item.items()
+                            if k in FormalizationCandidate.model_fields
+                        }))
+                    except Exception:  # pylint: disable=broad-except
+                        pass
+            if candidates:
+                result.formalization_written = append_formalization(prompt_path, candidates)
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.warning("Formalize LLM pass failed: %s", exc)
+
+    # Post-write validation: deterministic compile + lint, no LLM required
+    try:
+        from .contract_compile import compile_prompt  # pylint: disable=import-outside-toplevel
+        from .contract_check import check_prompt  # pylint: disable=import-outside-toplevel
+
+        ir = compile_prompt(prompt_path)
+        result.compile_errors = ir.error_count
+
+        lint = check_prompt(prompt_path)
+        result.new_lint_warnings = lint.warn_count
+        result.quality_ok = (ir.error_count == 0 and lint.error_count == 0)
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.warning("Post-write validation failed: %s", exc)
 
     return result

@@ -43,16 +43,36 @@ When <observable trigger/condition>, the <subject> MUST <observable obligation>.
 3. **A "When …" condition**: the observable state or input that triggers the rule.
    - Good: `When token_count is negative`
    - Bad: `The function should` (no When, no observable trigger)
-4. **An observable obligation** — at least one of:
-   - `MUST return <type or value>`
-   - `MUST raise <ExceptionType>`
-   - `MUST write <what> to <where>`
+4. **An observable obligation** using ONLY these compiler-recognized verb patterns:
+
+   **Allowed — the compiler understands these exactly:**
+   - `MUST return <type or value>`           ← preferred for function return values
+   - `MUST raise <ExceptionType>`            ← preferred for error conditions
+   - `MUST write <what>`                     ← also: store, save, append, insert, update, delete, remove
+   - `MUST call <identifier>`
    - `MUST emit <event>`
    - `MUST NOT call <identifier>`
-   - `MUST NOT mutate <what>`
-   - `MUST reject <input type> with <status/exception>`
+   - `MUST NOT write <what>`                 ← also: store, save
+   - `MUST NOT mutate <what>`               ← maps to the write/modify family
+
+   **Never use these — the compiler cannot parse them:**
+   - `MUST set`, `MUST increase`, `MUST decrease`, `MUST reduce`
+   - `MUST produce`, `MUST handle`, `MUST ensure`, `MUST support`, `MUST keep`
+   - `MUST update` (ambiguous — use `MUST write` or `MUST return` instead)
+
+   **For state-mutation rules** (counters, buckets, balances), frame the obligation
+   as a return value or a MUST NOT mutation, not as a direct field assignment:
+   - Bad:  `MUST set tokens_available to capacity - requested_tokens`
+   - Good: `MUST return True and tokens_available equal to prior tokens_available minus requested_tokens`
+   - Bad:  `MUST increase tokens_available by amount`
+   - Good: `MUST NOT return tokens_available greater than capacity`
+
 5. **No vague terms** unless defined in vocabulary: avoid "valid", "invalid", "graceful",
    "reasonable", "successful", "complete", "appropriate", "correct".
+   **Every adjective or status term appearing in a rule title or condition MUST have a
+   corresponding vocabulary entry.** If the title says "Successful consume", then
+   "successful" must be defined in vocabulary. Prefer removing the vague adjective
+   from the title entirely and stating the observable condition directly instead.
 
 **Rule count**: 3–8 rules for a typical module. Split complex behaviour into separate rules.
 Do not combine two independent obligations into one rule.
@@ -63,6 +83,15 @@ Do not combine two independent obligations into one rule.
 
 Define every term used in the rules that has more than one plausible interpretation.
 Format: `term: one-sentence precise definition that could be tested.`
+
+**Required vocabulary coverage:** Scan every rule you generate and add a vocabulary
+entry for each of:
+- Domain nouns (e.g. `token`, `capacity`, `bucket`)
+- Status adjectives in titles or conditions (e.g. `successful`, `valid`, `active`)
+- Quantitative bounds (e.g. `positive integer`, `non-negative`)
+
+A rule that uses a term not in vocabulary will fail `pdd prompt lint`. Prevent this
+by defining every non-obvious term you introduce, even if the definition seems obvious.
 
 ---
 

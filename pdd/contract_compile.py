@@ -54,6 +54,27 @@ _RAISE_RE = re.compile(
     r"(?=(?:\s+and\s+(?:MUST|SHOULD|MAY|SHALL)\b)|[.;](?:\s|$)|$)",
     re.IGNORECASE,
 )
+# State-mutation verbs: MUST set / reduce / increase / decrease / transition <field>
+_SET_RE = re.compile(
+    r"\b(MUST(?:\s+NOT)?|SHOULD(?:\s+NOT)?|MAY(?:\s+NOT)?|SHALL(?:\s+NOT)?)"
+    r"\s+(set|reduce|increase|decrease|transition)\s+([^;\n]+?)"
+    r"(?=(?:\s+and\s+(?:MUST|SHOULD|MAY|SHALL)\b)|[.;](?:\s|$)|$)",
+    re.IGNORECASE,
+)
+# Mutation-prohibition verbs: MUST NOT modify / mutate / change <field>
+_MUTATE_RE = re.compile(
+    r"\b(MUST(?:\s+NOT)?|SHOULD(?:\s+NOT)?|MAY(?:\s+NOT)?|SHALL(?:\s+NOT)?)"
+    r"\s+(modify|mutate|change)\s+([^;\n]+?)"
+    r"(?=(?:\s+and\s+(?:MUST|SHOULD|MAY|SHALL)\b)|[.;](?:\s|$)|$)",
+    re.IGNORECASE,
+)
+# Invariant verbs: MUST keep / maintain <field> <operator> <bound>
+_BOUND_RE = re.compile(
+    r"\b(MUST(?:\s+NOT)?|SHOULD(?:\s+NOT)?|MAY(?:\s+NOT)?|SHALL(?:\s+NOT)?)"
+    r"\s+(keep|maintain)\s+([^;\n]+?)"
+    r"(?=(?:\s+and\s+(?:MUST|SHOULD|MAY|SHALL)\b)|[.;](?:\s|$)|$)",
+    re.IGNORECASE,
+)
 _ID_TITLE_RE = re.compile(
     r"^(R-?\d+|RULE-?\d+)\s*(?:[-:.)]\s*)?(.*)$",
     re.IGNORECASE,
@@ -288,6 +309,23 @@ def _extract_obligations(block: str) -> list[Obligation]:
                 modal=modal,
                 type=obligation_type,
                 value={"target": target},
+                text=match.group(0),
+            ))
+
+    # State-mutation and invariant patterns (group 2 = verb, group 3 = target)
+    for pattern, obligation_type in (
+        (_SET_RE, "state_mutation"),
+        (_MUTATE_RE, "state_mutation"),
+        (_BOUND_RE, "invariant"),
+    ):
+        for match in pattern.finditer(normalized):
+            modal = match.group(1).upper()
+            verb = match.group(2).lower()
+            target = _clean_target(match.group(3))
+            obligations.append(Obligation(
+                modal=modal,
+                type=obligation_type,
+                value={"verb": verb, "target": target},
                 text=match.group(0),
             ))
 

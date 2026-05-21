@@ -135,6 +135,68 @@ def test_compile_prompt_reports_unstable_rule_id(tmp_path):
     assert result.compile_errors[0].code == "UNSTABLE_RULE_ID"
 
 
+def test_compile_state_mutation_set_pattern():
+    result = compile_prompt(FIXTURES / "state_mutation_python.prompt")
+    r1 = next(r for r in result.rules if r.id == "R1")
+
+    assert any(
+        ob.type == "state_mutation" and ob.value["verb"] == "set"
+        for ob in r1.obligations
+    ), "MUST set should compile as state_mutation"
+
+
+def test_compile_state_mutation_increase_pattern():
+    result = compile_prompt(FIXTURES / "state_mutation_python.prompt")
+    r2 = next(r for r in result.rules if r.id == "R2")
+
+    assert any(
+        ob.type == "state_mutation" and ob.value["verb"] == "increase"
+        for ob in r2.obligations
+    ), "MUST increase should compile as state_mutation"
+
+
+def test_compile_invariant_keep_pattern():
+    result = compile_prompt(FIXTURES / "state_mutation_python.prompt")
+    r3 = next(r for r in result.rules if r.id == "R3")
+
+    assert any(
+        ob.type == "invariant" and ob.value["verb"] == "keep"
+        for ob in r3.obligations
+    ), "MUST keep should compile as invariant"
+
+
+def test_compile_mutate_prohibition_pattern():
+    result = compile_prompt(FIXTURES / "state_mutation_python.prompt")
+    r4 = next(r for r in result.rules if r.id == "R4")
+
+    assert any(
+        ob.type == "state_mutation"
+        and ob.modal == "MUST NOT"
+        and ob.value["verb"] == "mutate"
+        for ob in r4.obligations
+    ), "MUST NOT mutate should compile as state_mutation with MUST NOT modal"
+
+
+def test_compile_invariant_maintain_pattern():
+    result = compile_prompt(FIXTURES / "state_mutation_python.prompt")
+    r5 = next(r for r in result.rules if r.id == "R5")
+
+    assert any(
+        ob.type == "invariant" and ob.value["verb"] == "maintain"
+        for ob in r5.obligations
+    ), "MUST maintain should compile as invariant"
+
+
+def test_compile_state_mutation_produces_no_obligation_errors():
+    result = compile_prompt(FIXTURES / "state_mutation_python.prompt")
+    obligation_errors = [
+        e for e in result.compile_errors if e.code == "NO_OBSERVABLE_OBLIGATION"
+    ]
+    assert obligation_errors == [], (
+        f"Unexpected NO_OBSERVABLE_OBLIGATION errors: {obligation_errors}"
+    )
+
+
 def test_compiled_ir_as_dict_is_json_safe():
     result = compile_prompt(FIXTURES / "refund_payment_python.prompt")
     payload = result.as_dict()

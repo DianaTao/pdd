@@ -728,11 +728,31 @@ def _render_author_result(result: AuthorResult, *, quiet: bool = False) -> None:
             _console.print(f"  {escape(test)}")
 
     if not result.dry_run:
+        formal_part = (
+            f", {result.formalization_written} formalization(s)"
+            if result.formalization_written > 0
+            else ""
+        )
         _console.print(
             f"\n[green]wrote:[/green] "
             f"{result.rules_written} rule(s), "
             f"{result.acceptance_tests_written} acceptance test(s)"
+            f"{formal_part}"
         )
+        # Quality summary (only when writeback actually happened)
+        if result.rules_written > 0:
+            errors_style = "red" if result.compile_errors > 0 else "green"
+            warns_style = "yellow" if result.new_lint_warnings > 0 else "green"
+            _console.print(
+                f"[bold]quality:[/bold] "
+                f"compile_errors=[{errors_style}]{result.compile_errors}[/{errors_style}]  "
+                f"lint_warnings=[{warns_style}]{result.new_lint_warnings}[/{warns_style}]"
+            )
+            if not result.quality_ok:
+                _console.print(
+                    "[yellow]  Run `pdd contracts compile` and `pdd contracts check` "
+                    "for details.[/yellow]"
+                )
 
 
 @contracts_group.command("author")
@@ -744,6 +764,8 @@ def _render_author_result(result: AuthorResult, *, quiet: bool = False) -> None:
               help="Print suggestions without writing to the prompt file.")
 @click.option("--force", is_flag=True, default=False,
               help="Overwrite existing <contract_rules> if present.")
+@click.option("--formalize", is_flag=True, default=False,
+              help="After writing rules, invoke formalize LLM to append a <formalization> block.")
 @click.option("--json", "as_json", is_flag=True, default=False,
               help="Output result as JSON.")
 @click.pass_context
@@ -754,6 +776,7 @@ def contracts_author(
     mode: Optional[str],
     dry_run: bool,
     force: bool,
+    formalize: bool,
     as_json: bool,
 ) -> None:
     """LLM-assisted authoring of <contract_rules> for a prompt. Requires --llm via env.
@@ -770,6 +793,7 @@ def contracts_author(
       pdd contracts author prompts/foo_python.prompt pdd/foo.py
       pdd contracts author --dry-run prompts/foo_python.prompt
       pdd contracts author --force prompts/foo_python.prompt
+      pdd contracts author --formalize prompts/foo_python.prompt
     """
     obj = ctx.obj or {}
     quiet: bool = obj.get("quiet", False)
@@ -788,6 +812,7 @@ def contracts_author(
         verbose=verbose,
         dry_run=dry_run,
         force=force,
+        formalize=formalize,
     )
 
     if as_json:

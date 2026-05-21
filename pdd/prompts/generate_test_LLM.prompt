@@ -124,7 +124,17 @@
     3. THIRD: Classify each target behavior as either:
         - FORMAL_CANDIDATE: pure, deterministic, finite-state logic that can be encoded faithfully
         - RUNTIME_TEST_ONLY: filesystem behavior, imports, framework wiring, network, auth providers, time, randomness, or anything that depends on environment interaction
-    4. FOURTH: Generate Z3-based proof tests ONLY for FORMAL_CANDIDATE properties such as invariants, forbidden states, or small algebraic/set properties.
+    3.5. CHECK FORMALIZATION BLOCK: Inspect the prompt for a `<formalization>` block with `target: z3`.
+        - If a `<formalization target: z3>` block IS present: use the variable names, assume conditions,
+          and property predicates from each formalization entry as the basis for Z3 proof tests.
+          Add R# markers to each Z3 test matching the corresponding rule ID.
+        - If NO `<formalization target: z3>` block is present: do NOT generate Z3-style Solver tests.
+          Opportunistic Z3 inference from arithmetic patterns alone is misleading because it tests
+          the LLM's own re-encoding of the logic rather than a specified property. Skip Z3 and
+          write behavioral unit tests instead. Only a `<formalization>` block proves the property
+          was intentionally specified.
+    4. FOURTH: If the formalization block is present (see step 3.5), generate Z3-based proof tests
+       for the FORMAL_CANDIDATE properties declared there.
         - Prefer proving properties over re-implementing the code in Z3
         - If a check is only over a bounded domain, label it as a bounded check in a short comment
         - If the property cannot be encoded cleanly, skip Z3 and use ordinary unit tests
