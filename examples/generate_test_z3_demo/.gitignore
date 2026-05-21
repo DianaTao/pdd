@@ -1,0 +1,6 @@
+src/
+tests/
+reports/
+.pdd/
+__pycache__/
+*.pyc
