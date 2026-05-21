@@ -1,0 +1,194 @@
+write a python module `foo_work` in `src/foo_work.py` that implements an idempotent
+request handler with JWT authorization, active-user checks, and a 24-hour idempotency
+store. Use only the Python standard library.
+
+% Workflow example prompt — same handler as prompt_lint_contract_e2e_demo/foo_codegen.
+% PDD authoring steps (lint + contracts) are documented under:
+%   examples/prompt_lint_contract_workflow/guidance/
+% Run from that directory:
+%   bash run_phase1.sh
+%   bash run_phase1.sh prompts/foo_work_work.prompt   # after clarify on a work copy
+% Do not run --ambiguity --apply on this file in git; copy to foo_work_work.prompt first.
+
+<contract_rules>
+R1 - Successful invoke
+When the Authorization bearer JWT has exp in the future and scope contains 'foo:invoke', AND (request_received_at - user.last_login_at).days <= 5, AND X-Idempotency-Key is non-empty and not present in IdempotencyStore within 24h, AND body is empty or valid JSON with amount_cents int > 0 (if present),
+the handler MUST return HTTP 200 with body {"result":"ok","request_id":<uuid4>,"amount_cents":<int|null>} AND MUST record (request_id, recorded_at) in the store under that key.
+R2 - Duplicate idempotency key
+When X-Idempotency-Key already has a recorded entry within the 24h TTL,
+the handler MUST return HTTP 409 with body {"reason":"duplicate","original_request_id":<stored>} AND MUST NOT add a second record for that key AND MUST NOT append to AUDIT_LOG.
+R3 - Unauthorized rejection
+When Authorization is missing, not 'Bearer <token>', not base64url-decodable, has exp <= now, or scope does not contain 'foo:invoke',
+the handler MUST return HTTP 401 AND MUST NOT call IdempotencyStore.record AND MUST NOT append to AUDIT_LOG.
+R4 - Inactive user rejection
+When (request_received_at - user.last_login_at).days > 5,
+the handler MUST return HTTP 403 AND MUST NOT call IdempotencyStore.record AND MUST NOT append to AUDIT_LOG.
+R5 - Body validation
+When body_bytes is non-empty and json.loads raises, the handler MUST return HTTP 400.
+When the parsed body has amount_cents present and amount_cents <= 0, the handler MUST return HTTP 422.
+In both cases the handler MUST NOT call IdempotencyStore.record for this key AND MUST leave entries for all other keys unchanged.
+R6 - Audit logging on success
+When the handler returns HTTP 200, it MUST append exactly one line to AUDIT_LOG containing the JWT 'sub', request_id, and amount_cents (or null).
+If appending to AUDIT_LOG raises, the handler MUST still return HTTP 200 and set body["audit_failed"] = true.
+</contract_rules>
+
+<requirements>
+Behavior (implement all of this in code):
+
+1. Authorization
+   - Read `Authorization: Bearer <jwt>`; reject missing, malformed, expired, or wrong-scope tokens before any idempotency write.
+   - JWT payload must include `exp` (unix seconds, must be in the future) and `scope` containing `foo:invoke`.
+   - Decode payload only (base64url); do not verify signatures in this demo.
+
+2. Idempotency
+   - Require header `X-Idempotency-Key` (non-empty string).
+   - Maintain an in-process store keyed by idempotency key with TTL 24 hours from first acceptance.
+   - First seen key within TTL: record `{request_id, recorded_at}` then return HTTP 200.
+   - Duplicate key within TTL: return HTTP 409 with JSON `{"reason": "duplicate", "original_request_id": "<stored>"}` and do not add a second record.
+
+3. Active user
+   - `UserProfile.last_login_at` and `RequestContext.request_received_at` are timezone-aware datetimes.
+   - Caller is active when `(request_received_at - last_login_at).days <= 5`.
+
+4. Request body
+   - Optional JSON body with fields `amount_cents` (int) and `note` (str).
+   - Malformed JSON → HTTP 400, no store mutation.
+   - If `amount_cents` is present and `<= 0` → HTTP 422.
+
+5. Successful response shape (HTTP 200)
+   - JSON `{"result": "ok", "request_id": "<uuid4>", "amount_cents": <int|null>}`.
+   - If audit logging fails after a successful store write, still return 200 but add `"audit_failed": true`.
+
+6. Concurrency
+   - Two concurrent requests with the same idempotency key must not both return 200 (per-key `threading.Lock` or equivalent check-then-set).
+
+7. Audit
+   - On HTTP 200 only, append one line to an in-memory list `AUDIT_LOG` with caller id from JWT `sub`, request_id, and amount_cents when supplied.
+   - Log upload attempts for audit when appropriate (see acceptance tests).
+
+Processing order (do not reorder): auth → idempotency key → active user → duplicate check → body validation → store write → audit → response.
+</requirements>
+
+<acceptance_tests>
+- Active users with a fresh idempotency key receive success (HTTP 200 with result and request_id).
+- Duplicate idempotency keys within a reasonable recent window are handled gracefully (one 200, replays 409).
+- Unauthorized callers are blocked (HTTP 401).
+- Inactive users do not get a successful outcome (HTTP 403).
+- Concurrent duplicate race: parallel same-key requests yield exactly one 200 and one 409.
+- Invalid JSON returns 400 without corrupting stored state for other keys.
+- R1: Given a Bearer JWT with future exp and scope 'foo:invoke', an active user (last_login_at within 5 days of request_received_at), a fresh X-Idempotency-Key, and an empty body, when handle_request runs, then it returns HandlerResult(status_code=200, body={"result":"ok","request_id":<uuid4>,"amount_cents":null}) and IdempotencyStore.has(key) is True.
+- R2: Given a key first accepted at T0 with stored request_id X, when a second handle_request with the same key arrives at T0 + 1 hour, then it returns status_code=409 with body {"reason":"duplicate","original_request_id":"X"} and IdempotencyStore still has exactly one record for that key.
+- R2: Given two threads calling handle_request concurrently with the same X-Idempotency-Key and otherwise R1-valid inputs, when both complete, then exactly one result has status_code==200 and the other has status_code==409 with original_request_id equal to the 200 response's request_id, and IdempotencyStore has exactly one record for that key.
+- R3: Given Authorization=None or a token whose decoded scope lacks 'foo:invoke', when handle_request runs, then status_code==401, IdempotencyStore.has(key) is False, and AUDIT_LOG is unchanged.
+- R4: Given a valid JWT but last_login_at such that (request_received_at - last_login_at).days == 6, when handle_request runs, then status_code==403 and IdempotencyStore.has(key) is False.
+- R5: Given IdempotencyStore already has key 'K1' -> request_id 'R1', when handle_request runs with key 'K2' and body_bytes=b'{not json', then status_code==400, IdempotencyStore.has('K2') is False, and IdempotencyStore.get_request_id('K1')=='R1'.
+- R6: Given an R1-valid request that returns HTTP 200 with request_id X and amount_cents=null, when handle_request completes, then len(AUDIT_LOG) increased by exactly 1 and the new line contains JWT 'sub', 'X', and the amount_cents value.
+</acceptance_tests>
+
+<deliverables>
+Implement `src/foo_work.py` with these public symbols:
+
+- `@dataclass class RequestContext`: fields `authorization`, `idempotency_key`, `request_received_at`, `body_bytes`
+- `@dataclass class UserProfile`: fields `user_id`, `last_login_at`
+- `@dataclass class HandlerResult`: fields `status_code: int`, `body: dict`
+- `class IdempotencyStore`: methods `has(key) -> bool`, `record(key, request_id) -> None`, `get_request_id(key) -> str | None`, plus TTL eviction on read/write
+- `def parse_bearer_jwt(authorization: str | None) -> tuple[bool, dict | None, str | None]`  # ok, claims, error
+- `def is_active_user(user: UserProfile, at: datetime) -> bool`
+- `def handle_request(ctx: RequestContext, user: UserProfile, store: IdempotencyStore) -> HandlerResult`
+
+Module-level `AUDIT_LOG: list[str]` for audit lines.
+
+Do not generate tests, CLI, or extra files in this step.
+</deliverables>
+
+<vocabulary>
+- valid response: HTTP 200 with JSON body {"result": "ok", "request_id": <uuid4>, "amount_cents": <int|null>}
+- active: user login within last 3 days
+- gracefully: Return 200 with idempotent replay body
+- authorized caller: request with Authorization: Bearer <jwt> whose base64url-decoded payload contains exp > now and scope including 'foo:invoke'
+- unauthorized access: any request not meeting the authorized-caller definition; results in HTTP 401
+- safely: Return HTTP 401 without writing to idempotency store or AUDIT_LOG
+- uploads look valid: the request passed auth, active-user, duplicate, and body validation checks and the handler is returning HTTP 200
+- reasonable recent window: the 24-hour TTL measured from the first acceptance of an idempotency key
+- invalid JSON: request body_bytes that raises json.JSONDecodeError when parsed with json.loads
+- log when appropriate: append to AUDIT_LOG only when handle_request returns status_code == 200
+</vocabulary>
+
+<formalization>
+R1:
+  target: contract_ir
+  variables:
+    jwt_ok: Bool
+    active: Bool
+    key_seen: Bool
+    body_ok: Bool
+    status: Int
+    recorded: Bool
+  assume: jwt_ok && active && !key_seen && body_ok
+  predicate: status == 200 && recorded == true
+  violation: (jwt_ok && active && !key_seen && body_ok) && (status != 200 || recorded == false)
+  # linked_test: R1: fresh key, active user, empty body -> 200 and store has key
+
+R2:
+  target: contract_ir
+  variables:
+    key_seen: Bool
+    status: Int
+    second_record_written: Bool
+    audited: Bool
+  assume: key_seen == true
+  predicate: status == 409 && second_record_written == false && audited == false
+  violation: key_seen && (status != 409 || second_record_written || audited)
+  # linked_test: R2: duplicate-key returns 409 and no second record; concurrency race
+
+R3:
+  target: contract_ir
+  variables:
+    jwt_ok: Bool
+    status: Int
+    recorded: Bool
+    audited: Bool
+  assume: jwt_ok == false
+  predicate: status == 401 && recorded == false && audited == false
+  violation: !jwt_ok && (status != 401 || recorded || audited)
+  # linked_test: R3: unauthorized -> 401, no store/audit mutation
+
+R4:
+  target: contract_ir
+  variables:
+    jwt_ok: Bool
+    active: Bool
+    status: Int
+    recorded: Bool
+    audited: Bool
+  assume: jwt_ok && !active
+  predicate: status == 403 && recorded == false && audited == false
+  violation: jwt_ok && !active && (status != 403 || recorded || audited)
+  # linked_test: R4: inactive user (days==6) -> 403
+
+R5:
+  target: contract_ir
+  variables:
+    json_ok: Bool
+    amount_present: Bool
+    amount_cents: Int
+    status: Int
+    other_keys_unchanged: Bool
+    recorded: Bool
+  assume: true
+  predicate: (!json_ok => status == 400) && (json_ok && amount_present && amount_cents <= 0 => status == 422) && other_keys_unchanged == true && recorded == false
+  violation: (!json_ok && status != 400) || (json_ok && amount_present && amount_cents <= 0 && status != 422) || other_keys_unchanged == false || recorded == true
+  # linked_test: R5: invalid JSON with prior key intact
+
+R6:
+  target: contract_ir
+  variables:
+    status: Int
+    audit_lines_appended: Int
+    audit_raised: Bool
+    audit_failed_flag: Bool
+  assume: status == 200
+  predicate: (audit_raised == false => audit_lines_appended == 1) && (audit_raised == true => audit_failed_flag == true)
+  violation: status == 200 && ((audit_raised == false && audit_lines_appended != 1) || (audit_raised == true && audit_failed_flag != true))
+  # linked_test: R6: audit append on 200 / audit_failed flag on raise
+</formalization>

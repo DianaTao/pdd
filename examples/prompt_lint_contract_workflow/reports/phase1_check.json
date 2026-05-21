@@ -1,0 +1,188 @@
+Complete onboarding with `pdd setup` to install tab completion and configure API
+keys.
+Checking for updates...
+[
+  {
+    "path": "prompts/foo_workflow_python.prompt",
+    "warn_count": 16,
+    "error_count": 0,
+    "issues": [
+      {
+        "level": "warn",
+        "code": "MISSING_MODAL",
+        "rule_id": "R1",
+        "section": "contract_rules",
+        "line": "R1: The handler must return a valid response when the caller is an active user and the request is not a duplicate.",
+        "message": "Rule [R1] has no modal verb (MUST / MUST NOT / MAY / SHOULD / DOES NOT).",
+        "term": "",
+        "suggestion": "Add a modal verb: \"The system MUST \u2026\" or \"The service MUST NOT \u2026\".",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "MISSING_MODAL",
+        "rule_id": "R2",
+        "section": "contract_rules",
+        "line": "R2: Duplicate requests must be rejected gracefully and must not corrupt stored state.",
+        "message": "Rule [R2] has no modal verb (MUST / MUST NOT / MAY / SHOULD / DOES NOT).",
+        "term": "",
+        "suggestion": "Add a modal verb: \"The system MUST \u2026\" or \"The service MUST NOT \u2026\".",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "MISSING_MODAL",
+        "rule_id": "R3",
+        "section": "contract_rules",
+        "line": "R3: Only authorized callers may invoke the handler; unauthorized access should fail safely.",
+        "message": "Rule [R3] has no modal verb (MUST / MUST NOT / MAY / SHOULD / DOES NOT).",
+        "term": "",
+        "suggestion": "Add a modal verb: \"The system MUST \u2026\" or \"The service MUST NOT \u2026\".",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "MISSING_MODAL",
+        "rule_id": "R4",
+        "section": "contract_rules",
+        "line": "R4: Inactive users must not receive a successful outcome.",
+        "message": "Rule [R4] has no modal verb (MUST / MUST NOT / MAY / SHOULD / DOES NOT).",
+        "term": "",
+        "suggestion": "Add a modal verb: \"The system MUST \u2026\" or \"The service MUST NOT \u2026\".",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "MISSING_MODAL",
+        "rule_id": "R5",
+        "section": "contract_rules",
+        "line": "R5: Bad payloads should be handled appropriately without breaking other keys.",
+        "message": "Rule [R5] has no modal verb (MUST / MUST NOT / MAY / SHOULD / DOES NOT).",
+        "term": "",
+        "suggestion": "Add a modal verb: \"The system MUST \u2026\" or \"The service MUST NOT \u2026\".",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "MISSING_MODAL",
+        "rule_id": "R6",
+        "section": "contract_rules",
+        "line": "R6: Audit logging must occur when uploads look valid and the outcome is successful.",
+        "message": "Rule [R6] has no modal verb (MUST / MUST NOT / MAY / SHOULD / DOES NOT).",
+        "term": "",
+        "suggestion": "Add a modal verb: \"The system MUST \u2026\" or \"The service MUST NOT \u2026\".",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM",
+        "rule_id": "",
+        "section": "contract_rules",
+        "line": "R1: The handler must return a valid response when the caller is an active user and the request is not a duplicate.",
+        "message": "Vague term \"active\" used in <contract_rules> without a <vocabulary> definition.",
+        "term": "active",
+        "suggestion": "active: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM",
+        "rule_id": "",
+        "section": "contract_rules",
+        "line": "R1: The handler must return a valid response when the caller is an active user and the request is not a duplicate.",
+        "message": "Vague term \"duplicate\" used in <contract_rules> without a <vocabulary> definition.",
+        "term": "duplicate",
+        "suggestion": "duplicate: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM",
+        "rule_id": "",
+        "section": "contract_rules",
+        "line": "R1: The handler must return a valid response when the caller is an active user and the request is not a duplicate.",
+        "message": "Vague term \"valid\" used in <contract_rules> without a <vocabulary> definition.",
+        "term": "valid",
+        "suggestion": "valid: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM",
+        "rule_id": "",
+        "section": "contract_rules",
+        "line": "R2: Duplicate requests must be rejected gracefully and must not corrupt stored state.",
+        "message": "Vague term \"duplicate\" used in <contract_rules> without a <vocabulary> definition.",
+        "term": "duplicate",
+        "suggestion": "duplicate: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM",
+        "rule_id": "",
+        "section": "contract_rules",
+        "line": "R3: Only authorized callers may invoke the handler; unauthorized access should fail safely.",
+        "message": "Vague term \"authorized\" used in <contract_rules> without a <vocabulary> definition.",
+        "term": "authorized",
+        "suggestion": "authorized: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM",
+        "rule_id": "",
+        "section": "contract_rules",
+        "line": "R3: Only authorized callers may invoke the handler; unauthorized access should fail safely.",
+        "message": "Vague term \"unauthorized\" used in <contract_rules> without a <vocabulary> definition.",
+        "term": "unauthorized",
+        "suggestion": "unauthorized: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM",
+        "rule_id": "",
+        "section": "contract_rules",
+        "line": "R4: Inactive users must not receive a successful outcome.",
+        "message": "Vague term \"inactive\" used in <contract_rules> without a <vocabulary> definition.",
+        "term": "inactive",
+        "suggestion": "inactive: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM",
+        "rule_id": "",
+        "section": "contract_rules",
+        "line": "R4: Inactive users must not receive a successful outcome.",
+        "message": "Vague term \"successful\" used in <contract_rules> without a <vocabulary> definition.",
+        "term": "successful",
+        "suggestion": "successful: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM",
+        "rule_id": "",
+        "section": "contract_rules",
+        "line": "R6: Audit logging must occur when uploads look valid and the outcome is successful.",
+        "message": "Vague term \"successful\" used in <contract_rules> without a <vocabulary> definition.",
+        "term": "successful",
+        "suggestion": "successful: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM",
+        "rule_id": "",
+        "section": "contract_rules",
+        "line": "R6: Audit logging must occur when uploads look valid and the outcome is successful.",
+        "message": "Vague term \"valid\" used in <contract_rules> without a <vocabulary> definition.",
+        "term": "valid",
+        "suggestion": "valid: <add a precise, observable definition here>",
+        "interpretations": []
+      }
+    ]
+  }
+]

@@ -1,0 +1,340 @@
+Checking for updates...
+[
+  {
+    "path": "prompts/foo_workflow_python.prompt",
+    "warn_count": 33,
+    "error_count": 0,
+    "issues": [
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM_UNDEFINED",
+        "term": "active",
+        "section": "contract_rules",
+        "line": "R1: The handler must return a valid response when the caller is an active user and the request is not a duplicate.",
+        "message": "Vague term \"active\" used in [contract_rules] without a <vocabulary> definition.",
+        "suggestion": "active: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM_UNDEFINED",
+        "term": "duplicate",
+        "section": "contract_rules",
+        "line": "R1: The handler must return a valid response when the caller is an active user and the request is not a duplicate.",
+        "message": "Vague term \"duplicate\" used in [contract_rules] without a <vocabulary> definition.",
+        "suggestion": "duplicate: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM_UNDEFINED",
+        "term": "valid",
+        "section": "contract_rules",
+        "line": "R1: The handler must return a valid response when the caller is an active user and the request is not a duplicate.",
+        "message": "Vague term \"valid\" used in [contract_rules] without a <vocabulary> definition.",
+        "suggestion": "valid: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM_UNDEFINED",
+        "term": "duplicate",
+        "section": "contract_rules",
+        "line": "R2: Duplicate requests must be rejected gracefully and must not corrupt stored state.",
+        "message": "Vague term \"duplicate\" used in [contract_rules] without a <vocabulary> definition.",
+        "suggestion": "duplicate: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM_UNDEFINED",
+        "term": "authorized",
+        "section": "contract_rules",
+        "line": "R3: Only authorized callers may invoke the handler; unauthorized access should fail safely.",
+        "message": "Vague term \"authorized\" used in [contract_rules] without a <vocabulary> definition.",
+        "suggestion": "authorized: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM_UNDEFINED",
+        "term": "unauthorized",
+        "section": "contract_rules",
+        "line": "R3: Only authorized callers may invoke the handler; unauthorized access should fail safely.",
+        "message": "Vague term \"unauthorized\" used in [contract_rules] without a <vocabulary> definition.",
+        "suggestion": "unauthorized: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_NO_OBSERVABLE_OUTCOME",
+        "term": "(no observable outcome)",
+        "section": "contract_rules",
+        "line": "R3: Only authorized callers may invoke the handler; unauthorized access should fail safely.",
+        "message": "Rule or criterion contains a vague term but no observable outcome verb (returns/raises/writes/emits/rejects/\u2026).",
+        "suggestion": "",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM_UNDEFINED",
+        "term": "inactive",
+        "section": "contract_rules",
+        "line": "R4: Inactive users must not receive a successful outcome.",
+        "message": "Vague term \"inactive\" used in [contract_rules] without a <vocabulary> definition.",
+        "suggestion": "inactive: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM_UNDEFINED",
+        "term": "successful",
+        "section": "contract_rules",
+        "line": "R4: Inactive users must not receive a successful outcome.",
+        "message": "Vague term \"successful\" used in [contract_rules] without a <vocabulary> definition.",
+        "suggestion": "successful: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_NO_OBSERVABLE_OUTCOME",
+        "term": "(no observable outcome)",
+        "section": "contract_rules",
+        "line": "R4: Inactive users must not receive a successful outcome.",
+        "message": "Rule or criterion contains a vague term but no observable outcome verb (returns/raises/writes/emits/rejects/\u2026).",
+        "suggestion": "",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM_UNDEFINED",
+        "term": "successful",
+        "section": "contract_rules",
+        "line": "R6: Audit logging must occur when uploads look valid and the outcome is successful.",
+        "message": "Vague term \"successful\" used in [contract_rules] without a <vocabulary> definition.",
+        "suggestion": "successful: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM_UNDEFINED",
+        "term": "valid",
+        "section": "contract_rules",
+        "line": "R6: Audit logging must occur when uploads look valid and the outcome is successful.",
+        "message": "Vague term \"valid\" used in [contract_rules] without a <vocabulary> definition.",
+        "suggestion": "valid: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_NO_OBSERVABLE_OUTCOME",
+        "term": "(no observable outcome)",
+        "section": "contract_rules",
+        "line": "R6: Audit logging must occur when uploads look valid and the outcome is successful.",
+        "message": "Rule or criterion contains a vague term but no observable outcome verb (returns/raises/writes/emits/rejects/\u2026).",
+        "suggestion": "",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM_UNDEFINED",
+        "term": "duplicate",
+        "section": "requirements",
+        "line": "- Duplicate key within TTL: return HTTP 409 with JSON `{\"reason\": \"duplicate\", \"original_request_id\": \"<stored>\"}` and do not add a second record.",
+        "message": "Vague term \"duplicate\" used in [requirements] without a <vocabulary> definition.",
+        "suggestion": "duplicate: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM_UNDEFINED",
+        "term": "active",
+        "section": "requirements",
+        "line": "3. Active user",
+        "message": "Vague term \"active\" used in [requirements] without a <vocabulary> definition.",
+        "suggestion": "active: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM_UNDEFINED",
+        "term": "active",
+        "section": "requirements",
+        "line": "- Caller is active when `(request_received_at - last_login_at).days <= 5`.",
+        "message": "Vague term \"active\" used in [requirements] without a <vocabulary> definition.",
+        "suggestion": "active: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM_UNDEFINED",
+        "term": "successful",
+        "section": "requirements",
+        "line": "5. Successful response shape (HTTP 200)",
+        "message": "Vague term \"successful\" used in [requirements] without a <vocabulary> definition.",
+        "suggestion": "successful: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM_UNDEFINED",
+        "term": "successful",
+        "section": "requirements",
+        "line": "- If audit logging fails after a successful store write, still return 200 but add `\"audit_failed\": true`.",
+        "message": "Vague term \"successful\" used in [requirements] without a <vocabulary> definition.",
+        "suggestion": "successful: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM_UNDEFINED",
+        "term": "active",
+        "section": "requirements",
+        "line": "Processing order (do not reorder): auth \u2192 idempotency key \u2192 active user \u2192 duplicate check \u2192 body validation \u2192 store write \u2192 audit \u2192 response.",
+        "message": "Vague term \"active\" used in [requirements] without a <vocabulary> definition.",
+        "suggestion": "active: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM_UNDEFINED",
+        "term": "duplicate",
+        "section": "requirements",
+        "line": "Processing order (do not reorder): auth \u2192 idempotency key \u2192 active user \u2192 duplicate check \u2192 body validation \u2192 store write \u2192 audit \u2192 response.",
+        "message": "Vague term \"duplicate\" used in [requirements] without a <vocabulary> definition.",
+        "suggestion": "duplicate: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM_UNDEFINED",
+        "term": "active",
+        "section": "acceptance_tests",
+        "line": "- Active users with a fresh idempotency key receive success (HTTP 200 with result and request_id).",
+        "message": "Vague term \"active\" used in [acceptance_tests] without a <vocabulary> definition.",
+        "suggestion": "active: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_NO_OBSERVABLE_OUTCOME",
+        "term": "(no observable outcome)",
+        "section": "acceptance_tests",
+        "line": "- Active users with a fresh idempotency key receive success (HTTP 200 with result and request_id).",
+        "message": "Rule or criterion contains a vague term but no observable outcome verb (returns/raises/writes/emits/rejects/\u2026).",
+        "suggestion": "",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM_UNDEFINED",
+        "term": "duplicate",
+        "section": "acceptance_tests",
+        "line": "- Duplicate idempotency keys within a reasonable recent window are handled gracefully (one 200, replays 409).",
+        "message": "Vague term \"duplicate\" used in [acceptance_tests] without a <vocabulary> definition.",
+        "suggestion": "duplicate: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM_UNDEFINED",
+        "term": "reasonable",
+        "section": "acceptance_tests",
+        "line": "- Duplicate idempotency keys within a reasonable recent window are handled gracefully (one 200, replays 409).",
+        "message": "Vague term \"reasonable\" used in [acceptance_tests] without a <vocabulary> definition.",
+        "suggestion": "reasonable: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM_UNDEFINED",
+        "term": "recent",
+        "section": "acceptance_tests",
+        "line": "- Duplicate idempotency keys within a reasonable recent window are handled gracefully (one 200, replays 409).",
+        "message": "Vague term \"recent\" used in [acceptance_tests] without a <vocabulary> definition.",
+        "suggestion": "recent: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_NO_OBSERVABLE_OUTCOME",
+        "term": "(no observable outcome)",
+        "section": "acceptance_tests",
+        "line": "- Duplicate idempotency keys within a reasonable recent window are handled gracefully (one 200, replays 409).",
+        "message": "Rule or criterion contains a vague term but no observable outcome verb (returns/raises/writes/emits/rejects/\u2026).",
+        "suggestion": "",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM_UNDEFINED",
+        "term": "unauthorized",
+        "section": "acceptance_tests",
+        "line": "- Unauthorized callers are blocked (HTTP 401).",
+        "message": "Vague term \"unauthorized\" used in [acceptance_tests] without a <vocabulary> definition.",
+        "suggestion": "unauthorized: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_NO_OBSERVABLE_OUTCOME",
+        "term": "(no observable outcome)",
+        "section": "acceptance_tests",
+        "line": "- Unauthorized callers are blocked (HTTP 401).",
+        "message": "Rule or criterion contains a vague term but no observable outcome verb (returns/raises/writes/emits/rejects/\u2026).",
+        "suggestion": "",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM_UNDEFINED",
+        "term": "inactive",
+        "section": "acceptance_tests",
+        "line": "- Inactive users do not get a successful outcome (HTTP 403).",
+        "message": "Vague term \"inactive\" used in [acceptance_tests] without a <vocabulary> definition.",
+        "suggestion": "inactive: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM_UNDEFINED",
+        "term": "successful",
+        "section": "acceptance_tests",
+        "line": "- Inactive users do not get a successful outcome (HTTP 403).",
+        "message": "Vague term \"successful\" used in [acceptance_tests] without a <vocabulary> definition.",
+        "suggestion": "successful: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_NO_OBSERVABLE_OUTCOME",
+        "term": "(no observable outcome)",
+        "section": "acceptance_tests",
+        "line": "- Inactive users do not get a successful outcome (HTTP 403).",
+        "message": "Rule or criterion contains a vague term but no observable outcome verb (returns/raises/writes/emits/rejects/\u2026).",
+        "suggestion": "",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM_UNDEFINED",
+        "term": "duplicate",
+        "section": "acceptance_tests",
+        "line": "- Concurrent duplicate race: parallel same-key requests yield exactly one 200 and one 409.",
+        "message": "Vague term \"duplicate\" used in [acceptance_tests] without a <vocabulary> definition.",
+        "suggestion": "duplicate: <add a precise, observable definition here>",
+        "interpretations": []
+      },
+      {
+        "level": "warn",
+        "code": "VAGUE_TERM_UNDEFINED",
+        "term": "invalid",
+        "section": "acceptance_tests",
+        "line": "- Invalid JSON returns 400 without corrupting stored state for other keys.",
+        "message": "Vague term \"invalid\" used in [acceptance_tests] without a <vocabulary> definition.",
+        "suggestion": "invalid: <add a precise, observable definition here>",
+        "interpretations": []
+      }
+    ]
+  }
+]

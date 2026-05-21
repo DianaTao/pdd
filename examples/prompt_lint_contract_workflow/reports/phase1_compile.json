@@ -1,0 +1,128 @@
+Complete onboarding with `pdd setup` to install tab completion and configure API
+keys.
+Checking for updates...
+[
+  {
+    "version": "pdd.contract_ir.v1",
+    "path": "prompts/foo_workflow_python.prompt",
+    "has_contract_rules": true,
+    "rule_count": 6,
+    "error_count": 9,
+    "rules": [
+      {
+        "id": "R1",
+        "title": "The handler must return a valid response when the caller is an active user and the request is not a duplicate.",
+        "modal": "",
+        "condition": "the caller is an active user and",
+        "obligations": [
+          {
+            "modal": "MUST",
+            "type": "return",
+            "value": {
+              "target": "a valid response when the caller is an active user and the request is not a duplicate"
+            },
+            "text": "must return a valid response when the caller is an active user and the request is not a duplicate"
+          }
+        ],
+        "raw": "R1: The handler must return a valid response when the caller is an active user and the request is not a duplicate."
+      },
+      {
+        "id": "R2",
+        "title": "Duplicate requests must be rejected gracefully and must not corrupt stored state.",
+        "modal": "",
+        "condition": "",
+        "obligations": [],
+        "raw": "R2: Duplicate requests must be rejected gracefully and must not corrupt stored state."
+      },
+      {
+        "id": "R3",
+        "title": "Only authorized callers may invoke the handler; unauthorized access should fail safely.",
+        "modal": "",
+        "condition": "",
+        "obligations": [],
+        "raw": "R3: Only authorized callers may invoke the handler; unauthorized access should fail safely."
+      },
+      {
+        "id": "R4",
+        "title": "Inactive users must not receive a successful outcome.",
+        "modal": "",
+        "condition": "",
+        "obligations": [],
+        "raw": "R4: Inactive users must not receive a successful outcome."
+      },
+      {
+        "id": "R5",
+        "title": "Bad payloads should be handled appropriately without breaking other keys.",
+        "modal": "",
+        "condition": "",
+        "obligations": [],
+        "raw": "R5: Bad payloads should be handled appropriately without breaking other keys."
+      },
+      {
+        "id": "R6",
+        "title": "Audit logging must occur when uploads look valid and the outcome is successful.",
+        "modal": "",
+        "condition": "uploads look valid and",
+        "obligations": [],
+        "raw": "R6: Audit logging must occur when uploads look valid and the outcome is successful."
+      }
+    ],
+    "compile_errors": [
+      {
+        "code": "MISSING_CONDITION",
+        "rule_id": "R2",
+        "message": "Rule must state a parseable condition using \"When ...\".",
+        "line": "R2: Duplicate requests must be rejected gracefully and must not corrupt stored state."
+      },
+      {
+        "code": "NO_OBSERVABLE_OBLIGATION",
+        "rule_id": "R2",
+        "message": "Rule must contain at least one parseable observable obligation, such as MUST return HTTP 409 or MUST NOT write a record.",
+        "line": "R2: Duplicate requests must be rejected gracefully and must not corrupt stored state."
+      },
+      {
+        "code": "MISSING_CONDITION",
+        "rule_id": "R3",
+        "message": "Rule must state a parseable condition using \"When ...\".",
+        "line": "R3: Only authorized callers may invoke the handler; unauthorized access should fail safely."
+      },
+      {
+        "code": "NO_OBSERVABLE_OBLIGATION",
+        "rule_id": "R3",
+        "message": "Rule must contain at least one parseable observable obligation, such as MUST return HTTP 409 or MUST NOT write a record.",
+        "line": "R3: Only authorized callers may invoke the handler; unauthorized access should fail safely."
+      },
+      {
+        "code": "MISSING_CONDITION",
+        "rule_id": "R4",
+        "message": "Rule must state a parseable condition using \"When ...\".",
+        "line": "R4: Inactive users must not receive a successful outcome."
+      },
+      {
+        "code": "NO_OBSERVABLE_OBLIGATION",
+        "rule_id": "R4",
+        "message": "Rule must contain at least one parseable observable obligation, such as MUST return HTTP 409 or MUST NOT write a record.",
+        "line": "R4: Inactive users must not receive a successful outcome."
+      },
+      {
+        "code": "MISSING_CONDITION",
+        "rule_id": "R5",
+        "message": "Rule must state a parseable condition using \"When ...\".",
+        "line": "R5: Bad payloads should be handled appropriately without breaking other keys."
+      },
+      {
+        "code": "NO_OBSERVABLE_OBLIGATION",
+        "rule_id": "R5",
+        "message": "Rule must contain at least one parseable observable obligation, such as MUST return HTTP 409 or MUST NOT write a record.",
+        "line": "R5: Bad payloads should be handled appropriately without breaking other keys."
+      },
+      {
+        "code": "NO_OBSERVABLE_OBLIGATION",
+        "rule_id": "R6",
+        "message": "Rule must contain at least one parseable observable obligation, such as MUST return HTTP 409 or MUST NOT write a record.",
+        "line": "R6: Audit logging must occur when uploads look valid and the outcome is successful."
+      }
+    ],
+    "ir_kind": "pdd.contract_ir.v1"
+  }
+]

@@ -1,0 +1,132 @@
+Complete onboarding with `pdd setup` to install tab completion and configure API
+keys.
+Checking for updates...
+{
+  "results": [
+    {
+      "path": "prompts/foo_workflow_python.prompt",
+      "has_contract_rules": true,
+      "error": null,
+      "rules": [
+        {
+          "rule_id": "R1",
+          "status": "story-only",
+          "stories": [
+            "story__foo_workflow.md"
+          ],
+          "tests": [],
+          "formal": [],
+          "waiver": null,
+          "failures": [],
+          "notes": [
+            "Story validates prompt intent, but no executable test references R1."
+          ],
+          "story_details": [
+            {
+              "path": "story__foo_workflow.md",
+              "validation": "passed"
+            }
+          ]
+        },
+        {
+          "rule_id": "R2",
+          "status": "story-only",
+          "stories": [
+            "story__foo_workflow.md"
+          ],
+          "tests": [],
+          "formal": [],
+          "waiver": null,
+          "failures": [],
+          "notes": [
+            "Story validates prompt intent, but no executable test references R2."
+          ],
+          "story_details": [
+            {
+              "path": "story__foo_workflow.md",
+              "validation": "passed"
+            }
+          ]
+        },
+        {
+          "rule_id": "R3",
+          "status": "story-only",
+          "stories": [
+            "story__foo_workflow.md"
+          ],
+          "tests": [],
+          "formal": [],
+          "waiver": null,
+          "failures": [],
+          "notes": [
+            "Story validates prompt intent, but no executable test references R3."
+          ],
+          "story_details": [
+            {
+              "path": "story__foo_workflow.md",
+              "validation": "passed"
+            }
+          ]
+        },
+        {
+          "rule_id": "R4",
+          "status": "story-only",
+          "stories": [
+            "story__foo_workflow.md"
+          ],
+          "tests": [],
+          "formal": [],
+          "waiver": null,
+          "failures": [],
+          "notes": [
+            "Story validates prompt intent, but no executable test references R4."
+          ],
+          "story_details": [
+            {
+              "path": "story__foo_workflow.md",
+              "validation": "passed"
+            }
+          ]
+        },
+        {
+          "rule_id": "R5",
+          "status": "unchecked",
+          "stories": [],
+          "tests": [],
+          "formal": [],
+          "waiver": null,
+          "failures": [],
+          "notes": [],
+          "story_details": []
+        },
+        {
+          "rule_id": "R6",
+          "status": "unchecked",
+          "stories": [],
+          "tests": [],
+          "formal": [],
+          "waiver": null,
+          "failures": [],
+          "notes": [],
+          "story_details": []
+        }
+      ],
+      "summary": {
+        "total": 6,
+        "checked": 0,
+        "story_only": 4,
+        "test_only": 0,
+        "unchecked": 2,
+        "waived": 0,
+        "failed": 0,
+        "formal_only": 0,
+        "needs_human": 0
+      }
+    }
+  ],
+  "total_prompts": 1,
+  "prompts_with_contracts": 1
+}
+📦 Debug snapshot saved to 
+/Users/yifeitao/Desktop/pdd/examples/prompt_lint_contract_workflow/.pdd/core_dum
+ps/pdd-core-20260520T223930Z.json (attach when reporting bugs)
