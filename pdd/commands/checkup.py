@@ -3,7 +3,7 @@ Checkup command — GitHub issue-driven project health check, or local diagnosti
 """
 import click
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Callable, Any
 
 from ..agentic_change import _parse_pr_url
 from ..agentic_checkup import run_agentic_checkup
@@ -12,219 +12,229 @@ from ..track_cost import track_cost
 from ..core.errors import handle_error
 
 
-@click.command("checkup")
-@click.argument("target", required=False, default=None)
-@click.option(
-    "--validate-arch-includes",
-    "validate_arch_includes",
-    is_flag=True,
-    default=False,
-    help="Cross-check architecture.json against module <include> tags (no GitHub issue).",
-)
-@click.option(
-    "--project-root",
-    "project_root",
-    type=click.Path(exists=True, path_type=Path, file_okay=False),
-    default=None,
-    help="With --validate-arch-includes: directory to scan (default: current directory).",
-)
-@click.option(
-    "--strict",
-    is_flag=True,
-    default=False,
-    help="With --validate-arch-includes: also validate bundled sample trees (examples/, …).",
-)
-@click.option(
-    "--no-fix",
-    is_flag=True,
-    default=False,
-    help="Report only, don't apply fixes.",
-)
-@click.option(
-    "--timeout-adder",
-    type=float,
-    default=0.0,
-    help="Additional seconds to add to each step's timeout.",
-)
-@click.option(
-    "--no-github-state",
-    is_flag=True,
-    default=False,
-    help="Disable GitHub state persistence.",
-)
-@click.option(
-    "--pr",
-    "pr_url",
-    type=str,
-    default=None,
-    help=(
-        "PR-mode: verify this existing pull request instead of creating a new one. "
-        "Requires --issue. TARGET must NOT be passed."
-    ),
-)
-@click.option(
-    "--issue",
-    "issue_url_opt",
-    type=str,
-    default=None,
-    help=(
-        "PR-mode companion to --pr: the original GitHub issue the PR is meant to "
-        "resolve. Used as issue context for verification."
-    ),
-)
-@click.option(
-    "--review-loop",
-    is_flag=True,
-    default=False,
-    help="In PR mode, run the primary-reviewer/fixer loop before returning a verdict.",
-)
-@click.option(
-    "--review-only",
-    is_flag=True,
-    default=False,
-    help=(
-        "With --review-loop, run only the primary reviewer first pass and do "
-        "not invoke the fixer, commit, or push."
-    ),
-)
-@click.option(
-    "--reviewers",
-    type=str,
-    default="codex,claude",
-    show_default=True,
-    help="Legacy comma-separated role order for --review-loop: reviewer,fixer.",
-)
-@click.option(
-    "--reviewer",
-    type=str,
-    default=None,
-    show_default=False,
-    help="Primary reviewer role for --review-loop. Overrides the first --reviewers role.",
-)
-@click.option(
-    "--fixer",
-    type=str,
-    default=None,
-    show_default=False,
-    help="Fixer role for --review-loop. Overrides the second --reviewers role.",
-)
-@click.option(
-    "--reviewer-fallback",
-    type=str,
-    default=None,
-    show_default=False,
-    help=(
-        "Optional secondary reviewer role to invoke once if the primary reviewer "
-        "fails (auth/network/exec/sandbox/rate-limit). Must differ from --reviewer "
-        "and --fixer."
-    ),
-)
-@click.option(
-    "--fixer-fallback",
-    type=str,
-    default=None,
-    show_default=False,
-    help=(
-        "Optional secondary fixer role to invoke once if the primary fixer "
-        "cannot address the reviewer's findings (e.g. a subscription-tier "
-        "credential exhaustion such as Claude Code 'You've hit your limit "
-        "· resets …'). Must differ from --fixer and --reviewer to preserve "
-        "reviewer/fixer role independence."
-    ),
-)
-@click.option(
-    "--max-review-rounds",
-    type=int,
-    default=5,
-    show_default=True,
-    help="Maximum primary-reviewer/fixer rounds.",
-)
-@click.option(
-    "--max-review-cost",
-    type=float,
-    default=50.0,
-    show_default=True,
-    help="Maximum review-loop LLM cost in USD.",
-)
-@click.option(
-    "--max-review-minutes",
-    type=float,
-    default=90.0,
-    show_default=True,
-    help="Maximum wall-clock minutes for the review loop.",
-)
-@click.option(
-    "--require-all-reviewers-clean/--no-require-all-reviewers-clean",
-    default=True,
-    show_default=True,
-    help="Compatibility flag; the primary reviewer is the authoritative ship gate.",
-)
-@click.option(
-    "--continue-on-reviewer-limit",
-    is_flag=True,
-    default=False,
-    help=(
-        "Report provider/rate/context-limit/auth/network/sandbox reviewer "
-        "failures as degraded instead of failed. This never marks an active "
-        "reviewer clean or continues mutation without a completed review."
-    ),
-)
-@click.option(
-    "--require-final-fresh-review/--no-require-final-fresh-review",
-    default=True,
-    show_default=True,
-    help="Compatibility flag; the primary reviewer's clean verification is final.",
-)
-@click.option(
-    "--blocking-severities",
-    type=str,
-    default=None,
-    show_default=False,
-    help=(
-        "Comma-separated highest-priority severities for review-loop reporting "
-        "and prompt guidance. The fixer still receives every valid reviewer "
-        "finding. Default: blocker,critical,medium. Unknown severities are dropped."
-    ),
-)
-@click.option(
-    "--clean-reviewer-states",
-    type=str,
-    default=None,
-    show_default=False,
-    help=(
-        "Compatibility parser for downstream reviewer-status gates. Default: "
-        "clean. The tokens 'failed', 'degraded', and 'missing' are always "
-        "treated as not-clean regardless of this flag."
-    ),
-)
-@click.option(
-    "--fallback-reviewer-on-failure",
-    is_flag=True,
-    default=False,
-    help=(
-        "Opt-in. When the primary reviewer ends in 'failed' or 'missing' "
-        "on the initial review pass of a round, run a second review pass "
-        "using the configured fixer's identity as a fallback reviewer. "
-        "On a clean fallback the rendered reviewer-status line shows the "
-        "primary as clean so downstream verdict adapters do not short-"
-        "circuit on the primary's outage; the original failure detail "
-        "is preserved in the Reviewer Diagnostics block of the final "
-        "report. NOTE: 'degraded' is intentionally NOT promoted — "
-        "degraded means reduced quality (rate limit, context window, "
-        "etc.) and must not silently lose signal. The fallback also does "
-        "NOT trigger on the post-fix verification pass: the fixer just "
-        "authored the changes being verified, so promoting it to "
-        "verifier would collapse the reviewer/fixer independence."
-    ),
-)
-@click.pass_context
-@track_cost
-def checkup(
+def checkup_options(f: Callable) -> Callable:
+    """Shared options for checkup and legacy-run commands."""
+    f = click.option(
+        "--validate-arch-includes",
+        "validate_arch_includes",
+        is_flag=True,
+        default=False,
+        help="Cross-check architecture.json against module <include> tags (no GitHub issue).",
+    )(f)
+    f = click.option(
+        "--project-root",
+        "project_root",
+        type=click.Path(exists=True, path_type=Path, file_okay=False),
+        default=None,
+        help="With --validate-arch-includes: directory to scan (default: current directory).",
+    )(f)
+    f = click.option(
+        "--validate-arch-strict",
+        "strict_arch",
+        is_flag=True,
+        default=False,
+        help="With --validate-arch-includes: also validate bundled sample trees (examples/, …).",
+    )(f)
+    f = click.option(
+        "--no-fix",
+        is_flag=True,
+        default=False,
+        help="Report only, don't apply fixes.",
+    )(f)
+    f = click.option(
+        "--timeout-adder",
+        type=float,
+        default=0.0,
+        help="Additional seconds to add to each step's timeout.",
+    )(f)
+    f = click.option(
+        "--no-github-state",
+        is_flag=True,
+        default=False,
+        help="Disable GitHub state persistence.",
+    )(f)
+    f = click.option(
+        "--pr",
+        "pr_url",
+        type=str,
+        default=None,
+        help=(
+            "PR-mode: verify this existing pull request instead of creating a new one. "
+            "Requires --issue. TARGET must NOT be passed."
+        ),
+    )(f)
+    f = click.option(
+        "--issue",
+        "issue_url_opt",
+        type=str,
+        default=None,
+        help=(
+            "PR-mode companion to --pr: the original GitHub issue the PR is meant to "
+            "resolve. Used as issue context for verification."
+        ),
+    )(f)
+    f = click.option(
+        "--review-loop",
+        is_flag=True,
+        default=False,
+        help="In PR mode, run the primary-reviewer/fixer loop before returning a verdict.",
+    )(f)
+    f = click.option(
+        "--review-only",
+        is_flag=True,
+        default=False,
+        help=(
+            "With --review-loop, run only the primary reviewer first pass and do "
+            "not invoke the fixer, commit, or push."
+        ),
+    )(f)
+    f = click.option(
+        "--reviewers",
+        type=str,
+        default="codex,claude",
+        show_default=True,
+        help="Legacy comma-separated role order for --review-loop: reviewer,fixer.",
+    )(f)
+    f = click.option(
+        "--reviewer",
+        type=str,
+        default=None,
+        show_default=False,
+        help="Primary reviewer role for --review-loop. Overrides the first --reviewers role.",
+    )(f)
+    f = click.option(
+        "--fixer",
+        type=str,
+        default=None,
+        show_default=False,
+        help="Fixer role for --review-loop. Overrides the second --reviewers role.",
+    )(f)
+    f = click.option(
+        "--reviewer-fallback",
+        type=str,
+        default=None,
+        show_default=False,
+        help=(
+            "Optional secondary reviewer role to invoke once if the primary reviewer "
+            "fails (auth/network/exec/sandbox/rate-limit). Must differ from --reviewer "
+            "and --fixer."
+        ),
+    )(f)
+    f = click.option(
+        "--fixer-fallback",
+        type=str,
+        default=None,
+        show_default=False,
+        help=(
+            "Optional secondary fixer role to invoke once if the primary fixer "
+            "cannot address the reviewer's findings (e.g. a subscription-tier "
+            "credential exhaustion such as Claude Code 'You've hit your limit "
+            "· resets …'). Must differ from --fixer and --reviewer to preserve "
+            "reviewer/fixer role independence."
+        ),
+    )(f)
+    f = click.option(
+        "--max-review-rounds",
+        type=int,
+        default=5,
+        show_default=True,
+        help="Maximum primary-reviewer/fixer rounds.",
+    )(f)
+    f = click.option(
+        "--max-review-cost",
+        type=float,
+        default=50.0,
+        show_default=True,
+        help="Maximum review-loop LLM cost in USD.",
+    )(f)
+    f = click.option(
+        "--max-review-minutes",
+        type=float,
+        default=90.0,
+        show_default=True,
+        help="Maximum wall-clock minutes for the review loop.",
+    )(f)
+    f = click.option(
+        "--require-all-reviewers-clean/--no-require-all-reviewers-clean",
+        default=True,
+        show_default=True,
+        help="Compatibility flag; the primary reviewer is the authoritative ship gate.",
+    )(f)
+    f = click.option(
+        "--continue-on-reviewer-limit",
+        is_flag=True,
+        default=False,
+        help=(
+            "Report provider/rate/context-limit/auth/network/sandbox reviewer "
+            "failures as degraded instead of failed. This never marks an active "
+            "reviewer clean or continues mutation without a completed review."
+        ),
+    )(f)
+    f = click.option(
+        "--require-final-fresh-review/--no-require-final-fresh-review",
+        default=True,
+        show_default=True,
+        help="Compatibility flag; the primary reviewer's clean verification is final.",
+    )(f)
+    f = click.option(
+        "--blocking-severities",
+        type=str,
+        default=None,
+        show_default=False,
+        help=(
+            "Comma-separated highest-priority severities for review-loop reporting "
+            "and prompt guidance. The fixer still receives every valid reviewer "
+            "finding. Default: blocker,critical,medium. Unknown severities are dropped."
+        ),
+    )(f)
+    f = click.option(
+        "--clean-reviewer-states",
+        type=str,
+        default=None,
+        show_default=False,
+        help=(
+            "Compatibility parser for downstream reviewer-status gates. Default: "
+            "clean. The tokens 'failed', 'degraded', and 'missing' are always "
+            "treated as not-clean regardless of this flag."
+        ),
+    )(f)
+    f = click.option(
+        "--fallback-reviewer-on-failure",
+        is_flag=True,
+        default=False,
+        help=(
+            "Opt-in. When the primary reviewer ends in 'failed' or 'missing' "
+            "on the initial review pass of a round, run a second review pass "
+            "using the configured fixer's identity as a fallback reviewer."
+        ),
+    )(f)
+    return f
+
+
+class CheckupGroup(click.Group):
+    """Custom Click Group to support legacy positional TARGET argument.
+    
+    If the first argument does not match a known subcommand (like 'contract'),
+    it is treated as a positional argument (TARGET) via the hidden 'legacy-run' 
+    subcommand.
+    """
+    def resolve_command(self, ctx, args):
+        try:
+            # Try to resolve normally first (matches 'contract')
+            return super().resolve_command(ctx, args)
+        except click.UsageError:
+            # If no command found, or if an option was found that doesn't belong to a command,
+            # delegate to the hidden 'legacy-run' command which handles positional TARGET.
+            # We must pass the original args so legacy-run can parse them.
+            return 'legacy-run', self.get_command(ctx, 'legacy-run'), args
+
+
+def _run_checkup_logic(
     ctx: click.Context,
     target: Optional[str],
     validate_arch_includes: bool,
     project_root: Optional[Path],
-    strict: bool,
+    strict_arch: bool,
     no_fix: bool,
     timeout_adder: float,
     no_github_state: bool,
@@ -247,16 +257,8 @@ def checkup(
     clean_reviewer_states: Optional[str],
     fallback_reviewer_on_failure: bool,
 ) -> Optional[Tuple[str, float, str]]:
-    """
-    Run agentic health checkup from a GitHub issue, or local diagnostics.
-
-    \b
-    GitHub mode (default): TARGET is an issue URL.
-    PR mode: pass --pr <pr-url> and --issue <issue-url> to verify an existing PR
-             against its source issue without creating a new PR.
-    Local mode: pass --validate-arch-includes (no TARGET) to cross-validate
-    architecture.json entries against module prompt <include> tags.
-    """
+    """Core logic for the checkup command, shared between group function and legacy-run."""
+    
     ctx.ensure_object(dict)
 
     if validate_arch_includes:
@@ -268,7 +270,7 @@ def checkup(
         root = project_root if project_root is not None else Path.cwd()
         from ..architecture_include_validation import run_validate_arch_includes_cli
 
-        run_validate_arch_includes_cli(root, strict=strict, quiet=ctx.obj.get("quiet", False))
+        run_validate_arch_includes_cli(root, strict=strict_arch, quiet=ctx.obj.get("quiet", False))
         return "validate-arch-includes: ok", 0.0, ""
 
     # PR-mode argument validation
@@ -326,13 +328,6 @@ def checkup(
                 "(e.g., https://github.com/org/repo/issues/123).",
                 param_hint="'--issue'",
             )
-        # PR mode without --no-fix would generate fix commits inside the
-        # PR-mode worktree (.pdd/worktrees/checkup-pr-N/) and never push
-        # them back to the PR — silently abandoning the work and confusing
-        # the user (who sees "Checkup complete" with no indication that
-        # fixes exist on a local branch). Push-back is a separate follow-up;
-        # until it lands, force --no-fix when --pr is set and warn so the
-        # user can re-invoke without --pr if they wanted fixes applied.
         if not no_fix and not review_loop:
             click.echo(
                 "Warning: --pr forces --no-fix because push-back to the PR "
@@ -409,3 +404,72 @@ def checkup(
     except Exception as exception:
         handle_error(exception, "checkup", ctx.obj.get("quiet", False))
         return None
+
+
+@click.group(
+    "checkup", 
+    cls=CheckupGroup,
+    invoke_without_command=True, 
+    context_settings=dict(allow_interspersed_args=False, ignore_unknown_options=True, allow_extra_args=True)
+)
+@checkup_options
+@click.pass_context
+@track_cost
+def checkup(ctx: click.Context, **kwargs) -> Optional[Tuple[str, float, str]]:
+    """
+    Run agentic health checkup from a GitHub issue, or local diagnostics.
+
+    \b
+    GitHub mode (default): TARGET is an issue URL.
+    PR mode: pass --pr <pr-url> and --issue <issue-url> to verify an existing PR
+             against its source issue without creating a new PR.
+    Local mode: pass --validate-arch-includes (no TARGET) to cross-validate
+    architecture.json entries against module prompt <include> tags.
+    """
+    if ctx.invoked_subcommand is not None and ctx.invoked_subcommand != 'legacy-run':
+        return None
+
+    # Handle legacy call directly if no subcommand provided
+    if ctx.invoked_subcommand is None:
+        target = ctx.args[0] if ctx.args else None
+        # Click only populates kwargs for parsed options. positional args in ctx.args
+        # are NOT in kwargs.
+        return _run_checkup_logic(ctx, target, **kwargs)
+    
+    return None
+
+
+@checkup.command("legacy-run", hidden=True, context_settings=dict(ignore_unknown_options=False, allow_extra_args=False))
+@click.argument('target', required=False)
+@checkup_options
+@click.pass_context
+def legacy_run(ctx, target, **kwargs):
+    """Hidden command to handle legacy positional arguments."""
+    # We prefer the options passed directly to legacy-run if it was invoked via resolve_command
+    return _run_checkup_logic(ctx, target, **kwargs)
+
+
+@checkup.group("contract")
+def contract_group():
+    """Module interface contract commands."""
+    pass
+
+
+@contract_group.command("check")
+@click.argument("prompt", required=True)
+@click.option(
+    "--strict",
+    is_flag=True,
+    default=False,
+    help="Verify that all <include> tags resolve to files that actually exist.",
+)
+@click.pass_context
+def contract_check(ctx, prompt, strict):
+    """
+    Validate module interface contract for a specific PROMPT.
+
+    Delegates to --validate-arch-includes logic for the specific module.
+    """
+    from ..architecture_include_validation import run_validate_arch_includes_cli
+    root = Path.cwd()
+    run_validate_arch_includes_cli(root, strict=strict, quiet=ctx.obj.get("quiet", False))

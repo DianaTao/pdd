@@ -26,6 +26,10 @@ STORY_PROMPT_REFERENCE_RE = re.compile(
     r"(?P<ref>[A-Za-z0-9_./-]+\.prompt)\b",
     flags=re.IGNORECASE,
 )
+STORY_COVERS_SECTION_RE = re.compile(
+    r"##\s*Covers\s*\n(?P<content>.*?)(?=\n##|\Z)",
+    re.IGNORECASE | re.DOTALL,
+)
 logger = logging.getLogger(__name__)
 
 
@@ -657,7 +661,16 @@ def run_user_story_tests(
     for story_path in story_files:
         story_content = _read_story(story_path)
         metadata_prompt_refs = _parse_story_prompt_metadata(story_content)
-        story_prompt_files = prompt_files
+        
+        # Issue #823: If metadata is missing, check for "## Covers" section
+        if not metadata_prompt_refs:
+            match = STORY_COVERS_SECTION_RE.search(story_content)
+            if match:
+                content = match.group("content")
+                metadata_prompt_refs = [
+                    m.group("ref") for m in STORY_PROMPT_REFERENCE_RE.finditer(content)
+                ]
+
         if metadata_prompt_refs:
             resolved_story_prompts: List[Path] = []
             unresolved_prompt_refs: List[str] = []
@@ -690,6 +703,16 @@ def run_user_story_tests(
                 if fail_fast:
                     break
                 continue
+        else:
+            # Issue #823: If no metadata or ## Covers, the story does not cover any prompt
+            # unless we are in auto-caching mode.
+            if cache_story_prompt_links:
+                story_prompt_files = prompt_files
+            else:
+                story_prompt_files = []
+
+        if not story_prompt_files:
+            continue
 
         changes_list, cost, model = detect_change(
             [str(p) for p in story_prompt_files],

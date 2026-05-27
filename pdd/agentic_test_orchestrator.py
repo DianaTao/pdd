@@ -814,6 +814,9 @@ def run_agentic_test_orchestrator(
             console.print(f"   Worktree: {worktree_path}")
         console.print(f"   PR created: {pr_url}")
 
+    if not changed_files:
+        return False, "No tests were generated or identified.", total_cost, model_used, []
+
     clear_workflow_state(cwd, issue_number, "test", state_dir, repo_owner, repo_name, use_github_state)
 
     final_msg = f"PR Created: {pr_url}" if pr_url != "Unknown" else "Workflow completed"

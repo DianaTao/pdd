@@ -3,12 +3,9 @@ GitPython==3.1.44
 PyYAML==6.0.1
 Requests==2.32.4
 aiofiles==24.1.0
-boto3==1.35.99
 click==8.1.7
 filelock>=3.12
-firebase_admin==6.6.0
-firecrawl_py==2.5.3
-google-cloud-aiplatform>=1.3
+firecrawl-py==2.5.3
 jsonschema==4.23.0
 keyring==25.6.0
 litellm[caching]>=1.80.0
@@ -28,6 +25,18 @@ semver==3.0.2
 setuptools
 textual
 z3_solver==4.14.1.0
+numpy>=1.26.0
+langchain>=0.3.0
+langchain-core>=0.3.0
+langchain-community>=0.3.0
+langchain-anthropic>=0.3.0
+langchain-mcp-adapters>=0.1.0
+langgraph>=0.2.0
+
+# Cloud dependencies (optional)
+boto3==1.35.99
+google-cloud-aiplatform>=1.3
+firebase_admin==6.6.0
 
 # Server dependencies (for pdd connect)
 fastapi>=0.115.0

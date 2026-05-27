@@ -31,6 +31,7 @@ _PYTEST_FAKE_HOME = tempfile.mkdtemp(prefix="pdd-pytest-home-")
 atexit.register(shutil.rmtree, _PYTEST_FAKE_HOME, ignore_errors=True)
 os.environ["HOME"] = _PYTEST_FAKE_HOME
 os.environ["CODEX_HOME"] = os.path.join(_PYTEST_FAKE_HOME, ".codex")
+os.environ["PDD_AUTO_UPDATE"] = "true"  # Ensure auto-update check runs in tests by default
 
 import pytest
 from dotenv import load_dotenv
@@ -164,6 +165,8 @@ def isolate_cloud_only_overrides(monkeypatch):
     """Clear developer cloud-only env flags unless a test sets them."""
     monkeypatch.delenv("PDD_CLOUD_ONLY", raising=False)
     monkeypatch.delenv("PDD_NO_LOCAL_FALLBACK", raising=False)
+    monkeypatch.delenv("PDD_AGENTIC_PROVIDER", raising=False)
+
 
 
 @pytest.fixture(autouse=True)
