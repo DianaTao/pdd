@@ -139,6 +139,24 @@ jobs:
             echo "requester=$requester"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Detect heal runtime availability
+        id: heal_cfg
+        if: steps.pf.outputs.skip != 'true'
+        env:
+          APP_ID: ${{ secrets.PDD_CLOUD_APP_ID }}
+          APP_KEY: ${{ secrets.PDD_CLOUD_APP_PRIVATE_KEY }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          available=true
+          if [ "$REPO" != "promptdriven/pdd" ]; then
+            available=false
+          fi
+          if [ -z "$APP_ID" ] || [ -z "$APP_KEY" ]; then
+            available=false
+          fi
+          echo "available=$available" >> "$GITHUB_OUTPUT"
+
       - name: Post check_run (in_progress) on PR head SHA
         if: steps.pf.outputs.skip != 'true'
         id: check_start
@@ -180,19 +198,43 @@ jobs:
             -f "output[title]=auto-heal skipped (fork PR)" \
             -f "output[summary]=Fork PRs are not auto-healed because the heal pushes commits to the PR branch (not possible across forks). [Workflow run]($RUN_URL)."
 
+      - name: Short-circuit when heal secrets unavailable (neutral conclusion)
+        if: >-
+          steps.pf.outputs.skip != 'true' &&
+          steps.pf.outputs.fork == 'false' &&
+          steps.heal_cfg.outputs.available != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          CHECK_ID: ${{ steps.check_start.outputs.check_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          gh api -X PATCH "repos/$REPO/check-runs/$CHECK_ID" \
+            -f status='completed' \
+            -f conclusion='neutral' \
+            -f "output[title]=auto-heal skipped (not configured)" \
+            -f "output[summary]=Auto-heal runs only on promptdriven/pdd with PDD_CLOUD_APP secrets configured. Fork and contributor clones skip heal with a neutral check. [Workflow run]($RUN_URL)."
+
       - name: Mint pdd_cloud App token
-        if: steps.pf.outputs.skip != 'true' && steps.pf.outputs.fork == 'false'
+        if: >-
+          steps.pf.outputs.skip != 'true' &&
+          steps.pf.outputs.fork == 'false' &&
+          steps.heal_cfg.outputs.available == 'true'
         id: app_token
         # SHA-pinned to v3.2.0 (https://github.com/actions/create-github-app-token/releases/tag/v3.2.0)
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
-          app-id: ${{ secrets.PDD_CLOUD_APP_ID }}
+          client-id: ${{ secrets.PDD_CLOUD_APP_ID }}
           private-key: ${{ secrets.PDD_CLOUD_APP_PRIVATE_KEY }}
           owner: promptdriven
           repositories: pdd_cloud
 
       - name: Authorize requester (must be pdd_cloud collaborator)
-        if: steps.pf.outputs.skip != 'true' && steps.pf.outputs.fork == 'false'
+        if: >-
+          steps.pf.outputs.skip != 'true' &&
+          steps.pf.outputs.fork == 'false' &&
+          steps.heal_cfg.outputs.available == 'true'
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           REQUESTER: ${{ steps.pf.outputs.requester }}
@@ -238,7 +280,10 @@ jobs:
           esac
 
       - name: Authenticate to GCP via Workload Identity Federation
-        if: steps.pf.outputs.skip != 'true' && steps.pf.outputs.fork == 'false'
+        if: >-
+          steps.pf.outputs.skip != 'true' &&
+          steps.pf.outputs.fork == 'false' &&
+          steps.heal_cfg.outputs.available == 'true'
         # SHA-pinned to v3.0.0 (https://github.com/google-github-actions/auth/releases/tag/v3.0.0)
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
         with:
@@ -246,12 +291,18 @@ jobs:
           service_account: pdd-public-heal-dispatcher@prompt-driven-development-stg.iam.gserviceaccount.com
 
       - name: Set up gcloud
-        if: steps.pf.outputs.skip != 'true' && steps.pf.outputs.fork == 'false'
+        if: >-
+          steps.pf.outputs.skip != 'true' &&
+          steps.pf.outputs.fork == 'false' &&
+          steps.heal_cfg.outputs.available == 'true'
         # SHA-pinned to v3.0.1 (https://github.com/google-github-actions/setup-gcloud/releases/tag/v3.0.1)
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db
 
       - name: Submit Cloud Build (async)
-        if: steps.pf.outputs.skip != 'true' && steps.pf.outputs.fork == 'false'
+        if: >-
+          steps.pf.outputs.skip != 'true' &&
+          steps.pf.outputs.fork == 'false' &&
+          steps.heal_cfg.outputs.available == 'true'
         id: gcb_submit
         env:
           PR_NUMBER: ${{ steps.pf.outputs.pr_number }}
@@ -285,7 +336,10 @@ jobs:
           echo "Cloud Build $build_id submitted; polling for completion."
 
       - name: Wait for Cloud Build to complete
-        if: steps.pf.outputs.skip != 'true' && steps.pf.outputs.fork == 'false'
+        if: >-
+          steps.pf.outputs.skip != 'true' &&
+          steps.pf.outputs.fork == 'false' &&
+          steps.heal_cfg.outputs.available == 'true'
         env:
           BUILD_ID: ${{ steps.gcb_submit.outputs.build_id }}
         run: |
@@ -314,7 +368,11 @@ jobs:
           done
 
       - name: Finalize check_run
-        if: always() && steps.check_start.outputs.check_id && steps.pf.outputs.fork == 'false'
+        if: >-
+          always() &&
+          steps.check_start.outputs.check_id &&
+          steps.pf.outputs.fork == 'false' &&
+          steps.heal_cfg.outputs.available == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
