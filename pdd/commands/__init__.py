@@ -9,6 +9,7 @@ from .modify import split, change, update
 from .maintenance import sync, sync_architecture, auto_deps, setup
 from .checkup import checkup
 from .analysis import detect_change, conflicts, bug, crash, trace
+from .coverage import coverage
 from .connect import connect
 from .auth import auth_group
 from .misc import preprocess
@@ -39,6 +40,7 @@ def register_commands(cli: click.Group) -> None:
     cli.add_command(bug)
     cli.add_command(crash)
     cli.add_command(trace)
+    cli.add_command(coverage)
     cli.add_command(preprocess)
     cli.add_command(extracts)
     cli.add_command(report_core)

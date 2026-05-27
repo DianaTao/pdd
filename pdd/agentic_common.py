@@ -1921,6 +1921,7 @@ def run_agentic_task(
     # Filter agents based on preference order
     candidates = [p for p in get_agent_provider_preference() if p in agents]
 
+
     if not candidates:
         msg = "No agent providers are available (check CLI installation and API keys)"
         if not quiet:

@@ -39,7 +39,7 @@ def test_user_story_tests_detect_pass(tmp_path):
 
     (prompts_dir / "foo_python.prompt").write_text("prompt", encoding="utf-8")
     story = stories_dir / "story__happy_path.md"
-    story.write_text("As a user...", encoding="utf-8")
+    story.write_text("## Covers\n- foo_python.prompt\n\nAs a user...", encoding="utf-8")
 
     with patch("pdd.user_story_tests.detect_change") as mock_detect:
         mock_detect.return_value = ([], 0.25, "gpt-test")
@@ -63,7 +63,7 @@ def test_user_story_tests_detect_fail(tmp_path):
 
     (prompts_dir / "foo_python.prompt").write_text("prompt", encoding="utf-8")
     story = stories_dir / "story__failure.md"
-    story.write_text("As a user...", encoding="utf-8")
+    story.write_text("## Covers\n- foo_python.prompt\n\nAs a user...", encoding="utf-8")
 
     changes = [{"prompt_name": "foo_python.prompt", "change_instructions": "Add support"}]
 
@@ -123,8 +123,8 @@ def test_user_story_tests_fail_fast(tmp_path):
     stories_dir.mkdir()
 
     (prompts_dir / "foo_python.prompt").write_text("prompt", encoding="utf-8")
-    (stories_dir / "story__one.md").write_text("story", encoding="utf-8")
-    (stories_dir / "story__two.md").write_text("story", encoding="utf-8")
+    (stories_dir / "story__one.md").write_text("## Covers\n- foo_python.prompt\n\nstory", encoding="utf-8")
+    (stories_dir / "story__two.md").write_text("## Covers\n- foo_python.prompt\n\nstory", encoding="utf-8")
 
     changes = [{"prompt_name": "foo_python.prompt", "change_instructions": "Add support"}]
 
