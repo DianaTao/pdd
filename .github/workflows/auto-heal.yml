@@ -20,8 +20,9 @@ name: auto-heal
 #     (gemini-dispatch-gh-app-private-key).
 #
 # ---- Security boundaries ----
-# - `pull_request_target` runs workflow code from main, never from PR head,
-#   so a fork PR cannot modify the auth gate. PR code only runs inside
+# - `pull_request_target` runs workflow code from the repo default branch
+#   (`main`), never from the PR head, so a fork PR cannot modify the auth gate.
+#   PR code only runs inside
 #   Cloud Build, which has no access to this workflow's GHA secrets.
 # - The dispatcher SA is impersonable ONLY by this exact workflow file at
 #   refs/heads/main (WIF attribute_condition + principalSet pinning to
