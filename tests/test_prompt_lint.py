@@ -397,7 +397,7 @@ class TestLlmPassesLocal:
             "<contract_rules>Handle requests appropriately.</contract_rules>\n",
             encoding="utf-8",
         )
-        run_llm_ambiguity_pass(path)
+        run_llm_ambiguity_pass(path, use_cloud=False)
         assert mock_llm.call_args.kwargs.get("use_cloud") is False
 
     @patch("pdd.llm_invoke.llm_invoke")
@@ -431,7 +431,7 @@ class TestLlmPassesLocal:
         }
         path = tmp_path / "t.prompt"
         path.write_text("<contract_rules>x</contract_rules>\n", encoding="utf-8")
-        run_llm_guidance_pass(path)
+        run_llm_guidance_pass(path, use_cloud=False)
         assert mock_llm.call_args.kwargs.get("use_cloud") is False
 
     @patch("pdd.llm_invoke.llm_invoke", side_effect=RuntimeError("network down"))

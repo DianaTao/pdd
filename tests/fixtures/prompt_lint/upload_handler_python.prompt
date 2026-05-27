@@ -4,17 +4,14 @@
 
 <contract_rules>
 R2 - Duplicate upload rejection
-When ...
+When the same duplicate upload is submitted twice, the service MUST reject the second request.
 </contract_rules>
 
 <requirements>
 - Accept multipart/form-data POST requests.
+- Only authorized users may upload files.
 - Return HTTP 201 on successful upload with {"id": "<uuid>"}.
+- Return a valid response for accepted uploads.
 - Reject duplicate uploads with HTTP 409.
 - Log all upload attempts for audit purposes.
 </requirements>
-
-<vocabulary>
-- duplicate upload: same tenant and SHA-256 hash
-- duplicate upload: same hash and tenant
-</vocabulary>

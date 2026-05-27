@@ -5,6 +5,7 @@
 <vocabulary>
 - duplicate upload: an upload whose SHA-256 hash and tenant ID match a previously accepted upload within the last 30 days
 - graceful rejection: returns HTTP 409 with JSON body {"code": "DUPLICATE", "message": "..."}
+- gracefully: same observable outcome as graceful rejection
 - authorized user: a user whose Bearer JWT is present, unexpired, and carries the "upload" scope
 - valid response: HTTP 201 with JSON body {"id": "<uuid>", "size": <bytes>, "created_at": "<iso8601>"}
 - active user: a user whose account.status field equals "active" in the accounts table
