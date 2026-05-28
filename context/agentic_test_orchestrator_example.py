@@ -21,9 +21,9 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-# Add project root to path
-project_root = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(project_root))
+# Add project root to path so the import resolves
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from pdd.agentic_test_orchestrator import (
     run_agentic_test_orchestrator,
@@ -146,6 +146,8 @@ def example_hard_stop_duplicate() -> None:
              patch("pdd.agentic_test_orchestrator.save_workflow_state",
                     return_value=None), \
              patch("pdd.agentic_test_orchestrator.clear_workflow_state"), \
+             patch("pdd.agentic_test_orchestrator._setup_worktree",
+                    return_value=(Path(tmpdir) / "worktree", None)), \
              patch("pdd.agentic_test_orchestrator.shutil") as mock_shutil:
 
             mock_shutil.which.return_value = None
@@ -182,7 +184,7 @@ def example_hard_stop_needs_info() -> None:
     step_outputs = {
         "step1": (True, "No duplicates found.", 0.01, "anthropic"),
         "step2": (True, "Codebase reviewed.", 0.01, "anthropic"),
-        "step3": (True, "Needs More Info: Please specify the API version.", 0.01, "anthropic"),
+        "step3": (True, "STOP_CONDITION: Needs More Info: Please specify the API version.", 0.01, "anthropic"),
     }
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -197,6 +199,8 @@ def example_hard_stop_needs_info() -> None:
              patch("pdd.agentic_test_orchestrator.save_workflow_state",
                     return_value=None), \
              patch("pdd.agentic_test_orchestrator.clear_workflow_state"), \
+             patch("pdd.agentic_test_orchestrator._setup_worktree",
+                    return_value=(Path(tmpdir) / "worktree", None)), \
              patch("pdd.agentic_test_orchestrator.shutil") as mock_shutil:
 
             mock_shutil.which.return_value = None
