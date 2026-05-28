@@ -290,42 +290,42 @@ def _candidate_relative_path(code_path: Path, project_root: Path) -> Path:
         return Path(code_path.name)
 
 
-def _ensure_package_inits(overlay_root: Path, module_path: Path) -> None:
-    """Add empty ``__init__.py`` files so package imports resolve under ``overlay_root``."""
-    try:
-        rel = module_path.relative_to(overlay_root)
-    except ValueError:
-        return
-    current = overlay_root
-    for part in rel.parts[:-1]:
-        current = current / part
-        init_file = current / "__init__.py"
-        if not init_file.exists():
-            init_file.write_text("", encoding="utf-8")
-
-
 def _build_pytest_overlay(
     candidate: Path,
     code_path: Path,
     project_root: Path,
     overlay_root: Path,
-) -> Optional[Path]:
-    """Build an isolated tree with the candidate module and copied tests."""
-    rel = _candidate_relative_path(code_path, project_root)
-    module_dest = overlay_root / rel
-    module_dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(candidate, module_dest)
-    _ensure_package_inits(overlay_root, module_dest)
-
+) -> Optional[list[Path]]:
+    """Build an isolated tree with mirrored code and candidate module."""
     tests = _discover_tests(code_path, project_root)
     if not tests:
         return None
 
-    overlay_tests = overlay_root / "tests"
-    overlay_tests.mkdir(parents=True, exist_ok=True)
-    for test_path in tests:
-        shutil.copy2(test_path, overlay_tests / test_path.name)
-    return overlay_tests
+    # Mirror the project structure using symlinks, replacing only the candidate file.
+    # This ensures sibling imports, conftest.py, and other package context are preserved.
+    def _mirror(src_dir: Path, dst_dir: Path):
+        for item in src_dir.iterdir():
+            if item.name in (
+                ".git",
+                ".pdd",
+                "__pycache__",
+                ".pytest_cache",
+                "pytest-overlay",
+            ):
+                continue
+            dst_item = dst_dir / item.name
+            if item.is_dir():
+                dst_item.mkdir(exist_ok=True)
+                _mirror(item, dst_item)
+            elif item.is_file():
+                if item.resolve() == code_path.resolve():
+                    shutil.copy2(candidate, dst_item)
+                else:
+                    # Use absolute symlinks for reliability in isolated runs
+                    os.symlink(item.resolve(), dst_item)
+
+    _mirror(project_root, overlay_root)
+    return [overlay_root / t.relative_to(project_root) for t in tests]
 
 
 def _run_pytest_for_candidate(
@@ -353,8 +353,12 @@ def _run_pytest_for_candidate(
         return True
 
     env = os.environ.copy()
+    # Ensure overlay_root is the only path in PYTHONPATH to avoid importing from project_root
     env["PYTHONPATH"] = str(overlay_root)
-    cmd = [sys.executable, "-m", "pytest", "-q", str(overlay_tests)]
+    # Also set PYTHONNOUSERSITE to avoid interference from user-installed packages
+    env["PYTHONNOUSERSITE"] = "1"
+
+    cmd = [sys.executable, "-m", "pytest", "-q"] + [str(p) for p in overlay_tests]
     completed = subprocess.run(
         cmd,
         cwd=overlay_root,
@@ -393,6 +397,11 @@ def _policy_configured(project_root: Path, manifest: Optional[ManifestView]) -> 
     )
     if any(path.is_file() for path in policy_paths):
         return True
+    
+    if manifest is None:
+        return False
+        
+    # Only return True if one of the policy keys is actually configured with a non-skipped status.
     return _validation_key_configured(manifest, _POLICY_VALIDATION_KEYS)
 
 

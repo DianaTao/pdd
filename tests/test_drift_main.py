@@ -348,3 +348,54 @@ def test_public_api_detects_renamed_symbol(tmp_path: Path) -> None:
     assert _public_api(path) == ["def refund_payment"]
     path.write_text("class RefundService:\n    pass\n", encoding="utf-8")
     assert _public_api(path) == ["class RefundService"]
+
+
+def test_pytest_candidate_sibling_import(tmp_path: Path) -> None:
+    """Candidate must be able to import sibling modules from the same package."""
+    project = tmp_path / "project"
+    project.mkdir()
+    pdd_dir = project / "pdd"
+    pdd_dir.mkdir()
+    (pdd_dir / "__init__.py").write_text("", encoding="utf-8")
+    (pdd_dir / "helper.py").write_text("def get_val(): return 42", encoding="utf-8")
+    
+    code = pdd_dir / "main_mod.py"
+    code.write_text("from pdd.helper import get_val\ndef status(): return get_val()", encoding="utf-8")
+    
+    tests_dir = project / "tests"
+    tests_dir.mkdir()
+    test_file = tests_dir / "test_main_mod.py"
+    test_file.write_text(
+        "from pdd.main_mod import status\n"
+        "def test_status():\n"
+        "    assert status() == 42\n",
+        encoding="utf-8"
+    )
+    
+    sandbox = project / "sandbox"
+    sandbox.mkdir()
+    
+    candidate = tmp_path / "candidate.py"
+    candidate.write_text("from pdd.helper import get_val\ndef status(): return get_val()", encoding="utf-8")
+    
+    # This should pass if sibling imports work in the overlay
+    assert _run_pytest_for_candidate(candidate, code, project, sandbox) is True
+
+
+def test_policy_configured_with_not_available_statuses(tmp_path: Path) -> None:
+    """Policy must NOT be considered configured when manifest only has not_available statuses."""
+    from pdd.drift_main import _policy_configured
+    from pdd.evidence_store import ManifestView
+    
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps({
+        "schema_version": 1,
+        "validation": {
+            "detect_stories": "not_available",
+            "verify": "not_available",
+            "unit_tests": "not_available",
+        }
+    }))
+    view = ManifestView.from_file(manifest_path, tmp_path)
+    
+    assert _policy_configured(tmp_path, view) is False
