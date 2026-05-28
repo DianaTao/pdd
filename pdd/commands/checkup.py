@@ -13,6 +13,7 @@ from ..agentic_sync import _is_github_issue_url
 from ..track_cost import track_cost
 from ..core.errors import handle_error
 from ..core.utils import echo_model_line
+from .drift import drift_cmd
 from .prompt import prompt_lint
 
 
@@ -351,10 +352,12 @@ def checkup(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     architecture.json entries against module prompt <include> tags.
     Prompt lint:
       pdd checkup lint TARGET [OPTIONS]  →  lint prompts and user stories for quality and ambiguity.
+    Regeneration drift:
+      pdd checkup drift <DEVUNIT> [OPTIONS]  →  run deterministic drift checks.
     """
     ctx.ensure_object(dict)
 
-    if show_help and target != "lint":
+    if show_help and target not in {"lint", "drift"}:
         click.echo(ctx.command.get_help(ctx))
         return None
 
@@ -370,6 +373,23 @@ def checkup(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         exit_code = prompt_lint.main(
             args=lint_args,
             prog_name="pdd checkup lint",
+            standalone_mode=False,
+            obj=ctx.obj,
+        )
+        if exit_code:
+            raise click.exceptions.Exit(exit_code)
+        return None
+
+    if target == "drift":
+        drift_args = list(ctx.args)
+        if not drift_args or show_help:
+            click.echo(
+                drift_cmd.get_help(click.Context(drift_cmd, info_name="pdd checkup drift"))
+            )
+            return None
+        exit_code = drift_cmd.main(
+            args=drift_args,
+            prog_name="pdd checkup drift",
             standalone_mode=False,
             obj=ctx.obj,
         )

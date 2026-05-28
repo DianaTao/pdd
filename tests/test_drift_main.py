@@ -92,19 +92,19 @@ def test_drift_json_payload(tmp_path: Path) -> None:
 
 
 def test_drift_cli_dry_run_multi_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``pdd drift <devunit> --dry-run --runs 3`` exits 0 when stable."""
+    """``pdd checkup drift <devunit> --dry-run --runs 3`` exits 0 when stable."""
     _write_fixture(tmp_path)
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(
         cli.cli,
-        ["--quiet", "drift", "refund_payment", "--dry-run", "--runs", "3"],
+        ["--quiet", "checkup", "drift", "refund_payment", "--dry-run", "--runs", "3"],
         catch_exceptions=False,
     )
     assert result.exit_code == 0
 
 
 def test_drift_cli_from_evidence_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``pdd drift --from-evidence ... --json`` emits stable JSON payload."""
+    """``pdd checkup drift --from-evidence ... --json`` emits stable JSON payload."""
     prompt, code = _write_fixture(tmp_path)
     manifest = tmp_path / ".pdd" / "evidence" / "devunits" / "refund_payment.latest.json"
     manifest.parent.mkdir(parents=True)
@@ -128,6 +128,7 @@ def test_drift_cli_from_evidence_json(tmp_path: Path, monkeypatch: pytest.Monkey
         cli.cli,
         [
             "--quiet",
+            "checkup",
             "drift",
             "refund_payment",
             "--dry-run",
