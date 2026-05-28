@@ -470,7 +470,7 @@
     "dependencies": [],
     "priority": 18,
     "filename": "resurface_check_Python.prompt",
-    "filepath": "extensions/recruiting/resurface_check.py",
+    "filepath": "pdd/prompts/resurface_check_Python.prompt",
     "tags": [
       "backend",
       "api",
@@ -3078,12 +3078,12 @@
     }
   },
   {
-    "reason": "LLM prompt template for agentic bug step4 reproduce operations.",
-    "description": "Defines the prompt structure for agentic bug step4 reproduce. Invoked by the corresponding Python module to format LLM requests.",
+    "reason": "LLM prompt template for agentic bug step5 reproduce operations.",
+    "description": "Defines the prompt structure for agentic bug step5 reproduce. Invoked by the corresponding Python module to format LLM requests.",
     "dependencies": [],
     "priority": 75,
-    "filename": "agentic_bug_step4_reproduce_LLM.prompt",
-    "filepath": "prompts/agentic_bug_step4_reproduce_LLM.prompt",
+    "filename": "agentic_bug_step5_reproduce_LLM.prompt",
+    "filepath": "prompts/agentic_bug_step5_reproduce_LLM.prompt",
     "tags": [
       "agentic",
       "config",
@@ -3200,12 +3200,12 @@
     }
   },
   {
-    "reason": "Creates draft PR with failing tests and PDD fix command for step 10 of agentic bug workflow.",
-    "description": "Step 10 (final step) of the agentic bug workflow. Creates a draft pull request with failing tests and links it to the GitHub issue. Includes pdd fix command for resolving the bug.",
+    "reason": "Creates draft PR with failing tests and PDD fix command for step 12 of agentic bug workflow.",
+    "description": "Step 12 of the agentic bug workflow. Creates a draft pull request with failing tests and links it to the GitHub issue. Includes pdd fix command for resolving the bug.",
     "dependencies": [],
     "priority": 80,
-    "filename": "agentic_bug_step10_pr_LLM.prompt",
-    "filepath": "prompts/agentic_bug_step10_pr_LLM.prompt",
+    "filename": "agentic_bug_step12_pr_LLM.prompt",
+    "filepath": "prompts/agentic_bug_step12_pr_LLM.prompt",
     "tags": [
       "agentic",
       "config",
@@ -3215,7 +3215,7 @@
     "interface": {
       "type": "command",
       "command": {
-        "name": "agentic_bug_step10",
+        "name": "agentic_bug_step12",
         "description": "Generate draft PR with failing tests and link to GitHub issue"
       }
     },
@@ -3558,30 +3558,6 @@
     },
     "position": {
       "x": 3000,
-      "y": 0
-    }
-  },
-  {
-    "reason": "LLM prompt template for extracting dependency includes from auto-include LLM output.",
-    "description": "Defines the prompt structure for extract auto include. Invoked by the corresponding Python module to format LLM requests.",
-    "dependencies": [],
-    "priority": 95,
-    "filename": "extract_auto_include_LLM.prompt",
-    "filepath": "prompts/extract_auto_include_LLM.prompt",
-    "tags": [
-      "config",
-      "extraction",
-      "llm",
-      "template"
-    ],
-    "interface": {
-      "type": "config",
-      "config": {
-        "keys": []
-      }
-    },
-    "position": {
-      "x": 1800,
       "y": 0
     }
   },
@@ -4174,7 +4150,7 @@
     "dependencies": [],
     "priority": 119,
     "filename": "pdd_theme_json.prompt",
-    "filepath": "pdd_theme.json",
+    "filepath": "pdd/prompts/pdd_theme_json.prompt",
     "tags": [
       "config"
     ],
@@ -4365,7 +4341,7 @@
     "dependencies": [],
     "priority": 124,
     "filename": "regression_analysis_log.prompt",
-    "filepath": "regression_analysis.log",
+    "filepath": "pdd/prompts/regression_analysis_log.prompt",
     "tags": [
       "config"
     ],
@@ -4386,7 +4362,7 @@
     "dependencies": [],
     "priority": 125,
     "filename": "regression_bash.prompt",
-    "filepath": "regression.sh",
+    "filepath": "tests/regression.sh",
     "tags": [
       "cli",
       "shell"
@@ -4452,7 +4428,7 @@
     "dependencies": [],
     "priority": 127,
     "filename": "run_generated_python.prompt",
-    "filepath": "pdd/run_generated.py",
+    "filepath": "utils/run_generated.py",
     "tags": [
       "generation",
       "module",
@@ -5154,7 +5130,7 @@
     "dependencies": [],
     "priority": 143,
     "filename": "prompt_tester_python.prompt",
-    "filepath": "pdd/prompt_tester.py",
+    "filepath": "tests/prompt_tester.py",
     "tags": [
       "module",
       "python",
@@ -5806,11 +5782,11 @@
   },
   {
     "reason": "Classifies whether a bug root cause is in code implementation or prompt specification.",
-    "description": "Step 5.5 of the agentic bug workflow. Classifies whether a bug root cause is in the code implementation or in the prompt specification itself.",
+    "description": "Step 7 of the agentic bug workflow. Classifies whether a bug root cause is in the code implementation or in the prompt specification itself.",
     "dependencies": [],
     "priority": 166,
-    "filename": "agentic_bug_step5_5_prompt_classification_LLM.prompt",
-    "filepath": "prompts/agentic_bug_step5_5_prompt_classification_LLM.prompt",
+    "filename": "agentic_bug_step7_prompt_classification_LLM.prompt",
+    "filepath": "prompts/agentic_bug_step7_prompt_classification_LLM.prompt",
     "tags": [
       "agentic",
       "config",
@@ -5830,11 +5806,11 @@
   },
   {
     "reason": "Generates E2E tests that verify the bug at a system level.",
-    "description": "Step 9 of the agentic bug workflow. Generates and runs end-to-end tests that verify a bug at the system integration level.",
+    "description": "Step 11 of the agentic bug workflow. Generates and runs end-to-end tests that verify a bug at the system integration level.",
     "dependencies": [],
     "priority": 167,
-    "filename": "agentic_bug_step9_e2e_test_LLM.prompt",
-    "filepath": "prompts/agentic_bug_step9_e2e_test_LLM.prompt",
+    "filename": "agentic_bug_step11_e2e_test_LLM.prompt",
+    "filepath": "prompts/agentic_bug_step11_e2e_test_LLM.prompt",
     "tags": [
       "agentic",
       "config",
@@ -9539,6 +9515,58 @@
             "name": "resolve_generate_output_paths",
             "signature": "(prompt_file, *, output=None, ...) -> list[str]",
             "returns": "list[str]"
+          }
+        ]
+      }
+    },
+    "position": {
+      "x": 0,
+      "y": 0
+    }
+  },
+  {
+    "reason": "Provides project-wide test-generation guidance, including contract-rule coverage planning, external-boundary mocking, isolation, and accumulated-test preservation.",
+    "description": "Provides project-wide test-generation guidance, including contract-rule coverage planning, external-boundary mocking, isolation, and accumulated-test preservation.",
+    "dependencies": [],
+    "priority": 243,
+    "filename": "context/test.prompt",
+    "filepath": "context/test.prompt",
+    "tags": [
+      "context",
+      "test"
+    ],
+    "interface": {
+      "type": "module",
+      "module": {
+        "functions": []
+      }
+    },
+    "position": {
+      "x": 0,
+      "y": 0
+    }
+  },
+  {
+    "reason": "Defines a tiny deterministic pricing helper fixture for verifying contract-aware test generation from stable rule IDs.",
+    "description": "Defines a tiny deterministic pricing helper fixture for verifying contract-aware test generation from stable rule IDs.",
+    "dependencies": [],
+    "priority": 244,
+    "filename": "context/contract_rules_test_fixture_python.prompt",
+    "filepath": "context/contract_rules_test_fixture.py",
+    "tags": [
+      "context",
+      "module",
+      "python",
+      "test-fixture"
+    ],
+    "interface": {
+      "type": "module",
+      "module": {
+        "functions": [
+          {
+            "name": "calculate_refund",
+            "signature": "(charge_amount: int | float, requested_refund: int | float) -> int | float",
+            "returns": "numeric refund amount"
           }
         ]
       }
