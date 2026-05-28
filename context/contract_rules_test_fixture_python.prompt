@@ -1,0 +1,40 @@
+<pdd-reason>Defines a tiny deterministic pricing helper fixture for verifying contract-aware test generation from stable rule IDs.</pdd-reason>
+
+<pdd-interface>
+{
+  "type": "module",
+  "module": {
+    "functions": [
+      {
+        "name": "calculate_refund",
+        "signature": "(charge_amount: int | float, requested_refund: int | float) -> int | float",
+        "returns": "numeric refund amount"
+      }
+    ]
+  }
+}
+</pdd-interface>
+
+<include>context/python_preamble.prompt</include>
+
+% Goal
+Create a tiny deterministic pricing helper used as a fixture for contract-aware test generation.
+
+% Role & Scope
+The module exposes one public function, `calculate_refund`, that computes an approved refund amount from an original charge and a requested refund.
+
+% Requirements
+- Accept numeric `charge_amount` and `requested_refund` inputs.
+- Return the requested refund amount when it is greater than or equal to zero and less than or equal to `charge_amount`.
+- Raise `ValueError` when the requested refund violates the contract rules.
+
+<contract_rules>
+R1 - In-range refund approved
+The function MUST return the requested refund when it is greater than or equal to zero and less than or equal to the original charge amount.
+
+R2 - Over-refund rejected
+The function MUST NOT approve a refund greater than the original charge amount.
+</contract_rules>
+
+% Deliverables
+- Code: `context/contract_rules_test_fixture.py`
