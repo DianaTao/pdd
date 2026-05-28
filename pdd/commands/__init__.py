@@ -8,6 +8,7 @@ from .fix import fix
 from .modify import split, change, update
 from .maintenance import sync, sync_architecture, auto_deps, setup
 from .checkup import checkup
+from .contracts import contracts_cli
 from .analysis import detect_change, conflicts, bug, crash, trace
 from .connect import connect
 from .auth import auth_group
@@ -20,10 +21,7 @@ from .utility import install_completion_cmd, verify
 from .which import which
 from .firecrawl import firecrawl_cache
 from .prompt import prompt_group
-from .contracts import contracts_group
 from .coverage import coverage_cmd
-from .evidence import evidence_group
-from .drift import drift_cmd
 
 def register_commands(cli: click.Group) -> None:
     """Register all subcommands with the main CLI group."""
@@ -37,6 +35,7 @@ def register_commands(cli: click.Group) -> None:
     cli.add_command(sync)
     cli.add_command(sync_architecture)
     cli.add_command(checkup)
+    cli.add_command(contracts_cli)
     cli.add_command(auto_deps)
     cli.add_command(setup)
     cli.add_command(detect_change)
@@ -61,7 +60,4 @@ def register_commands(cli: click.Group) -> None:
     cli.add_command(sessions)
     cli.add_command(firecrawl_cache)
     cli.add_command(prompt_group)
-    cli.add_command(contracts_group)
     cli.add_command(coverage_cmd, name="coverage")
-    cli.add_command(evidence_group)
-    cli.add_command(drift_cmd)

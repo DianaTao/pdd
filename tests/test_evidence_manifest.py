@@ -1,216 +1,274 @@
-"""Tests for pdd.evidence_manifest (deterministic — no LLM)."""
+"""Tests for routine evidence manifest emission."""
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 from pathlib import Path
 
+import jsonschema
 import pytest
 
 from pdd.evidence_manifest import (
-    SCHEMA,
-    EvidenceManifest,
-    ManifestValidation,
-    RuleEvidence,
-    build_manifest,
-    emit_manifest,
-    validate_manifest,
+    _preprocessed_expanded_sha256,
+    validation_from_sync,
+    write_evidence_manifest,
 )
+from pdd.preprocess import preprocess
 
 
-def _contract_prompt(tmp_path: Path) -> Path:
-    p = tmp_path / "foo.prompt"
-    p.write_text(
-        "<prompt>\nModule that validates amounts.\n</prompt>\n\n"
-        "<contract_rules>\n"
-        "R1 - Validate input\n"
-        "When amount is negative, the module MUST raise ValueError.\n"
-        "R2 - Return result\n"
-        "When amount is valid, the module MUST return a float.\n"
-        "</contract_rules>\n",
+def _hash(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _schema() -> dict:
+    schema_path = Path(__file__).parents[1] / "pdd" / "schemas" / "evidence_manifest.schema.json"
+    return json.loads(schema_path.read_text(encoding="utf-8"))
+
+
+def _expected_preprocessed_hash(prompt_text: str, project_root: Path) -> str:
+    previous = os.getcwd()
+    os.chdir(project_root)
+    try:
+        expanded = preprocess(prompt_text, recursive=True, double_curly_brackets=False)
+    finally:
+        os.chdir(previous)
+    return hashlib.sha256(expanded.encode("utf-8")).hexdigest()
+
+
+def test_writes_schema_valid_run_and_latest_manifest(tmp_path: Path) -> None:
+    """Verify that a valid evidence manifest is written according to the schema."""
+    prompt = tmp_path / "prompts" / "refund_python.prompt"
+    output = tmp_path / "src" / "refund.py"
+    include = tmp_path / "context" / "policy.prompt"
+    prompt.parent.mkdir()
+    output.parent.mkdir()
+    include.parent.mkdir()
+    include.write_text("Policy context.\n", encoding="utf-8")
+    prompt_text = "Use ```<context/policy.prompt>```.\n"
+    prompt.write_text(prompt_text, encoding="utf-8")
+    output.write_text("def refund():\n    return True\n", encoding="utf-8")
+
+    manifest_path = write_evidence_manifest(
+        command="pdd generate",
+        prompt_file=prompt,
+        output_files=[output],
+        model="local-model",
+        cost_usd=0.25,
+        temperature=0.0,
+        project_root=tmp_path,
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    jsonschema.validate(instance=manifest, schema=_schema())
+    assert manifest["prompt"]["sha256"] == _hash(prompt)
+    assert manifest["context"]["includes"] == [
+        {"path": "context/policy.prompt", "sha256": _hash(include)}
+    ]
+    assert manifest["prompt"]["expanded_sha256"] == _expected_preprocessed_hash(
+        prompt_text, tmp_path
+    )
+    assert manifest["outputs"] == [{"path": "src/refund.py", "sha256": _hash(output)}]
+    assert manifest["contracts"]["status"] == "not_applicable"
+    latest = tmp_path / ".pdd" / "evidence" / "devunits" / "refund.latest.json"
+    assert json.loads(latest.read_text(encoding="utf-8")) == manifest
+
+
+def test_output_hash_changes_with_output_content(tmp_path: Path) -> None:
+    """Assert output hashes change dynamically when the file contents are updated."""
+    prompt = tmp_path / "prompts" / "receipt_python.prompt"
+    output = tmp_path / "receipt.py"
+    prompt.parent.mkdir()
+    prompt.write_text("Write a receipt.\n", encoding="utf-8")
+    output.write_text("first\n", encoding="utf-8")
+    first_path = write_evidence_manifest(
+        command="pdd generate",
+        prompt_file=prompt,
+        output_files=[output],
+        project_root=tmp_path,
+    )
+    first = json.loads(first_path.read_text(encoding="utf-8"))
+
+    output.write_text("second\n", encoding="utf-8")
+    second_path = write_evidence_manifest(
+        command="pdd generate",
+        prompt_file=prompt,
+        output_files=[output],
+        project_root=tmp_path,
+    )
+    second = json.loads(second_path.read_text(encoding="utf-8"))
+
+    assert first["outputs"][0]["sha256"] != second["outputs"][0]["sha256"]
+
+
+def test_nested_include_records_and_expanded_hash(tmp_path: Path) -> None:
+    """Nested includes resolve beside the parent file and appear in context.includes."""
+    nested = tmp_path / "context" / "nested.prompt"
+    middle = tmp_path / "context" / "a.prompt"
+    prompt = tmp_path / "prompts" / "main_python.prompt"
+    nested.parent.mkdir(parents=True)
+    prompt.parent.mkdir()
+    nested.write_text("nested line\n", encoding="utf-8")
+    middle.write_text("middle ```<nested.prompt>```\n", encoding="utf-8")
+    prompt_text = "top ```<context/a.prompt>```\n"
+    prompt.write_text(prompt_text, encoding="utf-8")
+
+    manifest_path = write_evidence_manifest(
+        command="pdd generate",
+        prompt_file=prompt,
+        project_root=tmp_path,
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    include_paths = {record["path"] for record in manifest["context"]["includes"]}
+    assert "context/a.prompt" in include_paths
+    assert "context/nested.prompt" in include_paths
+    assert manifest["prompt"]["expanded_sha256"] == _expected_preprocessed_hash(
+        prompt_text, tmp_path
+    )
+    assert len(manifest["context"]["includes"]) == 2
+
+
+def test_path_attribute_include_records_primary_path(tmp_path: Path) -> None:
+    """Attributed includes must record the path= target, not the body fallback."""
+    source = tmp_path / "docs" / "source.md"
+    fallback = tmp_path / "fallback.md"
+    prompt = tmp_path / "prompts" / "attr_python.prompt"
+    source.parent.mkdir(parents=True)
+    prompt.parent.mkdir()
+    source.write_text("primary body\n", encoding="utf-8")
+    fallback.write_text("fallback body\n", encoding="utf-8")
+    prompt.write_text(
+        '<include path="docs/source.md">fallback.md</include>\n',
         encoding="utf-8",
     )
-    return p
 
-
-# ---------------------------------------------------------------------------
-# EvidenceManifest unit tests
-# ---------------------------------------------------------------------------
-
-
-def test_build_manifest_schema(tmp_path: Path) -> None:
-    p = _contract_prompt(tmp_path)
-    manifest = build_manifest(p)
-    assert manifest.schema == SCHEMA
-
-
-def test_build_manifest_sha256(tmp_path: Path) -> None:
-    p = _contract_prompt(tmp_path)
-    manifest = build_manifest(p)
-    assert len(manifest.prompt_sha256) == 64
-    assert manifest.prompt_sha256 != ""
-
-
-def test_build_manifest_rule_count(tmp_path: Path) -> None:
-    p = _contract_prompt(tmp_path)
-    manifest = build_manifest(p)
-    assert manifest.rule_count == len(manifest.rules)
-
-
-def test_build_manifest_no_llm(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """build_manifest must never call any LLM."""
-    called = []
-
-    def _fake(*a, **kw):
-        called.append(True)
-        return {}
-
-    monkeypatch.setattr("pdd.evidence_manifest.llm_invoke", _fake, raising=False)
-    p = _contract_prompt(tmp_path)
-    build_manifest(p)
-    assert not called
-
-
-def test_build_manifest_gap_flag(tmp_path: Path) -> None:
-    """Rules with unchecked status are flagged as gaps; test-only rules are not."""
-    p = _contract_prompt(tmp_path)
-    manifest = build_manifest(p)
-    # gap=True only when status is "unchecked" or story-only with no tests.
-    # "test-only" rules have gap=False (they have test coverage, just no stories).
-    for rule in manifest.rules:
-        if rule.status == "unchecked":
-            assert rule.gap is True
-        elif rule.status in ("checked", "test-only", "waived"):
-            assert rule.gap is False
-
-
-def test_build_manifest_json_serialisable(tmp_path: Path) -> None:
-    p = _contract_prompt(tmp_path)
-    manifest = build_manifest(p)
-    json.dumps(manifest.as_dict())  # must not raise
-
-
-# ---------------------------------------------------------------------------
-# emit_manifest
-# ---------------------------------------------------------------------------
-
-
-def test_emit_manifest_writes_file(tmp_path: Path) -> None:
-    p = _contract_prompt(tmp_path)
-    out = tmp_path / "reports" / "evidence.json"
-    manifest = emit_manifest(p, output_path=out)
-    assert out.is_file()
-    data = json.loads(out.read_text(encoding="utf-8"))
-    assert data["schema"] == SCHEMA
-
-
-def test_emit_manifest_no_output_returns_manifest(tmp_path: Path) -> None:
-    p = _contract_prompt(tmp_path)
-    manifest = emit_manifest(p)
-    assert isinstance(manifest, EvidenceManifest)
-
-
-# ---------------------------------------------------------------------------
-# validate_manifest
-# ---------------------------------------------------------------------------
-
-
-def test_validate_manifest_valid(tmp_path: Path) -> None:
-    p = _contract_prompt(tmp_path)
-    out = tmp_path / "evidence.json"
-    emit_manifest(p, output_path=out)
-    val = validate_manifest(out)
-    assert val.valid
-    assert val.schema == SCHEMA
-    assert val.errors == []
-
-
-def test_validate_manifest_wrong_schema(tmp_path: Path) -> None:
-    bad = tmp_path / "bad.json"
-    bad.write_text(
-        json.dumps({
-            "schema": "wrong.schema.v1",
-            "generated_at": "now",
-            "prompt_path": "x",
-            "prompt_sha256": "abc",
-            "rule_count": 0,
-            "rules": [],
-        }),
-        encoding="utf-8",
+    manifest_path = write_evidence_manifest(
+        command="pdd generate",
+        prompt_file=prompt,
+        project_root=tmp_path,
     )
-    val = validate_manifest(bad)
-    assert not val.valid
-    assert any("schema mismatch" in e for e in val.errors)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    include_paths = {record["path"] for record in manifest["context"]["includes"]}
+    assert "docs/source.md" in include_paths
+    assert "fallback.md" not in include_paths
 
 
-def test_validate_manifest_missing_keys(tmp_path: Path) -> None:
-    bad = tmp_path / "missing.json"
-    bad.write_text(json.dumps({"schema": SCHEMA}), encoding="utf-8")
-    val = validate_manifest(bad)
-    assert not val.valid
-    assert len(val.errors) >= 1
+def test_self_closing_include_is_recorded(tmp_path: Path) -> None:
+    prompt = tmp_path / "prompts" / "self_close_python.prompt"
+    include = tmp_path / "context" / "note.prompt"
+    prompt.parent.mkdir()
+    include.parent.mkdir(parents=True)
+    include.write_text("note body\n", encoding="utf-8")
+    prompt.write_text('<include path="context/note.prompt" />\n', encoding="utf-8")
+
+    manifest_path = write_evidence_manifest(
+        command="pdd generate",
+        prompt_file=prompt,
+        project_root=tmp_path,
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    include_paths = {record["path"] for record in manifest["context"]["includes"]}
+    assert "context/note.prompt" in include_paths
 
 
-def test_validate_manifest_unreadable(tmp_path: Path) -> None:
-    val = validate_manifest(tmp_path / "nonexistent.json")
-    assert not val.valid
+def test_include_inside_code_fence_is_not_recorded(tmp_path: Path) -> None:
+    secret = tmp_path / "secrets" / "secret.prompt"
+    prompt = tmp_path / "prompts" / "fenced_python.prompt"
+    secret.parent.mkdir(parents=True)
+    prompt.parent.mkdir()
+    secret.write_text("secret\n", encoding="utf-8")
+    prompt.write_text("```xml\n<include>secret.prompt</include>\n```\n", encoding="utf-8")
+
+    manifest_path = write_evidence_manifest(
+        command="pdd generate",
+        prompt_file=prompt,
+        project_root=tmp_path,
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    include_paths = {record["path"] for record in manifest["context"]["includes"]}
+    assert "secret.prompt" not in include_paths
 
 
-# ---------------------------------------------------------------------------
-# CLI smoke tests
-# ---------------------------------------------------------------------------
+def test_validation_from_sync_maps_completed_operations() -> None:
+    """Sync evidence must reflect operations that actually ran."""
+    validation = validation_from_sync(
+        {
+            "overall_success": True,
+            "results_by_language": {
+                "python": {
+                    "success": True,
+                    "operations_completed": ["test", "crash", "verify"],
+                }
+            },
+        },
+        skip_tests=False,
+        skip_verify=False,
+    )
+    assert validation["unit_tests"] == "passed"
+    assert validation["verify"] == "passed"
+    assert validation["detect_stories"] == "not_applicable"
 
 
-def test_evidence_emit_cli_smoke(tmp_path: Path) -> None:
-    from click.testing import CliRunner
-    from pdd.commands.evidence import evidence_emit
-
-    p = _contract_prompt(tmp_path)
-    runner = CliRunner()
-    result = runner.invoke(evidence_emit, [str(p)])
-    assert result.exit_code == 0
-
-
-def test_evidence_emit_cli_json(tmp_path: Path) -> None:
-    from click.testing import CliRunner
-    from pdd.commands.evidence import evidence_emit
-
-    p = _contract_prompt(tmp_path)
-    runner = CliRunner()
-    result = runner.invoke(evidence_emit, ["--json", str(p)])
-    assert result.exit_code == 0
-    data = json.loads(result.output)
-    assert data["schema"] == SCHEMA
+def test_validation_from_sync_dry_run_stays_not_available() -> None:
+    validation = validation_from_sync(
+        {
+            "overall_success": True,
+            "results_by_language": {
+                "python": {"success": True, "operations_completed": ["verify"]},
+            },
+        },
+        skip_tests=False,
+        skip_verify=False,
+        dry_run=True,
+    )
+    assert validation["unit_tests"] == "not_available"
+    assert validation["verify"] == "not_available"
 
 
-def test_evidence_emit_cli_markdown(tmp_path: Path) -> None:
-    from click.testing import CliRunner
-    from pdd.commands.evidence import evidence_emit
+def test_dynamic_prompt_records_expansion_as_unavailable(tmp_path: Path) -> None:
+    """Check that dynamic prompts with non-deterministic tags are flagged correctly."""
+    prompt = tmp_path / "prompts" / "dynamic_python.prompt"
+    prompt.parent.mkdir()
+    prompt.write_text("<shell>date</shell>\n", encoding="utf-8")
 
-    p = _contract_prompt(tmp_path)
-    runner = CliRunner()
-    result = runner.invoke(evidence_emit, ["--markdown", str(p)])
-    assert result.exit_code == 0
-    assert "Evidence report" in result.output
+    manifest_path = write_evidence_manifest(
+        command="pdd generate",
+        prompt_file=prompt,
+        project_root=tmp_path,
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
-
-def test_evidence_validate_cli_valid(tmp_path: Path) -> None:
-    from click.testing import CliRunner
-    from pdd.commands.evidence import evidence_emit, evidence_validate
-
-    p = _contract_prompt(tmp_path)
-    out = tmp_path / "ev.json"
-    runner = CliRunner()
-    runner.invoke(evidence_emit, ["--output", str(out), str(p)])
-    result = runner.invoke(evidence_validate, [str(out)])
-    assert result.exit_code == 0
+    assert manifest["prompt"]["uses_nondeterministic_tags"] is True
+    assert manifest["prompt"]["expanded_sha256"] is None
 
 
-def test_evidence_validate_cli_invalid(tmp_path: Path) -> None:
-    from click.testing import CliRunner
-    from pdd.commands.evidence import evidence_validate
+def test_preprocessed_expanded_hash_matches_preprocess_helper(tmp_path: Path) -> None:
+    prompt = tmp_path / "prompts" / "hash_python.prompt"
+    include = tmp_path / "context" / "body.prompt"
+    prompt.parent.mkdir()
+    include.parent.mkdir(parents=True)
+    include.write_text("included\n", encoding="utf-8")
+    prompt_text = "prefix ```<context/body.prompt>``` suffix\n"
+    prompt.write_text(prompt_text, encoding="utf-8")
 
-    bad = tmp_path / "bad.json"
-    bad.write_text("{}", encoding="utf-8")
-    runner = CliRunner()
-    result = runner.invoke(evidence_validate, [str(bad)])
-    assert result.exit_code == 2
+    assert _preprocessed_expanded_sha256(
+        prompt_text, tmp_path
+    ) == _expected_preprocessed_hash(prompt_text, tmp_path)
+
+
+def test_resolve_generate_output_paths_uses_construct_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prompt = tmp_path / "prompts" / "widget_python.prompt"
+    prompt.parent.mkdir()
+    prompt.write_text("Generate widget.\n", encoding="utf-8")
+
+    def fake_construct_paths(**_kwargs):  # type: ignore[no-untyped-def]
+        return {}, {}, {"output": str(tmp_path / "pdd" / "widget.py")}, "python"
+
+    monkeypatch.setattr("pdd.construct_paths.construct_paths", fake_construct_paths)
+    from pdd.evidence_manifest import resolve_generate_output_paths
+
+    resolved = resolve_generate_output_paths(prompt, quiet=True)
+    assert resolved == [str(tmp_path / "pdd" / "widget.py")]

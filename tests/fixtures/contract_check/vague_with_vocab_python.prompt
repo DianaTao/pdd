@@ -5,7 +5,6 @@
 <vocabulary>
 - duplicate upload: an upload whose SHA-256 hash and tenant_id match a row in uploads with status="accepted"
 - graceful rejection: returns HTTP 409 with JSON {"code": "DUPLICATE", "detail": "..."}
-- gracefully: same observable behavior as graceful rejection (HTTP 409, no server error)
 - authorized user: a caller whose Bearer JWT contains the "upload" scope and is unexpired
 - valid response: HTTP 201 with JSON {"id": "<uuid4>", "size": <bytes>, "created_at": "<ISO-8601>"}
 - successful upload: an upload that returns a valid response within 2000 ms
@@ -13,7 +12,7 @@
 </vocabulary>
 
 <contract_rules>
-R1: The system MUST reject duplicate uploads gracefully.
+R1: The system MUST reject duplicate uploads with a graceful rejection.
 R2: The system MUST only accept uploads from authorized users.
 R3: The system MUST return a valid response on successful upload.
 R4: The system MUST NOT allow active sessions to exceed 10 uploads per day.
