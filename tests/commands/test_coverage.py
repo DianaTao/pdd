@@ -25,6 +25,14 @@ from pdd.commands.coverage import coverage_cmd
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "coverage_contracts"
 
 
+def _cli_runner() -> CliRunner:
+    """CliRunner compatible with older Click (<8.2) that lacks mix_stderr."""
+    try:
+        return CliRunner(mix_stderr=False)
+    except TypeError:
+        return CliRunner()
+
+
 def _write(tmp_path: Path, name: str, content: str) -> Path:
     p = tmp_path / name
     p.write_text(textwrap.dedent(content), encoding="utf-8")
@@ -66,7 +74,8 @@ class TestCoverageBasic:
         prompt = _write(tmp_path, "foo_python.prompt", REFUND_PROMPT)
         runner = CliRunner()
         result = runner.invoke(coverage_cmd, ["--contracts", str(prompt)])
-        assert "foo_python.prompt" in result.output
+        # Rich tables may wrap long paths across lines on narrow CI terminals.
+        assert "foo_python.prompt" in result.output.replace("\n", "")
 
     def test_output_contains_rule_ids(self, tmp_path):
         prompt = _write(tmp_path, "foo_python.prompt", REFUND_PROMPT)
@@ -227,7 +236,7 @@ class TestCoverageMissingFile:
         assert "error" in parsed
 
     def test_missing_file_error_message(self, tmp_path):
-        runner = CliRunner(mix_stderr=False)
+        runner = _cli_runner()
         result = runner.invoke(
             coverage_cmd, ["--contracts", str(tmp_path / "nonexistent.prompt")]
         )

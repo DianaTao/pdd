@@ -32,4 +32,5 @@ The system MUST handle provider failures gracefully.
 
 <vocabulary>
 - graceful failure: HTTP 502 with retry_after field
+- gracefully: same observable behavior as graceful failure (HTTP 502 with retry_after)
 </vocabulary>

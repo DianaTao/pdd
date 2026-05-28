@@ -7,6 +7,7 @@ You are a Python developer. Implement the file upload module.
 - authorized user: a caller whose Bearer JWT contains the "upload" scope and is unexpired
 - duplicate upload: an upload whose SHA-256 hash and tenant_id match a row in uploads with status="accepted"
 - graceful rejection: returns HTTP 409 with JSON {"code": "DUPLICATE", "detail": "..."}
+- gracefully: same observable behavior as graceful rejection (HTTP 409, no server error)
 - valid file: a file whose MIME type is in the allowlist and whose size is <= 50 MB
 - successful upload: an upload that receives HTTP 201 within 2000 ms
 </vocabulary>

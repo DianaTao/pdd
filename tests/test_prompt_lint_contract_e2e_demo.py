@@ -53,6 +53,11 @@ def _pdd_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _run_demo(*extra: str) -> subprocess.CompletedProcess[str]:
+    if not RUN_E2E.is_file():
+        pytest.skip(
+            f"Missing {RUN_E2E.relative_to(REPO_ROOT)}; "
+            "generate via the demo's `make generate` / `demo.sh` locally."
+        )
     return subprocess.run(
         [sys.executable, str(RUN_E2E), *extra],
         cwd=str(REPO_ROOT),
