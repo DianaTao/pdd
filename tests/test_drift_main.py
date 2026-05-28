@@ -4,6 +4,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+from click.testing import CliRunner
+
+from pdd import cli
 from pdd.drift_main import run_drift
 from pdd.evidence_store import sha256_file
 
@@ -85,3 +89,55 @@ def test_drift_json_payload(tmp_path: Path) -> None:
     assert payload["status"] == "stable"
     assert payload["runs"] == 2
     assert len(payload["snapshots"]) == 2
+
+
+def test_drift_cli_dry_run_multi_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``pdd drift <devunit> --dry-run --runs 3`` exits 0 when stable."""
+    _write_fixture(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(
+        cli.cli,
+        ["--quiet", "drift", "refund_payment", "--dry-run", "--runs", "3"],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0
+
+
+def test_drift_cli_from_evidence_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``pdd drift --from-evidence ... --json`` emits stable JSON payload."""
+    prompt, code = _write_fixture(tmp_path)
+    manifest = tmp_path / ".pdd" / "evidence" / "devunits" / "refund_payment.latest.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "prompt": {"path": str(prompt.relative_to(tmp_path))},
+                "outputs": [
+                    {"path": str(code.relative_to(tmp_path)), "sha256": sha256_file(code)}
+                ],
+                "validation": {"unit_tests": "pass"},
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(
+        cli.cli,
+        [
+            "--quiet",
+            "drift",
+            "refund_payment",
+            "--dry-run",
+            "--from-evidence",
+            str(manifest),
+            "--json",
+        ],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["status"] == "stable"
+    assert payload["devunit"] == "refund_payment"
