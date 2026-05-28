@@ -62,6 +62,11 @@ downloads/
 eggs/
 .eggs/
 lib/
+# E2E demo drivers (checked in for CI; not Python packaging libs)
+!examples/contract_commands_cost_tracker_e2e_demo/lib/
+!examples/contract_commands_cost_tracker_e2e_demo/lib/**
+!examples/prompt_lint_e2e_demo/lib/
+!examples/prompt_lint_e2e_demo/lib/run_e2e.py
 lib64/
 parts/
 sdist/
