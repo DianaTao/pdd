@@ -8,6 +8,7 @@ You are a Python developer. Implement the payment processing module.
 - valid payment method: a payment method whose type is one of ["card", "ach", "wallet"] and whose token is a non-empty string from the vault service
 - duplicate charge: a charge whose idempotency_key matches an existing charge in the charges table created within the last 24 hours by the same merchant
 - graceful rejection: returns HTTP 409 with JSON {"code": "DUPLICATE_CHARGE", "idempotency_key": "<key>", "original_charge_id": "<id>"}
+- gracefully: same observable behavior as graceful rejection (HTTP 409, no server error)
 - successful charge: a charge that reaches status="captured" and receives HTTP 201 within 3000 ms
 - suspicious transaction: a transaction whose risk_score from the fraud service exceeds 0.85
 - settled: a charge whose status field equals "settled" in the charges table and whose settled_at timestamp is populated
