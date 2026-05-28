@@ -40,6 +40,9 @@ from .operation_log import (
     save_fingerprint,
     save_run_report,
     clear_run_report,
+    get_log_path,
+    get_run_report_path,
+    get_fingerprint_path,
 )
 from .sync_determine_operation import (
     sync_determine_operation,
@@ -55,7 +58,13 @@ from .sync_determine_operation import (
     _safe_basename,
 )
 from .auto_deps_main import auto_deps_main
-from .code_generator_main import code_generator_main
+from .code_generator_main import (
+    code_generator_main,
+    PublicSurfaceRegressionError,
+    TestChurnError,
+    _verify_public_surface_regression,
+)
+from .agentic_sync_runner import build_test_churn_hard_failure_from_error
 from .context_generator_main import context_generator_main
 from .crash_main import crash_main
 from .fix_verification_main import fix_verification_main
@@ -76,6 +85,52 @@ def _truncate_text(text: str, limit_chars: int) -> str:
     if len(text) <= limit_chars:
         return text
     return text[:limit_chars] + f"\n... (truncated, {len(text)} total chars)"
+
+
+def _compose_sync_summary(
+    *,
+    success: bool,
+    operations_completed: List[str],
+    skipped_operations: List[str],
+    errors: List[str],
+    terminal_reason: Optional[str] = None,
+) -> str:
+    """Compose a truthful, scoped summary line for the sync result.
+
+    - No-op success: "No sync operations required; selected target is already synchronized."
+    - Success with work: "Completed: <ops>" (and "; skipped: <ops>" when applicable)
+    - Failure: "Step <first> failed: <reason>" using the first error.
+    When ``terminal_reason`` is provided for an accepted-as-complete decision
+    (e.g. coverage below target but tests skipped, or test_extend unsupported
+    for the target language), it is appended so the user understands WHY the
+    run was accepted instead of seeing only "no operations required". #1103.
+    The selected-target scoping comes from the caller (sync_main renders this per language).
+    """
+    if not success:
+        first_err = next((e for e in errors if e), "")
+        if first_err:
+            return f"Sync failed: {first_err}"
+        return "Sync failed."
+
+    completed = [op for op in (operations_completed or []) if op]
+    skipped = [op for op in (skipped_operations or []) if op]
+    reason = (terminal_reason or "").strip()
+
+    if not completed and not skipped:
+        base = "No sync operations required; selected target is already synchronized."
+        if reason:
+            return f"{base} Accepted as complete: {reason}"
+        return base
+
+    parts: List[str] = []
+    if completed:
+        parts.append(f"Completed: {', '.join(completed)}")
+    if skipped:
+        parts.append(f"skipped: {', '.join(skipped)}")
+    summary = "; ".join(parts)
+    if reason:
+        summary = f"{summary}; accepted as complete: {reason}"
+    return summary
 
 
 def _run_fix_operation_test_subprocess(*args: Any, **kwargs: Any) -> Any:
@@ -125,6 +180,255 @@ def _extract_model_from_result(operation: str, result: tuple) -> str:
     if len(result) > idx and isinstance(result[idx], str):
         return result[idx]
     return 'unknown'
+
+
+def _fold_test_churn_cost_into_result(
+    result: Any,
+    *,
+    accumulated_cost: float,
+    accumulated_model: str,
+) -> Any:
+    """Return ``result`` with prior failed-attempt cost/model folded in.
+
+    The test op's return type is ``TestResult`` (a ``NamedTuple``) in
+    production, but legacy paths and tests may return a ``dict`` (with
+    ``cost``/``model`` keys) or a generic tuple where ``cost`` is at
+    index 1 and ``model`` at index 2 (matches ``_extract_cost_from_result``
+    /``_extract_model_from_result`` for the test op).
+
+    When the successful retry's model is absent/empty, fall back to the
+    accumulated model from the last failed attempt so the run report
+    still attributes the spend correctly. Shapes the helper doesn't
+    recognize are returned unchanged — the bug is most acute for the
+    canonical ``TestResult`` shape and we keep behavior conservative
+    for anything exotic.
+    """
+    # TestResult is a NamedTuple — use ``_replace`` to keep all other
+    # fields (content/agentic_success/error_message) intact.
+    if hasattr(result, "_replace") and hasattr(result, "_fields"):
+        fields = getattr(result, "_fields", ())
+        updates: Dict[str, Any] = {}
+        if "cost" in fields:
+            updates["cost"] = float(getattr(result, "cost", 0.0) or 0.0) + accumulated_cost
+        if "model" in fields:
+            current_model = getattr(result, "model", "") or ""
+            updates["model"] = current_model or accumulated_model or "unknown"
+        if updates:
+            return result._replace(**updates)
+        return result
+    if isinstance(result, dict):
+        folded = dict(result)
+        folded["cost"] = float(folded.get("cost", 0.0) or 0.0) + accumulated_cost
+        current_model = folded.get("model", "") or ""
+        folded["model"] = current_model or accumulated_model or "unknown"
+        return folded
+    if isinstance(result, tuple) and len(result) >= 3:
+        cost_idx = 1
+        model_idx = 2
+        existing_cost = result[cost_idx] if isinstance(result[cost_idx], (int, float)) and not isinstance(result[cost_idx], bool) else 0.0
+        existing_model = result[model_idx] if isinstance(result[model_idx], str) else ""
+        new_cost = float(existing_cost or 0.0) + accumulated_cost
+        new_model = existing_model or accumulated_model or "unknown"
+        return result[:cost_idx] + (new_cost, new_model) + result[model_idx + 1:]
+    return result
+
+
+def _run_test_op_with_churn_retry(
+    call: Callable[[Optional[str]], Any],
+    *,
+    basename: str,
+    budget_remaining: float,
+) -> Any:
+    """Run a `cmd_test_main` call inside a bounded `TestChurnError` repair loop.
+
+    The test-op uses the same `PDD_REPAIR_DIRECTIVE` plumbing as the
+    generate-op architecture-conformance / public-surface loop (#866, #1012),
+    but caps retries at one extra attempt: churn rewrites rarely converge,
+    and the directive forces an additive-only edit on the retry.
+
+    The ``call`` callable accepts an ``Optional[str]`` repair_directive
+    argument: attempt 1 receives ``None`` (no in-loop failure yet);
+    attempt 2 receives the prior ``TestChurnError.repair_directive``.
+    Callers are expected to forward this to ``cmd_test_main(..., repair_directive=...)``
+    so the directive flows into the test-generation prompt via the
+    explicit kwarg rather than ``os.environ`` (#1012, F-G / F-H).
+
+    Behavior:
+    - On each ``TestChurnError`` accumulate ``exc.total_cost`` / ``exc.model_name``
+      onto the exception (so callers can charge for failed attempts).
+    - Track the repair directive in a loop-local variable
+      ``pending_repair_directive`` (source of truth for the next
+      attempt's ``call`` argument). Also write
+      ``os.environ["PDD_REPAIR_DIRECTIVE"]`` so nested PDD CLI
+      subprocesses spawned by agentic test generation inherit it via
+      the env (load-bearing for ``code_generator_main``'s own repair
+      loop in the child process); but this loop ITSELF does not read
+      the env to drive the call.
+    - Skip the retry if the remaining budget is already exhausted by the
+      failed attempt's accumulated cost.
+    - On exhaustion, emit the structured ``=== test churn threshold exceeded ===``
+      block to stderr and re-raise the last exception.
+    - On a successful retry, fold any prior failed-attempt cost (and the
+      last failed-attempt model when the success response leaves the
+      model blank) into the returned ``TestResult`` so the sync budget
+      charges the operator for every attempt.
+    - Always restore ``PDD_REPAIR_DIRECTIVE`` to its prior value in a
+      ``finally`` block.
+    - **Stale outer env protection** (#1012, F-G): pop
+      ``PDD_REPAIR_DIRECTIVE`` from the env BEFORE attempt 1 so a stale
+      outer value (set by the caller's shell, a parent orchestration
+      layer, or a prior PDD command) cannot leak through env inheritance
+      into nested subprocesses during attempt 1. The prior value is
+      restored in ``finally``.
+
+    The previous behavior (only the generic ``except`` printed the hard
+    block) is preserved on exhaustion, so this function is the single
+    source-of-truth for emitting the diagnostic — the per-operation
+    ``except`` no longer prints it for the test op.
+    """
+    from .agentic_sync_runner import MAX_CONFORMANCE_ATTEMPTS
+
+    prev_repair = os.environ.get("PDD_REPAIR_DIRECTIVE")
+    # Pop the env var BEFORE attempt 1 so any nested PDD CLI subprocess
+    # spawned by agentic test generation during the first attempt sees a
+    # CLEAN env. Only failures raised inside THIS loop populate the
+    # directive for subsequent attempts.
+    os.environ.pop("PDD_REPAIR_DIRECTIVE", None)
+    # Loop-local source of truth for the next attempt's call argument.
+    pending_repair_directive: Optional[str] = None
+    try:
+        last_exc: Optional[TestChurnError] = None
+        last_signature: Optional[tuple] = None
+        accumulated_cost = 0.0
+        accumulated_model = ""
+        for attempt in range(MAX_CONFORMANCE_ATTEMPTS):
+            try:
+                result = call(pending_repair_directive)
+                # Fold prior failed-attempt cost/model into the successful
+                # retry's result so the caller charges all attempts against
+                # the sync budget. Mirrors the generate-op repair loop's
+                # post-success rewrap (see #1015 Codex review) and the
+                # `one_session_sync` accumulation.
+                if accumulated_cost > 0:
+                    result = _fold_test_churn_cost_into_result(
+                        result,
+                        accumulated_cost=accumulated_cost,
+                        accumulated_model=accumulated_model,
+                    )
+                return result
+            except TestChurnError as exc:
+                attempt_cost = float(getattr(exc, "total_cost", 0.0) or 0.0)
+                accumulated_cost += attempt_cost
+                exc.total_cost = accumulated_cost
+                exc_model = getattr(exc, "model_name", "") or ""
+                if exc_model and exc_model != "unknown":
+                    accumulated_model = exc_model
+                    exc.model_name = accumulated_model
+                signature = (
+                    f"{exc.churn_ratio:.2f}",
+                    str(exc.pre_line_count),
+                )
+                # Stop early if the retry produced the identical churn
+                # signature (no progress is being made).
+                if last_signature is not None and signature == last_signature:
+                    last_exc = exc
+                    break
+                last_signature = signature
+                last_exc = exc
+                if attempt + 1 >= MAX_CONFORMANCE_ATTEMPTS:
+                    break
+                # Test-churn retries are unlikely to converge — cap at one
+                # extra attempt (mirrors the generate-op test-churn branch).
+                if attempt >= 1:
+                    break
+                if accumulated_cost >= max(budget_remaining, 0.0):
+                    break
+                # Record the directive for the next attempt's `call`
+                # argument (loop-local source of truth) AND set the env
+                # var so any re-entrant PDD CLI subprocess spawned by
+                # agentic test generation inherits it.
+                pending_repair_directive = exc.repair_directive
+                os.environ["PDD_REPAIR_DIRECTIVE"] = exc.repair_directive
+        if last_exc is not None:
+            hard_block = build_test_churn_hard_failure_from_error(last_exc, basename)
+            print(hard_block, file=sys.stderr)
+            raise last_exc
+        # Unreachable: the loop either returns or sets last_exc.
+        return None
+    finally:
+        if prev_repair is None:
+            os.environ.pop("PDD_REPAIR_DIRECTIVE", None)
+        else:
+            os.environ["PDD_REPAIR_DIRECTIVE"] = prev_repair
+
+
+def _verify_code_surface_after_write(
+    *,
+    code_path: Path,
+    pre_code: str,
+    basename: str,
+    language: str,
+    prompt_path: Path,
+    operation: str,
+) -> Optional[PublicSurfaceRegressionError]:
+    """Verify the public surface of ``code_path`` against ``pre_code`` (#1012, P2.A).
+
+    Called AFTER a non-generate operation (``crash_main`` /
+    ``fix_verification_main`` / ``fix_main``) writes the code file
+    directly. The generate-op repair loop only protects
+    ``code_generator_main``; without this gate, downstream operations
+    can silently regress the public surface that the generate gate
+    accepted. Returns the ``PublicSurfaceRegressionError`` instance on
+    detection (so the caller can emit the structured hard-failure
+    block and record an appropriate error), or ``None`` when the
+    surface is preserved.
+
+    **Contract: crash/fix/verify surface failures are HARD failures.**
+    On detection this helper restores ``pre_code`` to disk and returns
+    the typed error WITHOUT triggering any retry. The
+    ``PDD_REPAIR_DIRECTIVE`` repair loop is intentionally NOT applied
+    here — it only governs the ``generate`` and ``one-session`` paths.
+    Each crash/fix/verify operation already has its own internal
+    iterative fix loop (``loop=True``, ``max_attempts=N``); wrapping
+    them in an outer surface-repair retry would compound retries
+    (``N × M``) and burn budget while rarely converging. The caller
+    surfaces the structured hard-failure block plus a clear
+    "operation failed" exit, and the user fixes the regression
+    (either by adjusting the prompt or adding a
+    ``BREAKING-CHANGE: remove <symbol>`` opt-out) before re-running.
+
+    The contract is mirrored in ``README.md`` so docs and behavior
+    cannot drift; do not introduce a retry here without updating both.
+    """
+    try:
+        post_code = code_path.read_text(encoding="utf-8")
+    except OSError:
+        post_code = ""
+    prompt_content = ""
+    try:
+        if prompt_path.exists():
+            prompt_content = prompt_path.read_text(encoding="utf-8")
+    except OSError:
+        prompt_content = ""
+    try:
+        _verify_public_surface_regression(
+            existing_code=pre_code,
+            generated_code=post_code,
+            prompt_name=f"{basename}_{language}.prompt",
+            output_path=str(code_path),
+            language=language,
+            prompt_content=prompt_content,
+        )
+    except PublicSurfaceRegressionError as surface_err:
+        # Restore the pre-operation code file so the regression does
+        # not persist on disk. The caller decides what to surface
+        # (error string + hard-failure block).
+        try:
+            code_path.write_text(pre_code, encoding="utf-8")
+        except OSError:
+            pass
+        return surface_err
+    return None
 
 
 def _use_agentic_path(language: str, agentic_mode: bool) -> bool:
@@ -336,7 +640,8 @@ def _build_auto_deps_rollback(prompt_path: Path, temp_output: Path) -> Operation
 # --- State Management Wrappers ---
 
 def _save_run_report_atomic(report: Dict[str, Any], basename: str, language: str,
-                    atomic_state: Optional['AtomicStateUpdate'] = None):
+                    atomic_state: Optional['AtomicStateUpdate'] = None,
+                    paths: Optional[Dict[str, Path]] = None):
     """Save a run report to the metadata directory, supporting atomic updates.
 
     Args:
@@ -344,14 +649,17 @@ def _save_run_report_atomic(report: Dict[str, Any], basename: str, language: str
         basename: The module basename.
         language: The programming language.
         atomic_state: Optional AtomicStateUpdate for atomic writes (Issue #159 fix).
+        paths: Optional path hints (Issue #1211) routing the file under the
+            subproject's .pdd/meta when run CWD lives above the subproject.
     """
     if atomic_state:
-        # Buffer for atomic write
-        report_file = META_DIR / f"{_safe_basename(basename)}_{language.lower()}_run.json"
+        # Buffer for atomic write — resolve via the same project-root-aware
+        # helper as the direct path so atomic writes don't bypass #1211.
+        report_file = get_run_report_path(basename, language, paths=paths)
         atomic_state.set_run_report(report, report_file)
     else:
         # Direct write using operation_log
-        save_run_report(basename, language, report)
+        save_run_report(basename, language, report, paths=paths)
 
 def _save_fingerprint_atomic(basename: str, language: str, operation: str,
                                paths: Dict[str, Path], cost: float, model: str,
@@ -381,7 +689,7 @@ def _save_fingerprint_atomic(basename: str, language: str, operation: str,
         if include_deps_override is not None:
             stored_deps = include_deps_override
         else:
-            prev_fp = read_fingerprint(basename, language)
+            prev_fp = read_fingerprint(basename, language, paths=paths)
             stored_deps = prev_fp.include_deps if prev_fp else None
         current_hashes = calculate_current_hashes(paths, stored_include_deps=stored_deps)
         # If override provided and current extraction found nothing, use the override
@@ -399,7 +707,10 @@ def _save_fingerprint_atomic(basename: str, language: str, operation: str,
             include_deps=current_hashes.get('include_deps'),  # Issue #522
         )
 
-        fingerprint_file = META_DIR / f"{_safe_basename(basename)}_{language.lower()}.json"
+        # Issue #1211: route the atomic fingerprint file through the
+        # paths-aware helper so subprojects whose .pddrc is below run CWD
+        # get the file under <subproject>/.pdd/meta, not parent CWD.
+        fingerprint_file = get_fingerprint_path(basename, language, paths=paths)
         atomic_state.set_fingerprint(asdict(fingerprint), fingerprint_file)
     else:
         # Direct write using operation_log
@@ -1334,7 +1645,10 @@ def _create_synthetic_run_report_for_agentic_success(
 
     # Save the report
     # NOTE: Must use _run.json (not _run_report.json) to match read_run_report() in sync_determine_operation.py
-    report_file = META_DIR / f"{_safe_basename(basename)}_{language.lower()}_run.json"
+    # Issue #1211: route via paths-aware helper so subproject meta dir is used.
+    report_file = get_run_report_path(
+        basename, language, paths={"test": test_file}
+    )
     if atomic_state:
         atomic_state.set_run_report(asdict(report), report_file)
     else:
@@ -1513,7 +1827,10 @@ def _execute_tests_and_create_run_report(
                     test_hash=test_hash,
                     test_files=test_file_hashes,  # Bug #156
                 )
-                _save_run_report_atomic(asdict(report), basename, language, atomic_state)
+                _save_run_report_atomic(
+                    asdict(report), basename, language, atomic_state,
+                    paths={"test": test_file},
+                )
                 return report
 
             effective_cwd = str(test_cmd.cwd) if test_cmd.cwd is not None else str(test_file.parent)
@@ -1556,7 +1873,9 @@ def _execute_tests_and_create_run_report(
             test_files=test_file_hashes,  # Bug #156
         )
 
-    _save_run_report_atomic(asdict(report), basename, language, atomic_state)
+    _save_run_report_atomic(
+        asdict(report), basename, language, atomic_state, paths={"test": test_file}
+    )
     return report
 
 def _create_mock_context(**kwargs) -> click.Context:
@@ -1566,14 +1885,23 @@ def _create_mock_context(**kwargs) -> click.Context:
     return ctx
 
 
-def _display_sync_log(basename: str, language: str, verbose: bool = False) -> Dict[str, Any]:
-    """Displays the sync log for a given basename and language."""
-    log_file = META_DIR / f"{_safe_basename(basename)}_{language.lower()}_sync.log"
+def _display_sync_log(
+    basename: str,
+    language: str,
+    verbose: bool = False,
+    paths: Optional[Dict[str, Path]] = None,
+) -> Dict[str, Any]:
+    """Displays the sync log for a given basename and language.
+
+    `paths` (Issue #1211) routes the log file lookup through the
+    subproject's .pdd/meta when invoked from a parent CWD.
+    """
+    log_file = get_log_path(basename, language, paths=paths)
     if not log_file.exists():
         print(f"No sync log found for '{basename}' in language '{language}'.")
         return {'success': False, 'errors': ['Log file not found.'], 'log_entries': []}
 
-    log_entries = load_operation_log(basename, language)
+    log_entries = load_operation_log(basename, language, paths=paths)
     print(f"--- Sync Log for {basename} ({language}) ---")
 
     if not log_entries:
@@ -1686,6 +2014,19 @@ def sync_orchestration(
     from .sync_determine_operation import get_extension
     
     if dry_run:
+        # Issue #1211: best-effort path lookup so the log file resolves
+        # under the subproject's .pdd/meta even from a parent CWD.
+        # Only pass `paths` if discovery succeeded, to keep the
+        # positional-arg shape unchanged for callers/tests that don't
+        # care about the path hint.
+        try:
+            _dry_paths = get_pdd_file_paths(
+                basename, language, prompts_dir, context_override=context_override
+            )
+        except Exception:
+            _dry_paths = None
+        if _dry_paths:
+            return _display_sync_log(basename, language, verbose, paths=_dry_paths)
         return _display_sync_log(basename, language, verbose)
 
     # --- Initialize State and Paths ---
@@ -1716,6 +2057,7 @@ def sync_orchestration(
             return {
                 "success": False,
                 "error": f"Failed to construct paths: {str(e)}",
+                "summary": f"Failed to construct paths: {str(e)}",
                 "operations_completed": [],
                 "errors": [f"Path construction failed: {str(e)}"]
             }
@@ -1804,6 +2146,7 @@ def sync_orchestration(
         last_model_name: str = "unknown"
         operation_history: List[str] = []
         operation_rollback: Optional[OperationFileRollback] = None
+        terminal_reason: Optional[str] = None
         MAX_CYCLE_REPEATS = 2
         try:
             log_event(
@@ -1812,6 +2155,7 @@ def sync_orchestration(
                 "sync_start",
                 {"pid": os.getpid()},
                 invocation_mode="sync",
+                paths=pdd_files,
             )
         except Exception:
             # Best-effort logging; sync should proceed even if log setup fails.
@@ -1822,7 +2166,7 @@ def sync_orchestration(
         
         try:
             with SyncLock(basename, language):
-                log_event(basename, language, "lock_acquired", {"pid": os.getpid()}, invocation_mode="sync")
+                log_event(basename, language, "lock_acquired", {"pid": os.getpid()}, invocation_mode="sync", paths=pdd_files)
                 
                 while True:
                     budget_remaining = budget - current_cost_ref[0]
@@ -1831,14 +2175,14 @@ def sync_orchestration(
                         log_event(basename, language, "budget_exceeded", {
                             "total_cost": current_cost_ref[0], 
                             "budget": budget
-                        }, invocation_mode="sync")
+                        }, invocation_mode="sync", paths=pdd_files)
                         break
 
                     if budget_remaining < budget * 0.2 and budget_remaining > 0:
                         log_event(basename, language, "budget_warning", {
                             "remaining": budget_remaining,
                             "percentage": (budget_remaining / budget) * 100
-                        }, invocation_mode="sync")
+                        }, invocation_mode="sync", paths=pdd_files)
 
                     decision = sync_determine_operation(
                         basename,
@@ -1869,7 +2213,7 @@ def sync_orchestration(
                         )
                     if should_abort:
                         errors.append("User aborted sync via steering.")
-                        log_event(basename, language, "steering_abort", {"recommended": operation}, invocation_mode="sync")
+                        log_event(basename, language, "steering_abort", {"recommended": operation}, invocation_mode="sync", paths=pdd_files)
                         break
 
                     if steered_op != operation:
@@ -1879,6 +2223,7 @@ def sync_orchestration(
                             "steering_override",
                             {"recommended": operation, "chosen": steered_op, "reason": decision.reason},
                             invocation_mode="sync",
+                            paths=pdd_files,
                         )
                         operation = steered_op
                         # Keep decision.operation aligned with the chosen path for downstream logging.
@@ -1903,7 +2248,7 @@ def sync_orchestration(
                         recent_auto_deps = [op for op in operation_history[-3:] if op == 'auto-deps']
                         if len(recent_auto_deps) >= 2:
                             errors.append("Detected auto-deps infinite loop. Force advancing to generate operation.")
-                            log_event(basename, language, "cycle_detected", {"cycle_type": "auto-deps-infinite"}, invocation_mode="sync")
+                            log_event(basename, language, "cycle_detected", {"cycle_type": "auto-deps-infinite"}, invocation_mode="sync", paths=pdd_files)
                             operation = 'generate'
                             decision.operation = 'generate' # Update decision too
 
@@ -1911,7 +2256,7 @@ def sync_orchestration(
                     if operation == 'auto-deps' and agentic_mode:
                         log_event(basename, language, "auto_deps_skipped", {
                             "reason": "auto-deps skipped in agentic mode — prompts have explicit dependencies"
-                        }, invocation_mode="sync")
+                        }, invocation_mode="sync", paths=pdd_files)
                         operation = 'generate'
                         decision.operation = 'generate'
 
@@ -1924,7 +2269,7 @@ def sync_orchestration(
                             recent_ops == ['verify', 'crash', 'verify', 'crash']):
                             # Pattern detected - this represents MAX_CYCLE_REPEATS iterations
                             errors.append(f"Detected crash-verify cycle repeated {MAX_CYCLE_REPEATS} times. Breaking cycle.")
-                            log_event(basename, language, "cycle_detected", {"cycle_type": "crash-verify", "count": MAX_CYCLE_REPEATS}, invocation_mode="sync")
+                            log_event(basename, language, "cycle_detected", {"cycle_type": "crash-verify", "count": MAX_CYCLE_REPEATS}, invocation_mode="sync", paths=pdd_files)
                             break
 
                     # Bug #4 fix: Detect test-fix cycle pattern
@@ -1936,7 +2281,7 @@ def sync_orchestration(
                             recent_ops == ['fix', 'test', 'fix', 'test']):
                             # Pattern detected - this represents MAX_CYCLE_REPEATS iterations
                             errors.append(f"Detected test-fix cycle repeated {MAX_CYCLE_REPEATS} times. Breaking cycle.")
-                            log_event(basename, language, "cycle_detected", {"cycle_type": "test-fix", "count": MAX_CYCLE_REPEATS}, invocation_mode="sync")
+                            log_event(basename, language, "cycle_detected", {"cycle_type": "test-fix", "count": MAX_CYCLE_REPEATS}, invocation_mode="sync", paths=pdd_files)
                             break
                                 
                     if operation == 'fix':
@@ -2024,13 +2369,13 @@ def sync_orchestration(
                         if language.lower() != 'python':
                             # Bug #573: Check coverage before accepting — don't declare success
                             # if coverage is below target (e.g. 0.0 from sys.modules stubs)
-                            current_rr = read_run_report(basename, language)
+                            current_rr = read_run_report(basename, language, paths=pdd_files)
                             coverage_ok = current_rr is not None and current_rr.coverage >= target_coverage
                             log_event(basename, language, "test_extend_skipped", {
                                 "reason": f"test_extend not supported for {language} (or agentic_mode), {'accepting' if coverage_ok else 'rejecting'} current state",
                                 "coverage": current_rr.coverage if current_rr else None,
                                 "coverage_ok": coverage_ok
-                            }, invocation_mode="sync")
+                            }, invocation_mode="sync", paths=pdd_files)
                             if not coverage_ok:
                                 current_cov = current_rr.coverage if current_rr else 0.0
                                 errors.append(f"Coverage {current_cov:.1f}% below target {target_coverage:.1f}% after test_extend skip (agentic mode)")
@@ -2042,7 +2387,7 @@ def sync_orchestration(
                         if extend_attempts >= MAX_TEST_EXTEND_ATTEMPTS:
                             # Bug #573: Check coverage before accepting — don't declare success
                             # if coverage is below target after exhausting retries
-                            current_rr = read_run_report(basename, language)
+                            current_rr = read_run_report(basename, language, paths=pdd_files)
                             coverage_ok = current_rr is not None and current_rr.coverage >= target_coverage
                             log_event(basename, language, "test_extend_limit", {
                                 "attempts": extend_attempts,
@@ -2050,7 +2395,7 @@ def sync_orchestration(
                                 "reason": "Max extend attempts reached",
                                 "coverage": current_rr.coverage if current_rr else None,
                                 "coverage_ok": coverage_ok
-                            }, invocation_mode="sync")
+                            }, invocation_mode="sync", paths=pdd_files)
                             if not coverage_ok:
                                 current_cov = current_rr.coverage if current_rr else 0.0
                                 errors.append(f"Coverage {current_cov:.1f}% below target {target_coverage:.1f}% after {extend_attempts} test_extend attempts")
@@ -2062,6 +2407,14 @@ def sync_orchestration(
                         # Emit phase marker for parent process to parse (agentic sync progress tracking)
                         print(f"PDD_PHASE: {current_function_name_ref[0]}", flush=True)
                         success = operation in ['all_synced', 'nothing']
+                        # Preserve the decision reason for terminal success states so the
+                        # final summary can surface accepted-as-complete details
+                        # (e.g. coverage skipped, test_extend not supported, unparseable
+                        # coverage). Without this the summary collapses to a generic
+                        # "no operations required" message and the user never sees why
+                        # we accepted the run as complete (#1103).
+                        if operation == 'all_synced' and decision.reason:
+                            terminal_reason = decision.reason
                         error_msg = None
                         if operation == 'fail_and_request_manual_merge':
                             msg = f"Manual merge required: {decision.reason}"
@@ -2101,7 +2454,7 @@ def sync_orchestration(
                             error_msg = decision.reason
                         
                         update_log_entry(log_entry, success=success, cost=0.0, model='none', duration=0.0, error=error_msg)
-                        append_log_entry(basename, language, log_entry)
+                        append_log_entry(basename, language, log_entry, paths=pdd_files)
                         break
                     
                     # Handle skips - save fingerprint with 'skip:' prefix to distinguish from actual execution
@@ -2110,7 +2463,7 @@ def sync_orchestration(
                         skipped_operations.append('verify')
                         print(f"PDD_PHASE: skip:{operation}", flush=True)
                         update_log_entry(log_entry, success=True, cost=0.0, model='skipped', duration=0.0, error=None)
-                        append_log_entry(basename, language, log_entry)
+                        append_log_entry(basename, language, log_entry, paths=pdd_files)
                         # Save fingerprint with 'skip:' prefix to indicate operation was skipped, not executed
                         _save_fingerprint_atomic(basename, language, 'skip:verify', pdd_files, 0.0, 'skipped')
                         continue
@@ -2118,7 +2471,7 @@ def sync_orchestration(
                         skipped_operations.append('test')
                         print(f"PDD_PHASE: skip:{operation}", flush=True)
                         update_log_entry(log_entry, success=True, cost=0.0, model='skipped', duration=0.0, error=None)
-                        append_log_entry(basename, language, log_entry)
+                        append_log_entry(basename, language, log_entry, paths=pdd_files)
                         # Save fingerprint with 'skip:' prefix to indicate operation was skipped, not executed
                         _save_fingerprint_atomic(basename, language, 'skip:test', pdd_files, 0.0, 'skipped')
                         continue
@@ -2126,7 +2479,7 @@ def sync_orchestration(
                         skipped_operations.append('crash')
                         print(f"PDD_PHASE: skip:{operation}", flush=True)
                         update_log_entry(log_entry, success=True, cost=0.0, model='skipped', duration=0.0, error=None)
-                        append_log_entry(basename, language, log_entry)
+                        append_log_entry(basename, language, log_entry, paths=pdd_files)
                         # Save fingerprint with 'skip:' prefix to indicate operation was skipped, not executed
                         _save_fingerprint_atomic(basename, language, 'skip:crash', pdd_files, 0.0, 'skipped')
                         # FIX: Create a synthetic run_report to prevent infinite loop when crash is skipped
@@ -2140,7 +2493,7 @@ def sync_orchestration(
                             coverage=0.0,
                             test_hash=current_hashes.get('test_hash')
                         )
-                        _save_run_report_atomic(asdict(synthetic_report), basename, language)
+                        _save_run_report_atomic(asdict(synthetic_report), basename, language, paths=pdd_files)
                         continue
 
                     current_function_name_ref[0] = operation
@@ -2209,7 +2562,7 @@ def sync_orchestration(
                                         # content just changed. Mirrors the
                                         # clear after generate (line 2272).
                                         try:
-                                            clear_run_report(basename, language)
+                                            clear_run_report(basename, language, paths=pdd_files)
                                         except Exception:
                                             # Never mask a successful auto-deps
                                             # result on metadata cleanup errors.
@@ -2226,15 +2579,38 @@ def sync_orchestration(
                                 # sees the missing-export instruction. Mirrors the loop in
                                 # sync_main.py / agentic_sync_runner.py for parity across all
                                 # `pdd sync` entry points.
-                                from .code_generator_main import ArchitectureConformanceError
+                                from .code_generator_main import (
+                                    ArchitectureConformanceError,
+                                    PublicSurfaceRegressionError,
+                                )
                                 from .agentic_sync_runner import (
                                     MAX_CONFORMANCE_ATTEMPTS,
                                     build_conformance_hard_failure_from_error,
+                                    build_public_surface_hard_failure_from_error,
                                 )
                                 _prev_repair = os.environ.get("PDD_REPAIR_DIRECTIVE")
+                                # Pop the env var BEFORE attempt 1 (#1012,
+                                # F-J) so `code_generator_main` reads a
+                                # CLEAN env on the first try. Without
+                                # this, a stale outer `PDD_REPAIR_DIRECTIVE`
+                                # (set by the caller's shell, a parent
+                                # orchestration layer, or a prior PDD
+                                # command) would be injected into the
+                                # first generation attempt's prompt via
+                                # the `<architecture_repair_directive>`
+                                # block read at code_generator_main.py:1990.
+                                # Only failures raised inside THIS loop
+                                # populate the directive for subsequent
+                                # attempts. The `finally` block below
+                                # restores the prior outer value when
+                                # the loop exits. Mirrors the parallel
+                                # pop in `_run_test_op_with_churn_retry`
+                                # (F-G) and `one_session_sync` (F-I).
+                                os.environ.pop("PDD_REPAIR_DIRECTIVE", None)
                                 try:
-                                    last_conform_exc: Optional[ArchitectureConformanceError] = None
-                                    last_conform_missing: Optional[tuple] = None
+                                    last_conform_exc: Optional[Any] = None
+                                    last_conform_signature: Optional[tuple] = None
+                                    last_conform_kind: Optional[str] = None
                                     conformance_failed_cost = 0.0
                                     conformance_failed_model = ""
                                     for _conform_attempt in range(MAX_CONFORMANCE_ATTEMPTS):
@@ -2243,20 +2619,59 @@ def sync_orchestration(
                                             result = code_generator_main(ctx, prompt_file=str(pdd_files['prompt'].resolve()), output=str(pdd_files['code'].resolve()), original_prompt_file_path=None, force_incremental_flag=False, output_from_config=True)
                                             last_conform_exc = None
                                             break
-                                        except ArchitectureConformanceError as _conform_exc:
+                                        except (
+                                            ArchitectureConformanceError,
+                                            PublicSurfaceRegressionError,
+                                            TestChurnError,
+                                        ) as _conform_exc:
                                             attempt_cost = float(getattr(_conform_exc, "total_cost", 0.0) or 0.0)
                                             conformance_failed_cost += attempt_cost
                                             _conform_exc.total_cost = conformance_failed_cost
                                             exc_model = getattr(_conform_exc, "model_name", "") or ""
                                             if exc_model and exc_model != "unknown":
                                                 conformance_failed_model = exc_model
-                                            new_missing = tuple(sorted(set(_conform_exc.missing_symbols)))
-                                            if last_conform_missing is not None and new_missing == last_conform_missing:
+                                            if isinstance(_conform_exc, PublicSurfaceRegressionError):
+                                                new_kind = "public_surface"
+                                                new_signature = tuple(
+                                                    [
+                                                        f"removed:{symbol}"
+                                                        for symbol in sorted(set(_conform_exc.removed_symbols))
+                                                    ]
+                                                    + [
+                                                        f"signature_changed:{symbol}"
+                                                        for symbol in sorted(
+                                                            set(
+                                                                getattr(
+                                                                    _conform_exc,
+                                                                    "changed_signatures",
+                                                                    [],
+                                                                )
+                                                            )
+                                                        )
+                                                    ]
+                                                )
+                                            elif isinstance(_conform_exc, TestChurnError):
+                                                new_kind = "test_churn"
+                                                new_signature = (
+                                                    f"{_conform_exc.churn_ratio:.2f}",
+                                                    str(_conform_exc.pre_line_count),
+                                                )
+                                            else:
+                                                new_kind = "architecture"
+                                                new_signature = tuple(sorted(set(_conform_exc.missing_symbols)))
+                                            if (
+                                                last_conform_signature is not None
+                                                and new_signature == last_conform_signature
+                                                and new_kind == last_conform_kind
+                                            ):
                                                 last_conform_exc = _conform_exc
                                                 break
-                                            last_conform_missing = new_missing
+                                            last_conform_signature = new_signature
+                                            last_conform_kind = new_kind
                                             last_conform_exc = _conform_exc
                                             if _conform_attempt + 1 >= MAX_CONFORMANCE_ATTEMPTS:
+                                                break
+                                            if isinstance(_conform_exc, TestChurnError) and _conform_attempt >= 1:
                                                 break
                                             if conformance_failed_cost >= max(budget - current_cost_ref[0], 0.0):
                                                 break
@@ -2269,9 +2684,18 @@ def sync_orchestration(
                                         # converts the exception into an errors.append
                                         # entry, but the structured block has already
                                         # been written to stderr for the user.
-                                        hard_block = build_conformance_hard_failure_from_error(
-                                            last_conform_exc, basename
-                                        )
+                                        if isinstance(last_conform_exc, PublicSurfaceRegressionError):
+                                            hard_block = build_public_surface_hard_failure_from_error(
+                                                last_conform_exc, basename
+                                            )
+                                        elif isinstance(last_conform_exc, TestChurnError):
+                                            hard_block = build_test_churn_hard_failure_from_error(
+                                                last_conform_exc, basename
+                                            )
+                                        else:
+                                            hard_block = build_conformance_hard_failure_from_error(
+                                                last_conform_exc, basename
+                                            )
                                         print(hard_block, file=sys.stderr)
                                         raise last_conform_exc
                                     if conformance_failed_cost and isinstance(result, tuple) and len(result) >= 4:
@@ -2287,7 +2711,7 @@ def sync_orchestration(
                                     else:
                                         os.environ["PDD_REPAIR_DIRECTIVE"] = _prev_repair
                                 # Clear stale run_report so crash/verify is required for newly generated code
-                                clear_run_report(basename, language)
+                                clear_run_report(basename, language, paths=pdd_files)
                                 # Issue #572: Validate Python imports after generation in agentic mode
                                 if agentic_mode and language.lower() == 'python' and pdd_files['code'].exists():
                                     unresolved = _validate_python_imports(
@@ -2302,7 +2726,7 @@ def sync_orchestration(
                                         log_event(basename, language, "import_validation_failed", {
                                             "unresolved_imports": unresolved,
                                             "code_file": str(pdd_files['code']),
-                                        }, invocation_mode="sync")
+                                        }, invocation_mode="sync", paths=pdd_files)
                                 # Issue #624: Validate TypeScript/JavaScript imports after generation in agentic mode
                                 if agentic_mode and language.lower() in ('typescript', 'javascript', 'typescriptreact', 'javascriptreact') and pdd_files['code'].exists():
                                     unresolved = _validate_typescript_imports(
@@ -2318,7 +2742,7 @@ def sync_orchestration(
                                         log_event(basename, language, "import_validation_failed", {
                                             "unresolved_imports": unresolved,
                                             "code_file": str(pdd_files['code']),
-                                        }, invocation_mode="sync")
+                                        }, invocation_mode="sync", paths=pdd_files)
                             elif operation == 'example':
                                 # Ensure example directory exists before generating
                                 pdd_files['example'].parent.mkdir(parents=True, exist_ok=True)
@@ -2332,7 +2756,7 @@ def sync_orchestration(
                                     continue
                             
                                 # Crash handling logic (simplified copy from original)
-                                current_run_report = read_run_report(basename, language)
+                                current_run_report = read_run_report(basename, language, paths=pdd_files)
                                 crash_log_content = ""
                             
                                 # Check for crash condition (either run report says so, or we check manually)
@@ -2401,7 +2825,7 @@ def sync_orchestration(
                                                 coverage=0.0,
                                                 test_hash=test_hash
                                             )
-                                            _save_run_report_atomic(asdict(report), basename, language, atomic_state=atomic_state)
+                                            _save_run_report_atomic(asdict(report), basename, language, atomic_state=atomic_state, paths=pdd_files)
                                         skipped_operations.append('crash')
                                         continue
                                     
@@ -2419,7 +2843,7 @@ def sync_orchestration(
                                             pdd_files['example']
                                         )
                                     if auto_fixed:
-                                        log_event(basename, language, "auto_fix_attempted", {"message": auto_fix_msg}, invocation_mode="sync")
+                                        log_event(basename, language, "auto_fix_attempted", {"message": auto_fix_msg}, invocation_mode="sync", paths=pdd_files)
                                         # Retry running the example after auto-fix
                                         retry_returncode, retry_stdout, retry_stderr = _run_example_with_error_detection(
                                             cmd_parts,
@@ -2428,7 +2852,7 @@ def sync_orchestration(
                                         )
                                         if retry_returncode == 0:
                                             # Auto-fix worked! Save run report and continue
-                                            log_event(basename, language, "auto_fix_success", {"message": auto_fix_msg}, invocation_mode="sync")
+                                            log_event(basename, language, "auto_fix_success", {"message": auto_fix_msg}, invocation_mode="sync", paths=pdd_files)
                                             if language.lower() == 'python' and pdd_files['test'].exists():
                                                 _execute_tests_and_create_run_report(
                                                     pdd_files['test'], basename, language, target_coverage,
@@ -2442,7 +2866,7 @@ def sync_orchestration(
                                                     exit_code=0, tests_passed=1, tests_failed=0, coverage=0.0,
                                                     test_hash=test_hash
                                                 )
-                                                _save_run_report_atomic(asdict(report), basename, language, atomic_state=atomic_state)
+                                                _save_run_report_atomic(asdict(report), basename, language, atomic_state=atomic_state, paths=pdd_files)
                                             result = (True, 0.0, 'auto-fix')
                                             success = True
                                             actual_cost = 0.0
@@ -2458,6 +2882,14 @@ def sync_orchestration(
                                             crash_log_content = f"Auto-fix attempted ({auto_fix_msg}) but still failing:\nRETRY STDOUT:\n{retry_stdout}\nRETRY STDERR:\n{retry_stderr}\n"
 
                                     Path("crash.log").write_text(crash_log_content)
+                                    # Snapshot pre-operation code so the
+                                    # public-surface gate (#1012, P2.A)
+                                    # can verify crash_main's rewrite
+                                    # did not regress public symbols.
+                                    try:
+                                        _crash_pre_code = pdd_files['code'].read_text(encoding="utf-8")
+                                    except OSError:
+                                        _crash_pre_code = ""
                                     try:
                                         # For non-Python languages (or agentic mode), set max_attempts=0 to skip iterative loop
                                         # and go directly to agentic fallback
@@ -2467,6 +2899,56 @@ def sync_orchestration(
                                         print(f"Crash fix failed: {e}")
                                         skipped_operations.append('crash')
                                         continue
+                                    # Post-operation public-surface gate
+                                    # (#1012, P2.A). crash_main writes
+                                    # the code file directly; without
+                                    # this check it could silently
+                                    # regress the surface that the
+                                    # generate gate accepted.
+                                    _crash_surface_exc = _verify_code_surface_after_write(
+                                        code_path=pdd_files['code'],
+                                        pre_code=_crash_pre_code,
+                                        basename=basename,
+                                        language=language,
+                                        prompt_path=pdd_files['prompt'],
+                                        operation='crash',
+                                    )
+                                    if _crash_surface_exc is not None:
+                                        from .agentic_sync_runner import (
+                                            build_public_surface_hard_failure_from_error,
+                                        )
+                                        hard_block = build_public_surface_hard_failure_from_error(
+                                            _crash_surface_exc, basename
+                                        )
+                                        print(hard_block, file=sys.stderr)
+                                        # Charge the failed helper's cost
+                                        # against the budget (#1012, P3.A)
+                                        # — without this, expensive
+                                        # crash_main spend that produced
+                                        # a regressing rewrite goes
+                                        # un-billed.
+                                        if isinstance(result, tuple):
+                                            current_cost_ref[0] += _extract_cost_from_result(
+                                                'crash', result
+                                            )
+                                        errors.append(
+                                            f"crash operation regressed public surface — refusing to continue. "
+                                            f"Add a `BREAKING-CHANGE:` directive to the prompt to opt out, "
+                                            f"or fix the prompt/code to preserve the public symbols. "
+                                            f"Details: {_crash_surface_exc}"
+                                        )
+                                        skipped_operations.append('crash')
+                                        # Terminate the operation loop
+                                        # (#1012, P3.A): a surface
+                                        # regression is a contract
+                                        # violation, not a transient
+                                        # failure. `continue` would let
+                                        # `sync_determine_operation`
+                                        # re-select the same op next
+                                        # iteration and spin
+                                        # indefinitely on deterministic
+                                        # bad output.
+                                        break
 
                             elif operation == 'verify':
                                 if not pdd_files['example'].exists():
@@ -2475,13 +2957,72 @@ def sync_orchestration(
                                 # For non-Python languages (or agentic mode), set max_attempts=0 to skip iterative loop
                                 # and go directly to agentic fallback
                                 effective_max_attempts = 0 if _use_agentic_path(language, agentic_mode) else max_attempts
+                                # Snapshot pre-operation code so the
+                                # public-surface gate (#1012, P2.A) can
+                                # verify the verify-op's rewrite did
+                                # not regress public symbols.
+                                try:
+                                    _verify_pre_code = pdd_files['code'].read_text(encoding="utf-8")
+                                except OSError:
+                                    _verify_pre_code = ""
                                 result = fix_verification_main(ctx, prompt_file=str(pdd_files['prompt']), code_file=str(pdd_files['code']), program_file=str(pdd_files['example']), output_results=f"{basename.replace('/', '_')}_verify_results.log", output_code=str(pdd_files['code']), output_program=str(pdd_files['example']), loop=True, verification_program=str(pdd_files['example']), max_attempts=effective_max_attempts, budget=budget - current_cost_ref[0], strength=strength, temperature=temperature)
+                                _verify_surface_exc = _verify_code_surface_after_write(
+                                    code_path=pdd_files['code'],
+                                    pre_code=_verify_pre_code,
+                                    basename=basename,
+                                    language=language,
+                                    prompt_path=pdd_files['prompt'],
+                                    operation='verify',
+                                )
+                                if _verify_surface_exc is not None:
+                                    from .agentic_sync_runner import (
+                                        build_public_surface_hard_failure_from_error,
+                                    )
+                                    hard_block = build_public_surface_hard_failure_from_error(
+                                        _verify_surface_exc, basename
+                                    )
+                                    print(hard_block, file=sys.stderr)
+                                    # Charge the failed helper's cost
+                                    # (#1012, P3.A).
+                                    if isinstance(result, tuple):
+                                        current_cost_ref[0] += _extract_cost_from_result(
+                                            'verify', result
+                                        )
+                                    errors.append(
+                                        f"verify operation regressed public surface — refusing to continue. "
+                                        f"Add a `BREAKING-CHANGE:` directive to the prompt to opt out, "
+                                        f"or fix the prompt/code to preserve the public symbols. "
+                                        f"Details: {_verify_surface_exc}"
+                                    )
+                                    skipped_operations.append('verify')
+                                    # Terminate the operation loop
+                                    # (#1012, P3.A): a surface
+                                    # regression is a contract
+                                    # violation. The verify op has no
+                                    # consecutive-operation guard, so
+                                    # `continue` would let
+                                    # `sync_determine_operation`
+                                    # re-select it and spin
+                                    # indefinitely on deterministic
+                                    # bad output.
+                                    break
                             elif operation == 'test':
                                 pdd_files['test'].parent.mkdir(parents=True, exist_ok=True)
                                 # Use merge=True when test file exists to preserve fixes and append new tests
                                 # instead of regenerating from scratch (which would overwrite fixes)
                                 test_file_exists = pdd_files['test'].exists()
-                                result = cmd_test_main(ctx, prompt_file=str(pdd_files['prompt']), code_file=str(pdd_files['code']), output=str(pdd_files['test']), language=language, coverage_report=None, existing_tests=[str(pdd_files['test'])] if test_file_exists else None, target_coverage=target_coverage, merge=test_file_exists, strength=strength, temperature=temperature)
+                                # Wrap `cmd_test_main` in the test-churn repair loop so
+                                # `TestChurnError` thrown by `_verify_test_churn` round-trips
+                                # through `PDD_REPAIR_DIRECTIVE` (mirrors the generate-op loop;
+                                # #1012). The helper restores the previous env value on exit
+                                # and prints the hard-failure block on exhaustion before
+                                # re-raising — keep the generic `except` below clear of any
+                                # duplicate print.
+                                result = _run_test_op_with_churn_retry(
+                                    lambda _repair_directive: cmd_test_main(ctx, prompt_file=str(pdd_files['prompt']), code_file=str(pdd_files['code']), output=str(pdd_files['test']), language=language, coverage_report=None, existing_tests=[str(pdd_files['test'])] if test_file_exists else None, target_coverage=target_coverage, merge=test_file_exists, strength=strength, temperature=temperature, repair_directive=_repair_directive),
+                                    basename=basename,
+                                    budget_remaining=budget - current_cost_ref[0],
+                                )
 
                                 # Always run real tests to get accurate pass/fail counts.
                                 # sync_determine_operation needs real tests_failed to recommend 'fix'.
@@ -2501,18 +3042,26 @@ def sync_orchestration(
                                 pdd_files['test'].parent.mkdir(parents=True, exist_ok=True)
                                 if pdd_files['test'].exists():
                                     existing_test_path = str(pdd_files['test'])
-                                    result = cmd_test_main(
-                                        ctx,
-                                        prompt_file=str(pdd_files['prompt']),
-                                        code_file=str(pdd_files['code']),
-                                        output=str(pdd_files['test']),
-                                        language=language,
-                                        coverage_report=None,
-                                        existing_tests=[existing_test_path],
-                                        target_coverage=target_coverage,
-                                        merge=True,
-                                        strength=strength,
-                                        temperature=temperature
+                                    # Same test-churn repair loop as the plain `test`
+                                    # op so coverage-extension regenerations also get
+                                    # one bounded retry under `PDD_REPAIR_DIRECTIVE`.
+                                    result = _run_test_op_with_churn_retry(
+                                        lambda _repair_directive: cmd_test_main(
+                                            ctx,
+                                            prompt_file=str(pdd_files['prompt']),
+                                            code_file=str(pdd_files['code']),
+                                            output=str(pdd_files['test']),
+                                            language=language,
+                                            coverage_report=None,
+                                            existing_tests=[existing_test_path],
+                                            target_coverage=target_coverage,
+                                            merge=True,
+                                            strength=strength,
+                                            temperature=temperature,
+                                            repair_directive=_repair_directive,
+                                        ),
+                                        basename=basename,
+                                        budget_remaining=budget - current_cost_ref[0],
                                     )
 
                                     # Always run real tests for accurate pass/fail counts.
@@ -2526,8 +3075,16 @@ def sync_orchestration(
                                         test_files=pdd_files.get('test_files'),  # Bug #156
                                     )
                                 else:
-                                    # No existing test file, fall back to regular test generation
-                                    result = cmd_test_main(ctx, prompt_file=str(pdd_files['prompt']), code_file=str(pdd_files['code']), output=str(pdd_files['test']), language=language, coverage_report=None, existing_tests=None, target_coverage=target_coverage, merge=False, strength=strength, temperature=temperature)
+                                    # No existing test file, fall back to regular test generation.
+                                    # Pre-existing file is empty so the churn gate would not
+                                    # trip (`_compute_test_churn_ratio` returns 0 for an empty
+                                    # pre), but wrap in the same helper for symmetry and so the
+                                    # `PDD_REPAIR_DIRECTIVE` env var is still cleaned up.
+                                    result = _run_test_op_with_churn_retry(
+                                        lambda _repair_directive: cmd_test_main(ctx, prompt_file=str(pdd_files['prompt']), code_file=str(pdd_files['code']), output=str(pdd_files['test']), language=language, coverage_report=None, existing_tests=None, target_coverage=target_coverage, merge=False, strength=strength, temperature=temperature, repair_directive=_repair_directive),
+                                        basename=basename,
+                                        budget_remaining=budget - current_cost_ref[0],
+                                    )
 
                                     # Always run real tests for accurate pass/fail counts.
                                     if pdd_files['test'].exists():
@@ -2661,7 +3218,50 @@ def sync_orchestration(
                                 # fix_error_loop runs them together. This detects test isolation
                                 # failures that only manifest when multiple test files interact.
                                 test_files_for_fix = [str(f) for f in pdd_files.get('test_files', [pdd_files['test']])]
+                                # Snapshot pre-operation code so the
+                                # public-surface gate (#1012, P2.A) can
+                                # verify fix_main's rewrite did not
+                                # regress public symbols.
+                                try:
+                                    _fix_pre_code = pdd_files['code'].read_text(encoding="utf-8")
+                                except OSError:
+                                    _fix_pre_code = ""
                                 result = fix_main(ctx, prompt_file=str(pdd_files['prompt']), code_file=str(pdd_files['code']), unit_test_file=unit_test_file_for_fix, error_file=str(error_file_path), output_test=output_test_for_fix, output_code=str(pdd_files['code']), output_results=f"{basename.replace('/', '_')}_fix_results.log", loop=True, verification_program=str(pdd_files['example']), max_attempts=effective_max_attempts, budget=budget - current_cost_ref[0], auto_submit=(not local), strength=strength, temperature=temperature, test_files=test_files_for_fix)
+                                _fix_surface_exc = _verify_code_surface_after_write(
+                                    code_path=pdd_files['code'],
+                                    pre_code=_fix_pre_code,
+                                    basename=basename,
+                                    language=language,
+                                    prompt_path=pdd_files['prompt'],
+                                    operation='fix',
+                                )
+                                if _fix_surface_exc is not None:
+                                    from .agentic_sync_runner import (
+                                        build_public_surface_hard_failure_from_error,
+                                    )
+                                    hard_block = build_public_surface_hard_failure_from_error(
+                                        _fix_surface_exc, basename
+                                    )
+                                    print(hard_block, file=sys.stderr)
+                                    # Charge the failed helper's cost
+                                    # (#1012, P3.A).
+                                    if isinstance(result, tuple):
+                                        current_cost_ref[0] += _extract_cost_from_result(
+                                            'fix', result
+                                        )
+                                    errors.append(
+                                        f"fix operation regressed public surface — refusing to continue. "
+                                        f"Add a `BREAKING-CHANGE:` directive to the prompt to opt out, "
+                                        f"or fix the prompt/code to preserve the public symbols. "
+                                        f"Details: {_fix_surface_exc}"
+                                    )
+                                    skipped_operations.append('fix')
+                                    # Terminate the operation loop
+                                    # (#1012, P3.A): surface regression
+                                    # is a contract violation; let the
+                                    # sync exit cleanly rather than
+                                    # spin.
+                                    break
                             elif operation == 'update':
                                 result = update_main(ctx, input_prompt_file=str(pdd_files['prompt']), modified_code_file=str(pdd_files['code']), input_code_file=None, output=str(pdd_files['prompt']), use_git=True, strength=strength, temperature=temperature)
                             else:
@@ -2707,6 +3307,12 @@ def sync_orchestration(
                         except Exception as e:
                             if operation_rollback is not None:
                                 operation_rollback.restore()
+                            # NOTE: TestChurnError no longer prints the structured
+                            # hard-failure block here. Both the generate-op repair
+                            # loop and `_run_test_op_with_churn_retry` already emit
+                            # `=== test churn threshold exceeded ===` before
+                            # re-raising, so printing it again would duplicate the
+                            # diagnostic in stderr.
                             error_msg = str(e) if str(e) else type(e).__name__
                             errors.append(f"Exception during '{operation}': {error_msg}")
                             exc_cost = float(getattr(e, "total_cost", 0.0) or 0.0)
@@ -2746,7 +3352,7 @@ def sync_orchestration(
                             pair = pop_last_pair(operation)
                             if pair:
                                 log_entry.setdefault("details", {})["llm_trace"] = pair
-                        append_log_entry(basename, language, log_entry)
+                        append_log_entry(basename, language, log_entry, paths=pdd_files)
 
                         # Post-operation checks (simplified)
                         if success and operation == 'crash':
@@ -2763,7 +3369,7 @@ def sync_orchestration(
                                     coverage=0.0,
                                     test_hash=test_hash
                                 )
-                                _save_run_report_atomic(asdict(report), basename, language, atomic_state=atomic_state)
+                                _save_run_report_atomic(asdict(report), basename, language, atomic_state=atomic_state, paths=pdd_files)
                             else:
                                 # Re-run example to verify crash fix worked (Python only)
                                 try:
@@ -2788,12 +3394,12 @@ def sync_orchestration(
                                      # Include test_hash for staleness detection
                                      test_hash = calculate_sha256(pdd_files['test']) if pdd_files['test'].exists() else None
                                      report = RunReport(datetime.datetime.now(datetime.timezone.utc).isoformat(), returncode, 1 if returncode==0 else 0, 0 if returncode==0 else 1, 100.0 if returncode==0 else 0.0, test_hash=test_hash)
-                                     _save_run_report_atomic(asdict(report), basename, language, atomic_state=atomic_state)
+                                     _save_run_report_atomic(asdict(report), basename, language, atomic_state=atomic_state, paths=pdd_files)
                                 except Exception as e:
                                      # Bug #8 fix: Don't silently swallow exceptions - log them and mark as error
                                      error_msg = f"Post-crash verification failed: {e}"
                                      errors.append(error_msg)
-                                     log_event(basename, language, "post_crash_verification_failed", {"error": str(e)}, invocation_mode="sync")
+                                     log_event(basename, language, "post_crash_verification_failed", {"error": str(e)}, invocation_mode="sync", paths=pdd_files)
                     
                         if success and operation == 'verify':
                             if _use_agentic_path(language, agentic_mode) and language.lower() != 'python':
@@ -2806,7 +3412,7 @@ def sync_orchestration(
                                     coverage=0.0,
                                     test_hash=test_hash
                                 )
-                                _save_run_report_atomic(asdict(report), basename, language, atomic_state=atomic_state)
+                                _save_run_report_atomic(asdict(report), basename, language, atomic_state=atomic_state, paths=pdd_files)
 
                         if success and operation == 'fix':
                             # Re-run tests to update run_report after successful fix
@@ -2824,7 +3430,7 @@ def sync_orchestration(
                                     coverage=0.0,
                                     test_hash=test_hash
                                 )
-                                _save_run_report_atomic(asdict(report), basename, language, atomic_state=atomic_state)
+                                _save_run_report_atomic(asdict(report), basename, language, atomic_state=atomic_state, paths=pdd_files)
                             elif pdd_files['test'].exists():
                                 _execute_tests_and_create_run_report(
                                     pdd_files['test'],
@@ -2866,7 +3472,7 @@ def sync_orchestration(
             traceback.print_exc()
         finally:
             try:
-                log_event(basename, language, "lock_released", {"pid": os.getpid(), "total_cost": current_cost_ref[0]}, invocation_mode="sync")
+                log_event(basename, language, "lock_released", {"pid": os.getpid(), "total_cost": current_cost_ref[0]}, invocation_mode="sync", paths=pdd_files)
             except: pass
             
         # Return result dict
@@ -2893,7 +3499,14 @@ def sync_orchestration(
             'total_time': time.time() - start_time,
             'final_state': {p: {'exists': f.exists(), 'path': str(f)} for p, f in pdd_files.items() if p != 'test_files'},
             'errors': errors,
-            'error': "; ".join(errors) if errors else None,  # Add this line
+            'error': "; ".join(errors) if errors else None,
+            'summary': _compose_sync_summary(
+                success=not errors,
+                operations_completed=operations_completed,
+                skipped_operations=skipped_operations,
+                errors=errors,
+                terminal_reason=terminal_reason,
+            ),
             'model_name': last_model_name,
         }
 
@@ -2960,10 +3573,11 @@ def sync_orchestration(
             "total_cost": current_cost_ref[0],
             "model_name": "",
             "error": "Sync process interrupted or returned no result.",
+            "summary": "Sync interrupted: app exited without result.",
             "operations_completed": [],
             "errors": ["App exited without result"]
         }
-    
+
     return result
 
 if __name__ == '__main__':

@@ -264,7 +264,7 @@ class TestStoryLinkPrompt:
 
     def test_no_metadata_not_linked(self):
         text = "## Covers\n- R1: rule"
-        assert not _story_links_prompt(text, "foo_python.prompt")
+        assert _story_links_prompt(text, "foo_python.prompt")
 
     def test_path_variant_matches(self):
         text = "<!-- pdd-story-prompts: prompts/foo_python.prompt -->"
@@ -478,20 +478,83 @@ class TestScanTestFileDirectly:
     def test_docstring_covers_tag(self):
         source = 'def test_foo():\n    """R7: validates boundary."""\n    pass\n'
         evidence: dict = {}
-        _scan_test_file(source, evidence)
+        _scan_test_file(source, evidence, prompt_name="", require_prompt_qualified=False)
         assert "R7" in evidence
 
     def test_covers_comment_style(self):
         source = "def test_bar():  # covers R8\n    pass\n"
         evidence: dict = {}
-        _scan_test_file(source, evidence)
+        _scan_test_file(source, evidence, prompt_name="", require_prompt_qualified=False)
         assert "R8" in evidence
 
     def test_rule_comment_style(self):
         source = "def test_baz():  # rule R9\n    pass\n"
         evidence: dict = {}
-        _scan_test_file(source, evidence)
+        _scan_test_file(source, evidence, prompt_name="", require_prompt_qualified=False)
         assert "R9" in evidence
+
+
+def test_metadata_less_story_counts_as_linked(tmp_path: Path) -> None:
+    """Stories without pdd-story-prompts apply to the prompt set (existing flow)."""
+    prompt = _make_prompt(
+        tmp_path,
+        """\
+        <contract_rules>
+        R1 - Foo
+        The system MUST do foo.
+        </contract_rules>
+        """,
+        name="foo_python.prompt",
+    )
+    stories = tmp_path / "user_stories"
+    stories.mkdir()
+    _make_story(
+        stories,
+        """\
+        ## Covers
+        - R1: foo rule
+
+        ## Acceptance Criteria
+        - It works.
+        """,
+        name="story__no_meta.md",
+    )
+    result = build_coverage(prompt, stories_dir=stories, tests_dir=tmp_path / "none")
+    assert result.has_contract_rules is True
+    assert result.rules[0].rule_id == "R1"
+    assert "story__no_meta.md" in result.rules[0].stories
+
+
+def test_directory_mode_requires_prompt_qualified_test_refs(tmp_path: Path) -> None:
+    """Avoid false positives when multiple prompts share the same rule IDs."""
+    prompts = tmp_path / "prompts"
+    prompts.mkdir()
+    foo = _make_prompt(
+        prompts,
+        "<contract_rules>\nR1 - Foo\nThe system MUST foo.\n</contract_rules>\n",
+        name="foo_python.prompt",
+    )
+    _make_prompt(
+        prompts,
+        "<contract_rules>\nR1 - Bar\nThe system MUST bar.\n</contract_rules>\n",
+        name="bar_python.prompt",
+    )
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    _make_test_file(
+        tests_dir,
+        """\
+        def test_only_foo():
+            \"\"\"foo_python.prompt#R1: covers foo rule\"\"\"
+            assert True
+        """,
+        name="test_foo.py",
+    )
+
+    results = build_coverage_directory(prompts, stories_dir=tmp_path / "none", tests_dir=tests_dir)
+    by_name = {r.path.name: r for r in results}
+    assert by_name[foo.name].rules[0].status == STATUS_TEST_ONLY
+    assert by_name["bar_python.prompt"].rules[0].status == STATUS_UNCHECKED
 
 
 # ===========================================================================
@@ -780,6 +843,40 @@ class TestBuildCoverage:
         assert "rules" in d
         assert "summary" in d
         assert "error" in d
+        assert "read_errors" in d
+        assert d["read_errors"] == []
+
+    def test_read_errors_surface_when_story_unreadable(self, tmp_path, monkeypatch):
+        prompt = _make_prompt(tmp_path, """\
+            <contract_rules>
+            R1 - Rule
+            The system MUST do X.
+            </contract_rules>
+        """)
+        stories_dir = tmp_path / "stories"
+        stories_dir.mkdir()
+        story = stories_dir / "story__linked.md"
+        story.write_text(
+            "<!-- pdd-story-prompts: "
+            + prompt.name
+            + " -->\n## Covers\n- R1: covers rule\n",
+            encoding="utf-8",
+        )
+        original_read_text = Path.read_text
+
+        def _read_text(self, *args, **kwargs):
+            if self.name == "story__linked.md":
+                raise OSError("permission denied")
+            return original_read_text(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", _read_text)
+        result = build_coverage(
+            prompt,
+            stories_dir=stories_dir,
+            tests_dir=tmp_path / "none",
+        )
+        assert result.read_errors
+        assert any("story__linked.md" in message for message in result.read_errors)
 
 
 class TestBuildCoverageDirectory:

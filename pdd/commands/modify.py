@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 from typing import Optional, Tuple, Any
@@ -15,9 +16,20 @@ from ..agentic_change import run_agentic_change
 from ..update_main import update_main
 from ..track_cost import track_cost
 from ..core.errors import handle_error
+from ..core.utils import echo_model_line
 from ..operation_log import log_operation
+from ..evidence_manifest import write_evidence_manifest
 
 console = Console()
+
+_GITHUB_ISSUE_RE = re.compile(
+    r"^(?:https?://)?(?:www\.)?github\.com/[^/]+/[^/]+/issues/\d+(?:[/?#].*)?$"
+)
+
+
+def _is_github_issue_url(value: str) -> bool:
+    """Return True when value is a GitHub issue URL."""
+    return bool(_GITHUB_ISSUE_RE.match(value.strip()))
 
 @click.command()
 @click.argument("args", nargs=-1)
@@ -149,7 +161,7 @@ def split(
                 click.echo(f"Status: {status}")
                 click.echo(f"Message: {message}")
                 click.echo(f"Cost: ${cost:.4f}")
-                click.echo(f"Model: {model}")
+                echo_model_line(model)
                 if changed_files:
                     click.echo("Changed files:")
                     for f in changed_files:
@@ -175,6 +187,23 @@ def split(
 @click.option("--csv", is_flag=True, help="Use CSV input for batch processing.")
 @click.option("--timeout-adder", type=float, default=0.0, help="Additional seconds to add to each step's timeout (agentic mode only).")
 @click.option("--no-github-state", is_flag=True, default=False, help="Disable GitHub state persistence (agentic mode only).")
+@click.option(
+    "--evidence",
+    is_flag=True,
+    default=False,
+    help="Write a machine-readable evidence manifest for this run.",
+)
+@click.option(
+    "--clean-restart",
+    is_flag=True,
+    default=False,
+    help=(
+        "Discard any persisted solving state for this issue and start a fresh "
+        "full pdd-issue flow from the default base branch, ignoring any "
+        "previously generated change/issue-N branch artifacts. Use when "
+        "recovering from a stopped or wrong-model run."
+    ),
+)
 @click.pass_context
 @track_cost
 def change(
@@ -186,6 +215,8 @@ def change(
     csv: bool,
     timeout_adder: float,
     no_github_state: bool,
+    evidence: bool,
+    clean_restart: bool,
 ) -> Optional[Tuple[Any, float, str]]:
     """
     Modify an input prompt file based on a change prompt or issue.
@@ -197,7 +228,12 @@ def change(
         pdd change --manual CHANGE_PROMPT_FILE INPUT_CODE_FILE [INPUT_PROMPT_FILE]
     """
     ctx.ensure_object(dict)
-    
+
+    if clean_restart and manual:
+        raise click.UsageError(
+            "--clean-restart is only valid in agentic mode and cannot be used with --manual"
+        )
+
     try:
         # Set budget in context for manual mode usage
         ctx.obj["budget"] = budget
@@ -255,15 +291,28 @@ def change(
                 use_csv=csv,
                 budget=budget
             )
+            if evidence:
+                write_evidence_manifest(
+                    command="pdd change",
+                    prompt_file=input_prompt,
+                    output_files=[output] if output else (),
+                    model=model,
+                    cost_usd=cost,
+                    temperature=ctx.obj.get("temperature", 0.0),
+                )
             return result, cost, model
 
         else:
             # Agentic Mode Validation and Execution
             if len(args) != 1:
                 raise click.UsageError("Agentic mode requires exactly 1 argument: ISSUE_URL")
-            
+
             issue_url = args[0]
-            
+            if clean_restart and not _is_github_issue_url(issue_url):
+                raise click.UsageError(
+                    "--clean-restart can only be used with an agentic GitHub issue URL."
+                )
+
             # Call run_agentic_change
             success, message, cost, model, changed_files = run_agentic_change(
                 issue_url=issue_url,
@@ -271,6 +320,7 @@ def change(
                 quiet=quiet,
                 timeout_adder=timeout_adder,
                 use_github_state=not no_github_state,
+                clean_restart=clean_restart,
                 reasoning_time=ctx.obj.get("time") if ctx.obj.get("time_explicit") else None,
             )
 
@@ -280,7 +330,7 @@ def change(
                 click.echo(f"Status: {status}")
                 click.echo(f"Message: {message}")
                 click.echo(f"Cost: ${cost:.4f}")
-                click.echo(f"Model: {model}")
+                echo_model_line(model)
                 if changed_files:
                     click.echo("Changed files:")
                     for f in changed_files:
@@ -289,6 +339,15 @@ def change(
             if not success:
                 raise click.exceptions.Exit(1)
 
+            if evidence:
+                write_evidence_manifest(
+                    command="pdd change",
+                    output_files=changed_files,
+                    model=model,
+                    cost_usd=cost,
+                    temperature=ctx.obj.get("temperature", 0.0),
+                    basename="agentic-change",
+                )
             return message, cost, model
 
     except (click.Abort, click.exceptions.Exit, click.UsageError):

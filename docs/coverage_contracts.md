@@ -1,8 +1,13 @@
-# `pdd coverage --contracts`
+# Contract coverage matrix (`pdd checkup coverage`)
 
-Build an inspectable rule-to-evidence matrix for `.prompt` files that define `<contract_rules>`.  
-No LLM required — pure static analysis. Uses the shared IR from
-[`pdd/contract_ir.py`](../pdd/contract_ir.py).
+Build an inspectable rule-to-evidence matrix for `.prompt` files that define `<contract_rules>`.
+No LLM required — pure static analysis.
+
+Coverage is exposed via checkup:
+
+```bash
+pdd checkup coverage prompts/refund_payment_python.prompt
+```
 
 ---
 
@@ -10,22 +15,22 @@ No LLM required — pure static analysis. Uses the shared IR from
 
 ```bash
 # Single file
-pdd coverage --contracts prompts/refund_payment_python.prompt
+pdd checkup coverage prompts/refund_payment_python.prompt
 
 # Directory (scans recursively, skips *_LLM.prompt)
-pdd coverage --contracts prompts/
+pdd checkup coverage prompts/
 
 # JSON output for CI
-pdd coverage --contracts --json prompts/
-
-# Fail when MUST/MUST NOT rules are unchecked or evidence failed
-pdd coverage --contracts --strict prompts/
+pdd checkup coverage --json prompts/
 
 # Custom story and test directories
-pdd coverage --contracts \
+pdd checkup coverage \
     --stories-dir user_stories \
     --tests-dir   tests \
     prompts/refund_payment_python.prompt
+
+# Alias: --stories
+pdd checkup coverage --stories user_stories prompts/
 ```
 
 Default directories:
@@ -36,7 +41,7 @@ Default directories:
 Runnable demo files live in `examples/coverage_contracts_demo/`:
 
 ```bash
-pdd coverage --contracts \
+pdd checkup coverage \
   --stories-dir examples/coverage_contracts_demo/user_stories \
   --tests-dir examples/coverage_contracts_demo/tests \
   examples/coverage_contracts_demo/prompts/refund_payment_python.prompt
@@ -101,7 +106,7 @@ R6: WAIVED W1
 
 ### 2. Story `## Covers` sections
 
-Story files (`story__*.md`) are scanned **recursively** in `--stories-dir`.  
+Story files (`story__*.md`) are scanned **recursively** in `--stories-dir` (alias `--stories`).
 A story is linked to a prompt if it contains:
 
 ```markdown
@@ -123,12 +128,21 @@ Cross-module format is also supported:
 - prompts/refund_payment_python.prompt#R3: description
 ```
 
-Stories without a `<!-- pdd-story-prompts: ... -->` comment are **not** linked to any prompt and are skipped.
+Stories **without** `<!-- pdd-story-prompts: ... -->` apply to the prompt set under evaluation (same convention as `pdd/user_story_tests.py`). Stories **with** metadata are scoped to the listed prompt filenames or paths.
 
 ### 3. Test file heuristic
 
-Test files (`test_*.py`) are scanned **recursively** in `--tests-dir` using a conservative heuristic.  
+Test files (`test_*.py`) are scanned **recursively** in `--tests-dir` using a conservative heuristic.
 Only `test*` functions that **explicitly reference a rule ID** are counted.
+
+**Single-prompt runs** accept unqualified references (for example `test_R1_rejects_zero`).
+
+**Directory runs** require **prompt-qualified** references so one shared `R1` on two prompts cannot mark both as covered from a single test. Use a docstring or signature line such as:
+
+```python
+def test_only_foo():
+    """refund_payment_python.prompt#R1: covers rule"""
+```
 
 **Recognised patterns (documented heuristic):**
 
@@ -139,7 +153,7 @@ Only `test*` functions that **explicitly reference a rule ID** are counted.
 | Inline comment | `def test_foo():  # covers R3` | `covers R<N>` or `rule R<N>` prefix |
 | Docstring first line | `"""R5: validates boundary."""` | First 120 chars of the docstring |
 
-Functions that do **not** start with `test` are ignored entirely.  
+Functions that do **not** start with `test` are ignored entirely.
 No semantic analysis of test logic is performed.
 
 Syntax validation is deterministic: if a `test_*.py` file cannot be parsed and it explicitly references `R<N>`, those rules are classified as `failed`.
@@ -173,11 +187,12 @@ Failed rules are gaps and make the command exit `1`, the same as `unchecked`, `s
 
 | Code | Meaning |
 |------|---------|
-| `0` | All rules are `checked` or `waived` |
-| `1` | At least one rule is `unchecked`, `story-only`, `test-only`, or `failed` |
-| `2` | Error (file not found, unreadable prompt) |
+| `0` | All rules are `checked` or `waived`; no scanner read errors |
+| `1` | Coverage gaps (`unchecked`, `story-only`, `test-only`, `failed`) and/or unreadable story/test files under the scan directories |
+| `2` | Fatal error (missing `TARGET`, unreadable prompt file) |
 
 Exit code `1` is intended for CI gating — teams can choose to enforce it or not.
+Prompt-level failures use exit `2` so coverage gaps on other files are not masked in directory runs.
 
 ---
 
@@ -194,11 +209,29 @@ Prompt: prompts/legacy_utility_python.prompt
 - No rules reported
 - No errors raised
 
-This means `pdd coverage --contracts` is safe to run against any repository, even those that pre-date the contract rules convention.
+This means `pdd checkup coverage` is safe to run against any repository, even those that pre-date the contract rules convention.
+
+---
+
+## Pull request scope and dependencies
+
+The coverage matrix (**#823**) is static analysis only; it does not call an LLM.
+
+| Piece | Role | Required for #823? |
+|-------|------|--------------------|
+| `pdd checkup coverage` | Coverage CLI and `pdd/coverage_contracts.py` | **Yes** |
+| `pdd contracts check` / `pdd checkup contract check` | Authoring lint for contract sections | **No** — optional companion |
+| `pdd checkup lint` | Prompt/user-story quality lint | **No** |
+| `pdd evidence` / `--evidence` manifests (#824) | Run audit receipts | **No** — separate feature |
+
+Some PRs stack contract check, lint, coverage, and evidence for one review pass. That is a release convenience, not a runtime dependency.
 
 ---
 
 ## JSON schema
+
+Coverage JSON is a single object envelope. **`pdd contracts check --json`** returns a
+top-level **array** of contract-check results instead (one object per prompt/story scan).
 
 ```json
 {
@@ -207,6 +240,7 @@ This means `pdd coverage --contracts` is safe to run against any repository, eve
       "path": "prompts/refund_payment_python.prompt",
       "has_contract_rules": true,
       "error": null,
+      "read_errors": [],
       "rules": [
         {
           "rule_id": "R1",
@@ -255,7 +289,8 @@ This means `pdd coverage --contracts` is safe to run against any repository, eve
 |-------|------|-------------|
 | `path` | `string` | Absolute or relative path to the prompt file |
 | `has_contract_rules` | `bool` | `false` for legacy prompts |
-| `error` | `string\|null` | Non-null if the file could not be read |
+| `error` | `string\|null` | Non-null if the prompt file could not be read (exit `2`) |
+| `read_errors` | `list[string]` | Story/test files that could not be read under `--stories` / `--tests-dir` (exit `1`) |
 | `rules` | `list[Rule]` | Coverage entry per rule |
 | `summary` | `object` | Per-status counts |
 

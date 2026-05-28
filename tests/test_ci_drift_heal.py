@@ -2409,6 +2409,141 @@ class TestRunPddCommandRollback:
 
 
 # ---------------------------------------------------------------------------
+# Heal subprocess timeout resolver tests
+# ---------------------------------------------------------------------------
+
+
+class TestHealSubprocessTimeoutResolver:
+    """Tests for the per-call timeout resolver and PDD_HEAL_SUBPROCESS_TIMEOUT env override."""
+
+    def test_default_is_2400(self):
+        """With no env override, the resolver returns the 2400 default."""
+        from pdd.ci_drift_heal import (
+            _heal_subprocess_timeout,
+            _HEAL_SUBPROCESS_TIMEOUT_DEFAULT,
+        )
+
+        assert _HEAL_SUBPROCESS_TIMEOUT_DEFAULT == 2400
+
+        env = {k: v for k, v in os.environ.items() if k != "PDD_HEAL_SUBPROCESS_TIMEOUT"}
+        with patch.dict(os.environ, env, clear=True):
+            assert _heal_subprocess_timeout() == 2400
+
+    def test_env_override_positive_integer(self):
+        """PDD_HEAL_SUBPROCESS_TIMEOUT=3000 → resolver returns 3000."""
+        from pdd.ci_drift_heal import _heal_subprocess_timeout
+
+        with patch.dict(os.environ, {"PDD_HEAL_SUBPROCESS_TIMEOUT": "3000"}, clear=False):
+            assert _heal_subprocess_timeout() == 3000
+
+    @pytest.mark.parametrize("bad_value", ["abc", "-1", "0", "", "  ", "1.5", "12.0"])
+    def test_invalid_env_falls_back_to_default(self, bad_value):
+        """Invalid values (non-int, non-positive, empty) fall back to 2400 default."""
+        from pdd.ci_drift_heal import _heal_subprocess_timeout
+
+        with patch.dict(os.environ, {"PDD_HEAL_SUBPROCESS_TIMEOUT": bad_value}, clear=False):
+            assert _heal_subprocess_timeout() == 2400
+
+    def test_resolver_reads_env_per_call(self):
+        """Resolver reads env on each call (not cached at import time)."""
+        from pdd.ci_drift_heal import _heal_subprocess_timeout
+
+        with patch.dict(os.environ, {"PDD_HEAL_SUBPROCESS_TIMEOUT": "1500"}, clear=False):
+            first = _heal_subprocess_timeout()
+
+        with patch.dict(os.environ, {"PDD_HEAL_SUBPROCESS_TIMEOUT": "2700"}, clear=False):
+            second = _heal_subprocess_timeout()
+
+        assert first == 1500
+        assert second == 2700
+
+    def test_run_pdd_command_passes_resolved_timeout_to_subprocess(self):
+        """`subprocess.run` is invoked with timeout = resolved value (default 2400)."""
+        env = {k: v for k, v in os.environ.items() if k != "PDD_HEAL_SUBPROCESS_TIMEOUT"}
+        success_result = MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch("pdd.ci_drift_heal.subprocess.run", return_value=success_result) as mock_run:
+            ok = _run_pdd_command(["pdd", "sync", "auth"], {"PDD_FORCE": "1"}, "Heal auth")
+
+        assert ok is True
+        # Find the pdd sync call (other calls may include git status for rollback prep).
+        pdd_calls = [c for c in mock_run.call_args_list if c[0][0] == ["pdd", "sync", "auth"]]
+        assert len(pdd_calls) == 1
+        assert pdd_calls[0].kwargs.get("timeout") == 2400
+
+    def test_run_pdd_command_uses_env_override_timeout(self):
+        """With PDD_HEAL_SUBPROCESS_TIMEOUT set, subprocess.run gets the override value."""
+        success_result = MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch.dict(os.environ, {"PDD_HEAL_SUBPROCESS_TIMEOUT": "3000"}, clear=False), \
+             patch("pdd.ci_drift_heal.subprocess.run", return_value=success_result) as mock_run:
+            ok = _run_pdd_command(["pdd", "sync", "auth"], {"PDD_FORCE": "1"}, "Heal auth")
+
+        assert ok is True
+        pdd_calls = [c for c in mock_run.call_args_list if c[0][0] == ["pdd", "sync", "auth"]]
+        assert len(pdd_calls) == 1
+        assert pdd_calls[0].kwargs.get("timeout") == 3000
+
+    def test_timeout_error_message_reports_resolved_value(self):
+        """On TimeoutExpired, the stderr message reflects the resolved (not hardcoded) timeout."""
+        captured = {}
+
+        def fake_run(cmd, **kwargs):
+            if cmd[:3] == ["git", "status", "--porcelain"]:
+                return MagicMock(returncode=0, stdout="", stderr="")
+            if cmd == ["pdd", "sync", "auth"]:
+                raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout"))
+            if cmd[:3] == ["git", "restore", "--source=HEAD"]:
+                return MagicMock(returncode=0, stdout="", stderr="")
+            raise AssertionError(f"Unexpected command: {cmd}")
+
+        # Capture rich console output to confirm the resolved value is rendered.
+        with patch.dict(os.environ, {"PDD_HEAL_SUBPROCESS_TIMEOUT": "3000"}, clear=False), \
+             patch("pdd.ci_drift_heal.subprocess.run", side_effect=fake_run), \
+             patch("pdd.ci_drift_heal.console.print") as mock_print:
+            result = _run_pdd_command(
+                ["pdd", "sync", "auth"],
+                {"PDD_RESTORE_PROTECTED_PATHS_ON_FAILURE": "1"},
+                "Heal auth",
+            )
+
+        assert result is False
+        printed = " ".join(str(call.args[0]) for call in mock_print.call_args_list)
+        captured["printed"] = printed
+        assert "timeout after 3000s" in printed, captured
+        assert "timeout after 1200s" not in printed
+        assert "timeout after 2400s" not in printed
+
+    def test_timeout_error_message_uses_default_when_no_override(self):
+        """Without override, timeout error reports the 2400 default value."""
+        env = {k: v for k, v in os.environ.items() if k != "PDD_HEAL_SUBPROCESS_TIMEOUT"}
+
+        def fake_run(cmd, **kwargs):
+            if cmd[:3] == ["git", "status", "--porcelain"]:
+                return MagicMock(returncode=0, stdout="", stderr="")
+            if cmd == ["pdd", "sync", "auth"]:
+                raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout"))
+            if cmd[:3] == ["git", "restore", "--source=HEAD"]:
+                return MagicMock(returncode=0, stdout="", stderr="")
+            raise AssertionError(f"Unexpected command: {cmd}")
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch("pdd.ci_drift_heal.subprocess.run", side_effect=fake_run), \
+             patch("pdd.ci_drift_heal.console.print") as mock_print:
+            result = _run_pdd_command(
+                ["pdd", "sync", "auth"],
+                {"PDD_RESTORE_PROTECTED_PATHS_ON_FAILURE": "1"},
+                "Heal auth",
+            )
+
+        assert result is False
+        printed = " ".join(str(call.args[0]) for call in mock_print.call_args_list)
+        assert "timeout after 2400s" in printed
+        assert "timeout after 1200s" not in printed
+
+
+# ---------------------------------------------------------------------------
 # _parse_args tests
 # ---------------------------------------------------------------------------
 
@@ -2927,10 +3062,13 @@ class TestRunMetadataSyncSafe:
         assert "tags" in out
 
     def test_returns_true_when_result_ok(self, tmp_path):
+        """Issue #1211: paths are built from known prompt/code args, not get_pdd_file_paths."""
         from pdd.ci_drift_heal import _run_metadata_sync_safe
         from pdd.metadata_sync import MetadataSyncResult, StageStatus
         prompt = tmp_path / "foo_python.prompt"
         prompt.write_text("body")
+        code = tmp_path / "foo.py"
+        code.write_text("def foo(): pass")
         good = MetadataSyncResult(
             prompt_path=prompt,
             stages={s: StageStatus(status="ok") for s in
@@ -2942,17 +3080,117 @@ class TestRunMetadataSyncSafe:
             example_hash=None,
             test_files=None,
         )
-        paths = {"prompt": prompt, "code": tmp_path / "foo.py"}
         with patch("pdd.metadata_sync.run_metadata_sync", return_value=good), \
              patch("pdd.operation_log.infer_module_identity",
                    return_value=("foo", "python")), \
-             patch("pdd.sync_determine_operation.get_pdd_file_paths", return_value=paths), \
              patch("pdd.sync_determine_operation.read_fingerprint",
                    return_value=fingerprint), \
              patch("pdd.operation_log.save_fingerprint") as mock_save:
-            assert _run_metadata_sync_safe(str(prompt), None) is True
+            assert _run_metadata_sync_safe(str(prompt), str(code)) is True
         mock_save.assert_called_once()
-        assert mock_save.call_args.kwargs["paths"] == paths
+        # paths must be built directly from prompt/code args (not get_pdd_file_paths)
+        saved_paths = mock_save.call_args.kwargs["paths"]
+        assert saved_paths["prompt"] == prompt
+        assert saved_paths["code"] == code
+
+    def test_returns_false_when_code_path_missing_and_result_ok(self, tmp_path, capsys):
+        """Issue #1211: raises ValueError when code_path is None but result.ok is True."""
+        from pdd.ci_drift_heal import _run_metadata_sync_safe
+        from pdd.metadata_sync import MetadataSyncResult, StageStatus
+        prompt = tmp_path / "foo_python.prompt"
+        prompt.write_text("body")
+        good = MetadataSyncResult(
+            prompt_path=prompt,
+            stages={s: StageStatus(status="ok") for s in
+                    ("prompt", "tags", "architecture", "run_report", "fingerprint")},
+        )
+        with patch("pdd.metadata_sync.run_metadata_sync", return_value=good), \
+             patch("pdd.operation_log.infer_module_identity",
+                   return_value=("foo", "python")):
+            assert _run_metadata_sync_safe(str(prompt), None) is False
+        assert "fingerprint refresh failed" in capsys.readouterr().out
+
+
+class TestSubprojectRootFor:
+    """Issue #1211: _subproject_root_for walks up from prompt/code to find .pddrc."""
+
+    def test_finds_pddrc_from_prompt_path(self, tmp_path):
+        from pdd.ci_drift_heal import DriftInfo, _subproject_root_for
+        sub = tmp_path / "extensions" / "app"
+        sub.mkdir(parents=True)
+        (sub / ".pddrc").write_text("")
+        prompt = sub / "prompts" / "foo_python.prompt"
+        prompt.parent.mkdir()
+        prompt.write_text("body")
+        drift = DriftInfo(
+            basename="foo", language="python", operation="update", reason="drift",
+            prompt_path=str(prompt), code_path=None,
+        )
+        assert _subproject_root_for(drift) == sub
+
+    def test_falls_back_to_code_path_when_no_pddrc_by_prompt(self, tmp_path):
+        from pdd.ci_drift_heal import DriftInfo, _subproject_root_for
+        sub = tmp_path / "myapp"
+        sub.mkdir()
+        (sub / ".pddrc").write_text("")
+        # prompt is in a directory with no .pddrc (but code is in the subproject)
+        prompt_dir = tmp_path / "prompts"
+        prompt_dir.mkdir()
+        prompt = prompt_dir / "foo_python.prompt"
+        prompt.write_text("body")
+        code = sub / "foo.py"
+        code.write_text("def foo(): pass")
+        drift = DriftInfo(
+            basename="foo", language="python", operation="update", reason="drift",
+            prompt_path=str(prompt), code_path=str(code),
+        )
+        assert _subproject_root_for(drift) == sub
+
+    def test_falls_back_to_repo_root_when_no_pddrc(self, tmp_path):
+        from pdd.ci_drift_heal import DriftInfo, _subproject_root_for
+        prompt = tmp_path / "foo_python.prompt"
+        prompt.write_text("body")
+        drift = DriftInfo(
+            basename="foo", language="python", operation="update", reason="drift",
+            prompt_path=str(prompt), code_path=None,
+        )
+        with patch("pdd.ci_drift_heal._repo_root", return_value=tmp_path):
+            result = _subproject_root_for(drift)
+        assert result == tmp_path
+
+    def test_snapshot_restore_use_subproject_root(self, tmp_path):
+        """Issue #1211: snapshot/restore resolve .pdd/meta under subproject, not parent."""
+        from pdd.ci_drift_heal import (
+            DriftInfo, _snapshot_metadata_state_for, _restore_metadata_state_for,
+        )
+        sub = tmp_path / "extensions" / "app"
+        sub.mkdir(parents=True)
+        (sub / ".pddrc").write_text("")
+        meta = sub / ".pdd" / "meta"
+        meta.mkdir(parents=True)
+        fp_file = meta / "foo_python.json"
+        fp_file.write_bytes(b'{"version":1}')
+
+        prompt = sub / "prompts" / "foo_python.prompt"
+        prompt.parent.mkdir()
+        prompt.write_text("body")
+
+        drift = DriftInfo(
+            basename="foo", language="python", operation="update", reason="drift",
+            prompt_path=str(prompt), code_path=None,
+        )
+
+        snapshot = _snapshot_metadata_state_for(drift)
+        # Fingerprint bytes captured from the subproject .pdd/meta
+        assert ".pdd/meta/foo_python.json" in snapshot
+        assert snapshot[".pdd/meta/foo_python.json"] == b'{"version":1}'
+
+        # Wipe the file, then restore — should write back under subproject
+        fp_file.unlink()
+        assert not fp_file.exists()
+        _restore_metadata_state_for(snapshot, sub)
+        assert fp_file.exists()
+        assert fp_file.read_bytes() == b'{"version":1}'
 
 
 class TestHealModuleInvokesMetadataSync:
@@ -3045,6 +3283,8 @@ class TestHealModuleInvokesMetadataSync:
         drift_b = MagicMock()
         drift_b.basename = "b"
         drift_b.language = "python"
+        drift_b.prompt_path = None  # ensure _subproject_root_for falls back to _repo_root
+        drift_b.code_path = None
 
         with patch("pdd.ci_drift_heal._repo_root", return_value=repo):
             snapshot_b = _snapshot_metadata_state_for(drift_b)
@@ -3056,7 +3296,7 @@ class TestHealModuleInvokesMetadataSync:
                              b'{"name":"b","fingerprint":"PARTIAL"}]}')
             (repo / ".pdd" / "meta" / "b_python.json").write_bytes(b"partial")
 
-            _restore_metadata_state_for(snapshot_b)
+            _restore_metadata_state_for(snapshot_b, repo)
 
         # After restore: architecture.json is back to its pre-B-sync state,
         # which CONTAINS module A's NEW_A write. The repo-wide
@@ -3085,6 +3325,8 @@ class TestHealModuleInvokesMetadataSync:
         drift = MagicMock()
         drift.basename = "commands/foo"
         drift.language = "python"
+        drift.prompt_path = None  # ensure _subproject_root_for falls back to _repo_root
+        drift.code_path = None
 
         fingerprint_path = meta_dir / "commands_foo_python.json"
         run_report_path = meta_dir / "commands_foo_python_run.json"
@@ -3095,7 +3337,7 @@ class TestHealModuleInvokesMetadataSync:
 
             fingerprint_path.write_bytes(b"partial fingerprint")
             run_report_path.write_bytes(b"partial run report")
-            _restore_metadata_state_for(snapshot)
+            _restore_metadata_state_for(snapshot, repo)
 
         assert ".pdd/meta/commands_foo_python.json" in snapshot
         assert ".pdd/meta/commands_foo_python_run.json" in snapshot
