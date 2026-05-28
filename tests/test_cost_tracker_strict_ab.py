@@ -39,7 +39,7 @@ def _run_demo(*extra: str) -> subprocess.CompletedProcess[str]:
 
 @pytest.mark.skip(
     reason=(
-        "run_experiment_a.py depends on pdd.evidence_manifest, pdd gate, and "
+        "run_experiment_a.py depends on pdd.evidence_manifest, pdd checkup gate, and "
         "pdd contracts drift which are planned follow-on commands not yet implemented."
     )
 )

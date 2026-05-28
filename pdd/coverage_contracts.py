@@ -21,6 +21,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from .contract_ir import (
+    COVERAGE_REF_RE,
+    CROSS_MODULE_REF_RE,
+    _WAIVER_REF_RE,
+    _extract_markdown_sections,
+    extract_sections as _extract_sections,
+    parse_coverage_block as _parse_coverage_block,
+    parse_rule_ids as _parse_rule_ids,
+    parse_waiver_rule_map as _parse_waiver_rule_map,
+    rule_ids_from_covers as _rule_ids_from_covers,
+)
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -33,53 +45,17 @@ STATUS_TEST_ONLY = "test-only"
 STATUS_UNCHECKED = "unchecked"
 STATUS_WAIVED = "waived"
 STATUS_FAILED = "failed"
-STATUS_FORMAL_ONLY = "formal-only"
-STATUS_NEEDS_HUMAN = "needs-human"
 
 # ---------------------------------------------------------------------------
-# Section extraction (canonical parser in contract_ir)
+# Markdown section helper (uses contract_ir heading index)
 # ---------------------------------------------------------------------------
-
-from .contract_ir import (  # noqa: E402
-    extract_sections as _extract_sections,
-    parse_coverage_block as _parse_coverage_block,
-    parse_prompt_contracts,
-    parse_rule_ids as _parse_rule_ids,
-    parse_waiver_rule_map as _parse_waiver_rule_map,
-)
-
-_MARKDOWN_HEADING_RE = re.compile(
-    r"^#{1,3}\s+(?P<heading>.+?)\s*$",
-    re.MULTILINE,
-)
 
 
 def _extract_markdown_section(text: str, heading: str) -> str:
-    """
-    Return the text under a specific markdown heading until the next heading.
-    Case-insensitive heading match.
-    """
-    pattern = re.compile(
-        r"^#{1,3}\s+" + re.escape(heading) + r"\s*$(.*?)(?=^#{1,3}\s|\Z)",
-        re.MULTILINE | re.DOTALL | re.IGNORECASE,
-    )
-    match = pattern.search(text)
-    return match.group(1).strip() if match else ""
+    """Return body under a markdown ## / ### heading (case-insensitive)."""
+    return _extract_markdown_sections(text).get(heading.strip().lower(), "")
 
-# ---------------------------------------------------------------------------
-# Rule ID patterns (shared with contract_check via contract_ir)
-# ---------------------------------------------------------------------------
 
-from .contract_ir import (  # noqa: E402  (regex aliases co-located with parsers)
-    COVERAGE_REF_RE as _COVERAGE_REF_RE,
-    CROSS_MODULE_REF_RE as _CROSS_MODULE_REF_RE,
-    rule_ids_from_covers as _rule_ids_from_covers,
-)
-
-_EXPLICIT_ID_RE = re.compile(r"^(R-?\d+|RULE-?\d+)\b", re.IGNORECASE)
-_SEQ_ID_RE = re.compile(r"^(\d+)[.):\s]")
-_WAIVER_ID_RE = re.compile(r"^(W-?\d+):", re.IGNORECASE)
-_WAIVER_REF_RE = re.compile(r"\bWAIVED\s+(W-?\d+)\b", re.IGNORECASE)
 _STORY_PROMPTS_META_RE = re.compile(
     r"<!--\s*pdd-story-prompts:\s*(?P<prompts>.*?)\s*-->",
     re.IGNORECASE,
@@ -99,17 +75,6 @@ _TEST_COMMENT_RE = re.compile(
 
 
 @dataclass
-class StoryEvidence:
-    """Story-level coverage evidence with validation status."""
-
-    path: str
-    validation: str = "passed"  # passed | failed | unknown
-
-    def as_dict(self) -> dict:
-        return {"path": self.path, "validation": self.validation}
-
-
-@dataclass
 class RuleCoverage:
     """Coverage evidence for one contract rule."""
 
@@ -117,11 +82,8 @@ class RuleCoverage:
     status: str          # STATUS_* constant
     stories: list[str] = field(default_factory=list)   # story filenames
     tests: list[str] = field(default_factory=list)     # test function names
-    formal: list[str] = field(default_factory=list)    # formalization evidence
     waiver: Optional[str] = None                       # waiver ID, e.g. "W1"
     failures: list[str] = field(default_factory=list)  # validation failures
-    notes: list[str] = field(default_factory=list)
-    story_details: list[StoryEvidence] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         """Serialise to a JSON-safe dictionary."""
@@ -130,11 +92,8 @@ class RuleCoverage:
             "status": self.status,
             "stories": self.stories,
             "tests": self.tests,
-            "formal": self.formal,
             "waiver": self.waiver,
             "failures": self.failures,
-            "notes": self.notes,
-            "story_details": [s.as_dict() for s in self.story_details],
         }
 
 
@@ -146,6 +105,7 @@ class CoverageResult:
     rules: list[RuleCoverage] = field(default_factory=list)
     has_contract_rules: bool = False
     error: Optional[str] = None
+    read_errors: list[str] = field(default_factory=list)
 
     @property
     def summary(self) -> dict[str, int]:
@@ -158,8 +118,6 @@ class CoverageResult:
             "unchecked": 0,
             "waived": 0,
             "failed": 0,
-            "formal_only": 0,
-            "needs_human": 0,
         }
         for rule in self.rules:
             key = rule.status.replace("-", "_")
@@ -173,14 +131,10 @@ class CoverageResult:
             "path": str(self.path),
             "has_contract_rules": self.has_contract_rules,
             "error": self.error,
+            "read_errors": self.read_errors,
             "rules": [r.as_dict() for r in self.rules],
             "summary": self.summary,
         }
-
-# ---------------------------------------------------------------------------
-# Section parsers
-# ---------------------------------------------------------------------------
-
 
 # ---------------------------------------------------------------------------
 # Story evidence scanner
@@ -195,12 +149,13 @@ def _prompt_basename(path: Path) -> str:
 def _story_links_prompt(story_text: str, prompt_name: str) -> bool:
     """
     Return True if the story's pdd-story-prompts metadata mentions prompt_name.
-    If the metadata comment is absent, the story is considered potentially
-    linked to any prompt (broad match).
+
+    Stories without ``<!-- pdd-story-prompts: ... -->`` are treated as applying
+    to the prompt set under evaluation (matching the existing user-story flow).
     """
     meta_match = _STORY_PROMPTS_META_RE.search(story_text)
     if not meta_match:
-        return False  # no metadata = not linked to any specific prompt
+        return True  # no metadata = applies to prompt set
     prompts_str = meta_match.group("prompts")
     listed = [p.strip() for p in prompts_str.split(",")]
     prompt_base = prompt_name.lower()
@@ -213,14 +168,17 @@ def _story_links_prompt(story_text: str, prompt_name: str) -> bool:
 def scan_story_evidence(
     stories_dir: Path,
     prompt_path: Path,
+    read_errors: Optional[list[str]] = None,
 ) -> dict[str, list[str]]:
     """
     Scan story__*.md files (recursively) and return a mapping
     rule_id → [story_filename, ...] for rules covered by stories
     that link to prompt_path.
 
-    The story must have a <!-- pdd-story-prompts: ... --> comment
-    that includes the prompt's filename (or relative path).
+    Story linking follows ``pdd/user_story_tests.py``: stories with
+    ``<!-- pdd-story-prompts: ... -->`` must list the prompt filename
+    (or path); stories without that metadata apply to the prompt set
+    under evaluation.
     """
     evidence: dict[str, list[str]] = {}
     if not stories_dir.exists():
@@ -231,7 +189,9 @@ def scan_story_evidence(
     for story_path in sorted(stories_dir.rglob("story__*.md")):
         try:
             story_text = story_path.read_text(encoding="utf-8")
-        except OSError:
+        except OSError as exc:
+            if read_errors is not None:
+                read_errors.append(f"{story_path.name}: {exc}")
             continue
 
         if not _story_links_prompt(story_text, prompt_name):
@@ -253,13 +213,14 @@ def scan_story_evidence(
 def scan_story_validation_failures(
     stories_dir: Path,
     prompt_path: Path,
+    read_errors: Optional[list[str]] = None,
 ) -> dict[str, list[str]]:
     """
     Return rule_id -> validation failure descriptions for linked stories.
 
-    This is intentionally deterministic and uses the existing story-linking
-    convention: only stories with pdd-story-prompts metadata matching the prompt
-    are considered. A linked story that claims rule coverage but has no
+    This is intentionally deterministic and uses the same story-linking rules
+    as :func:`scan_story_evidence` (including metadata-less stories that apply
+    to the prompt set). A linked story that claims rule coverage but has no
     ``## Acceptance Criteria`` section is considered failed coverage evidence.
     """
     failures: dict[str, list[str]] = {}
@@ -272,9 +233,8 @@ def scan_story_validation_failures(
         try:
             story_text = story_path.read_text(encoding="utf-8")
         except OSError as exc:
-            failures.setdefault("__story_read_error__", []).append(
-                f"{story_path.name}: {exc}"
-            )
+            if read_errors is not None:
+                read_errors.append(f"{story_path.name}: {exc}")
             continue
 
         if not _story_links_prompt(story_text, prompt_name):
@@ -314,7 +274,12 @@ def scan_story_validation_failures(
 # No fuzzy or semantic matching is performed.
 
 
-def scan_test_evidence(tests_dir: Path) -> dict[str, list[str]]:
+def scan_test_evidence(
+    tests_dir: Path,
+    prompt_path: Optional[Path] = None,
+    read_errors: Optional[list[str]] = None,
+    require_prompt_qualified: bool = False,
+) -> dict[str, list[str]]:
     """
     Heuristically scan test files for rule ID references.
 
@@ -328,18 +293,25 @@ def scan_test_evidence(tests_dir: Path) -> dict[str, list[str]]:
     if not tests_dir.exists():
         return evidence
 
+    prompt_name = prompt_path.name if prompt_path is not None else ""
+
     for test_file in sorted(tests_dir.rglob("test_*.py")):
         try:
             source = test_file.read_text(encoding="utf-8")
-        except OSError:
+        except OSError as exc:
+            if read_errors is not None:
+                read_errors.append(f"{test_file.name}: {exc}")
             continue
 
-        _scan_test_file(source, evidence)
+        _scan_test_file(source, evidence, prompt_name=prompt_name, require_prompt_qualified=require_prompt_qualified)
 
     return evidence
 
 
-def scan_test_validation_failures(tests_dir: Path) -> dict[str, list[str]]:
+def scan_test_validation_failures(
+    tests_dir: Path,
+    read_errors: Optional[list[str]] = None,
+) -> dict[str, list[str]]:
     """
     Return rule_id -> validation failure descriptions for test files.
 
@@ -356,9 +328,8 @@ def scan_test_validation_failures(tests_dir: Path) -> dict[str, list[str]]:
         try:
             source = test_file.read_text(encoding="utf-8")
         except OSError as exc:
-            failures.setdefault("__test_read_error__", []).append(
-                f"{test_file.name}: {exc}"
-            )
+            if read_errors is not None:
+                read_errors.append(f"{test_file.name}: {exc}")
             continue
 
         try:
@@ -383,12 +354,18 @@ def _rule_ids_from_test_source(source: str) -> set[str]:
         ids.add(f"R{digit}")
     for comment_match in _TEST_COMMENT_RE.finditer(source):
         ids.add(comment_match.group(1).upper())
-    for ref_match in _COVERAGE_REF_RE.finditer(source):
+    for ref_match in COVERAGE_REF_RE.finditer(source):
         ids.add(ref_match.group(1).upper())
     return ids
 
 
-def _scan_test_file(source: str, evidence: dict[str, list[str]]) -> None:  # pylint: disable=too-many-locals
+def _scan_test_file(  # pylint: disable=too-many-locals
+    source: str,
+    evidence: dict[str, list[str]],
+    *,
+    prompt_name: str,
+    require_prompt_qualified: bool,
+) -> None:
     """
     Parse a single test file's source and populate evidence in-place.
 
@@ -418,9 +395,23 @@ def _scan_test_file(source: str, evidence: dict[str, list[str]]) -> None:  # pyl
         if not fname.startswith("test"):
             continue
 
-        # Pattern 1: function name contains R<N>
-        name_matches = _TEST_FUNC_RE.findall(fname)
-        for digit in name_matches:
+        # Prompt-qualified mode: only accept references scoped to this prompt.
+        if require_prompt_qualified:
+            # Check the function docstring first line and the function signature line.
+            docstring = ast.get_docstring(node) or ""
+            first_line = docstring.splitlines()[0][:200] if docstring else ""
+            sig_line = source.splitlines()[max(node.lineno - 1, 0)] if source else ""
+            for text in (first_line, sig_line):
+                for match in CROSS_MODULE_REF_RE.finditer(text):
+                    if match.group(1).lower().endswith("/" + prompt_name.lower()) or match.group(1).lower() == prompt_name.lower():
+                        rid = match.group(2).upper()
+                        evidence.setdefault(rid, [])
+                        if fname not in evidence[rid]:
+                            evidence[rid].append(fname)
+            continue
+
+        # Pattern 1: function name contains R<N> (unqualified, single-prompt usage)
+        for digit in _TEST_FUNC_RE.findall(fname):
             rid = f"R{digit}"
             evidence.setdefault(rid, [])
             if fname not in evidence[rid]:
@@ -439,7 +430,7 @@ def _scan_test_file(source: str, evidence: dict[str, list[str]]) -> None:  # pyl
         docstring = ast.get_docstring(node)
         if docstring:
             first_line = docstring.splitlines()[0][:120]
-            for doc_match in _COVERAGE_REF_RE.finditer(first_line):
+            for doc_match in COVERAGE_REF_RE.finditer(first_line):
                 rid = doc_match.group(1).upper()
                 evidence.setdefault(rid, [])
                 if fname not in evidence[rid]:
@@ -480,8 +471,6 @@ def _classify_rule(  # pylint: disable=too-many-arguments
     story_evidence: dict[str, list[str]],
     test_evidence: dict[str, list[str]],
     validation_failures: Optional[dict[str, list[str]]] = None,
-    formal_evidence: Optional[dict[str, list[str]]] = None,
-    story_validation: Optional[dict[str, list[StoryEvidence]]] = None,
 ) -> RuleCoverage:
     """
     Classify one rule ID and return a RuleCoverage.
@@ -543,30 +532,15 @@ def _classify_rule(  # pylint: disable=too-many-arguments
             elif "test" in evidence_item.lower() and evidence_item not in tests:
                 tests.append(evidence_item)
 
-    formal = list((formal_evidence or {}).get(rid, []))
-    story_details = list((story_validation or {}).get(rid, []))
     has_story = bool(stories)
     has_test = bool(tests)
-    has_formal = bool(formal)
-    valid_story = bool(story_details) and all(
-        s.validation == "passed" for s in story_details
-    ) if story_details else has_story
 
-    notes: list[str] = []
-    if has_story and not has_test:
-        notes.append(
-            "Story validates prompt intent, but no executable test references "
-            f"{rid}."
-        )
-
-    if valid_story and has_test:
+    if has_story and has_test:
         status = STATUS_CHECKED
-    elif valid_story:
+    elif has_story:
         status = STATUS_STORY_ONLY
     elif has_test:
         status = STATUS_TEST_ONLY
-    elif has_formal:
-        status = STATUS_FORMAL_ONLY
     else:
         status = STATUS_UNCHECKED
 
@@ -575,10 +549,7 @@ def _classify_rule(  # pylint: disable=too-many-arguments
         status=status,
         stories=stories,
         tests=tests,
-        formal=formal,
         waiver=None,
-        notes=notes,
-        story_details=story_details,
     )
 
 # ---------------------------------------------------------------------------
@@ -591,7 +562,7 @@ def build_coverage(
     stories_dir: Optional[Path] = None,
     tests_dir: Optional[Path] = None,
     *,
-    strict: bool = False,
+    require_prompt_qualified_tests: bool = False,
 ) -> CoverageResult:
     """
     Build a coverage matrix for a single prompt file.
@@ -619,50 +590,50 @@ def build_coverage(
 
     result = CoverageResult(path=path)
 
-    ir = parse_prompt_contracts(path, stories_dir=stories_dir, tests_dir=tests_dir)
-    if ir.parse_error:
-        result.error = ir.parse_error
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        result.error = f'File not found: "{path}"'
+        return result
+    except OSError as exc:
+        result.error = str(exc)
         return result
 
-    if "contract_rules" not in ir.sections:
+    sections = _extract_sections(text)
+
+    if "contract_rules" not in sections:
+        # Legacy prompt — no <contract_rules> tag at all
         return result
 
     result.has_contract_rules = True
-    rules_text = ir.sections.get("contract_rules", "")
+    rules_text = sections["contract_rules"]
     if not rules_text.strip():
+        # Section tag present but empty — has contracts, zero rules
         return result
     rule_ids = _parse_rule_ids(rules_text)
 
-    coverage_entries = dict(ir.coverage_entries)
-    waivers_text = ir.sections.get("waivers", "")
+    coverage_text = sections.get("coverage", "")
+    coverage_entries = _parse_coverage_block(coverage_text) if coverage_text else {}
+
+    waivers_text = sections.get("waivers", "")
     waiver_map = _parse_waiver_rule_map(waivers_text) if waivers_text else {}
 
-    story_evidence = ir.story_covers or scan_story_evidence(stories_dir, path)
-    test_evidence = ir.test_refs or scan_test_evidence(tests_dir)
+    read_errors: list[str] = []
+    story_evidence = scan_story_evidence(stories_dir, path, read_errors=read_errors)
+    test_evidence = scan_test_evidence(
+        tests_dir,
+        prompt_path=path,
+        read_errors=read_errors,
+        require_prompt_qualified=require_prompt_qualified_tests,
+    )
     validation_failures: dict[str, list[str]] = {}
     for source in (
-        scan_story_validation_failures(stories_dir, path),
-        scan_test_validation_failures(tests_dir),
+        scan_story_validation_failures(stories_dir, path, read_errors=read_errors),
+        scan_test_validation_failures(tests_dir, read_errors=read_errors),
     ):
         for rid, messages in source.items():
             validation_failures.setdefault(rid, []).extend(messages)
-
-    formal_evidence: dict[str, list[str]] = {}
-    for formal in ir.formalizations:
-        rid = formal.rule_id.upper()
-        label = f"smt:{rid}" if (formal.target or "").lower() == "smt" else f"formal:{rid}"
-        if formal.predicate:
-            label = f"{label}:predicate"
-        formal_evidence.setdefault(rid, []).append(label)
-
-    story_validation: dict[str, list[StoryEvidence]] = {}
-    for rid, story_names in story_evidence.items():
-        fails = validation_failures.get(rid, [])
-        for name in story_names:
-            failed = any(name in msg for msg in fails)
-            story_validation.setdefault(rid, []).append(
-                StoryEvidence(path=name, validation="failed" if failed else "passed")
-            )
+    result.read_errors = read_errors
 
     for rid in rule_ids:
         rule_cov = _classify_rule(
@@ -672,21 +643,8 @@ def build_coverage(
             story_evidence,
             test_evidence,
             validation_failures,
-            formal_evidence=formal_evidence,
-            story_validation=story_validation,
         )
         result.rules.append(rule_cov)
-
-    if strict:
-        for rule_cov in result.rules:
-            rule = ir.rule_by_id(rule_cov.rule_id)
-            modal = (rule.modal if rule else "").upper()
-            if rule_cov.status == STATUS_FAILED:
-                result.error = result.error or "strict coverage: failed evidence"
-            elif rule_cov.status == STATUS_UNCHECKED and modal in ("MUST", "MUST NOT"):
-                result.error = result.error or "strict coverage: uncovered MUST/MUST NOT"
-            elif rule_cov.status == STATUS_STORY_ONLY and modal == "MUST NOT":
-                result.error = result.error or "strict coverage: MUST NOT requires executable test"
 
     return result
 
@@ -695,8 +653,6 @@ def build_coverage_directory(
     directory: Path,
     stories_dir: Optional[Path] = None,
     tests_dir: Optional[Path] = None,
-    *,
-    strict: bool = False,
 ) -> list[CoverageResult]:
     """
     Build coverage matrices for every `*.prompt` file under a directory.
@@ -707,7 +663,14 @@ def build_coverage_directory(
     for prompt_path in sorted(directory.rglob("*.prompt")):
         if prompt_path.name.lower().endswith("_llm.prompt"):
             continue
+        # Directory mode must avoid cross-prompt test evidence false positives.
+        # Require prompt-qualified test references (e.g. foo_python.prompt#R1).
         results.append(
-            build_coverage(prompt_path, stories_dir, tests_dir, strict=strict)
+            build_coverage(
+                prompt_path,
+                stories_dir,
+                tests_dir,
+                require_prompt_qualified_tests=True,
+            )
         )
     return results

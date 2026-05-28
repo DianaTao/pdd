@@ -8,6 +8,7 @@ from .fix import fix
 from .modify import split, change, update
 from .maintenance import sync, sync_architecture, auto_deps, setup
 from .checkup import checkup
+from .contracts import contracts_cli
 from .analysis import detect_change, conflicts, bug, crash, trace
 from .connect import connect
 from .auth import auth_group
@@ -20,9 +21,7 @@ from .utility import install_completion_cmd, verify
 from .which import which
 from .firecrawl import firecrawl_cache
 from .prompt import prompt_group
-from .contracts import contracts_group
 from .coverage import coverage_cmd
-from .evidence import evidence_group
 
 def register_commands(cli: click.Group) -> None:
     """Register all subcommands with the main CLI group."""
@@ -36,6 +35,7 @@ def register_commands(cli: click.Group) -> None:
     cli.add_command(sync)
     cli.add_command(sync_architecture)
     cli.add_command(checkup)
+    cli.add_command(contracts_cli)
     cli.add_command(auto_deps)
     cli.add_command(setup)
     cli.add_command(detect_change)
@@ -49,7 +49,7 @@ def register_commands(cli: click.Group) -> None:
     cli.add_command(install_completion_cmd, name="install_completion")
     cli.add_command(verify)
     cli.add_command(which)
-    
+
     # Register templates group directly to commands dict to handle nesting if needed,
     # or just add_command works for groups too.
     # The original code did: cli.commands["templates"] = templates_group
@@ -60,6 +60,4 @@ def register_commands(cli: click.Group) -> None:
     cli.add_command(sessions)
     cli.add_command(firecrawl_cache)
     cli.add_command(prompt_group)
-    cli.add_command(contracts_group)
     cli.add_command(coverage_cmd, name="coverage")
-    cli.add_command(evidence_group)

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# E2E demo for pdd gate / evidence / contracts author / drift on cost_tracker prompt.
+# E2E demo for pdd checkup gate / evidence / contracts author / drift on cost_tracker prompt.
 #
 #   bash examples/contract_commands_cost_tracker_e2e_demo/demo.sh
 #   bash examples/contract_commands_cost_tracker_e2e_demo/demo.sh --live --keep-artifacts

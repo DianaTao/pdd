@@ -3,17 +3,14 @@
 Prompt and user-story lint engine.
 
 Detects vague/ambiguous terms in <contract_rules>, <requirements>,
-<acceptance_tests>, and user-story acceptance criteria. Optionally runs an
-LLM pass to suggest vocabulary definitions.
+<acceptance_tests>, and user-story acceptance criteria. An optional LLM pass
+can add advisory ambiguity findings without changing files.
 
 Public API
 ----------
 scan_prompt(path, *, strict=False) -> LintResult
 scan_stories(stories_dir, *, strict=False) -> list[LintResult]
-apply_suggestions(path, issues) -> int
-append_vocabulary_definitions(path, suggestions) -> int
-run_llm_ambiguity_pass(path, strength, temperature, time, verbose) -> list[LintIssue]
-run_llm_guidance_pass(path, strength, temperature, time, verbose) -> dict
+run_llm_ambiguity_pass(path, strength, temperature, time, verbose, use_cloud) -> list[LintIssue]
 """
 from __future__ import annotations
 
@@ -41,6 +38,7 @@ VAGUE_TERMS: frozenset[str] = frozenset({
     "recent",
     "duplicate",
     "graceful",
+    "gracefully",
     "reasonable",
     "authorized",
     "unauthorized",
@@ -125,7 +123,7 @@ _MD_HEADING_RE = re.compile(r"^(#{1,3})\s+(.+)$", re.MULTILINE)
 # ---------------------------------------------------------------------------
 
 @dataclass
-class LintIssue:
+class LintIssue:  # pylint: disable=too-many-instance-attributes
     """A single lint finding."""
 
     level: str                                          # "warn" or "error"
@@ -184,8 +182,10 @@ class LintResult:
 
 def _extract_xml_sections(text: str) -> dict[str, str]:
     """Return tag-name → inner text for all XML-style sections found."""
-    from .contract_ir import _extract_xml_sections as _canonical_xml  # pylint: disable=import-outside-toplevel
-    return _canonical_xml(text)
+    return {
+        match.group("tag").lower(): match.group("body").strip()
+        for match in _XML_SECTION_RE.finditer(text)
+    }
 
 
 def _extract_markdown_sections(text: str) -> dict[str, str]:
@@ -250,7 +250,6 @@ _VOCABULARY_SECTIONS: frozenset[str] = frozenset({
     "vocabulary",
     "glossary",
     "definitions",
-    "covers",
 })
 
 # Sections where we additionally check for observable-outcome verbs
@@ -263,33 +262,16 @@ _OBSERVABLE_CHECK_SECTIONS: frozenset[str] = frozenset({
 
 def _extract_vocabulary_terms(vocab_text: str) -> set[str]:
     """
-    Extract defined term names from a vocabulary/glossary/covers block.
+    Extract defined term names from a vocabulary/glossary/definitions block.
 
     Heuristic: a line whose leading token (after optional bullet) is followed
     by `:` or ` - ` is treated as a definition. Both the full phrase AND each
     individual word in the phrase are added as known terms, so that "valid
     response" in vocabulary suppresses the warning for the word "valid".
-
-    Also handles the cross-module ## Covers format:
-        - prompts/payment_python.prompt#R3: No provider call before validation
-    The descriptive text after the colon is treated as a known term phrase.
     """
     terms: set[str] = set()
     for line in vocab_text.splitlines():
         stripped = line.strip()
-
-        # Cross-module Covers: - prompts/foo.prompt#R3: term phrase
-        cross = re.match(
-            r"^[-*]?\s*[\w./\-]+\.prompt#[A-Za-z0-9\-]+\s*:\s*(.+)$",
-            stripped,
-        )
-        if cross:
-            phrase = cross.group(1).strip().lower()
-            terms.add(phrase)
-            for word in re.split(r"[\s_-]+", phrase):
-                if word:
-                    terms.add(word)
-            continue
 
         # Standard: "term: ..." or "- term: ..." or "* term: ..." or "term - ..."
         term_match = re.match(
@@ -408,13 +390,11 @@ def _check_llm_template(
     )]
 
 
-def scan_prompt(
+def scan_prompt(  # pylint: disable=too-many-locals
     path: Path,
     *,
     strict: bool = False,
     llm_template: Optional[bool] = None,
-    stories_dir: Optional[Path] = None,
-    tests_dir: Optional[Path] = None,
 ) -> LintResult:
     """
     Deterministic lint scan of a single prompt file.
@@ -478,17 +458,6 @@ def scan_prompt(
     if not found_any_section:
         logger.debug("prompt_lint: no recognised sections in %s — skipping", path)
 
-    from .contract_ir import parse_prompt_contracts  # pylint: disable=import-outside-toplevel
-    from .formalization_lint import check_formalization  # pylint: disable=import-outside-toplevel
-
-    ir = parse_prompt_contracts(
-        path,
-        stories_dir=stories_dir,
-        tests_dir=tests_dir,
-    )
-    if not ir.parse_error:
-        result.issues.extend(check_formalization(ir, strict=strict))
-
     return result
 
 
@@ -496,8 +465,8 @@ def scan_stories(stories_dir: Path, *, strict: bool = False) -> list[LintResult]
     """
     Scan all story__*.md files under stories_dir for vague acceptance criteria.
 
-    Each story's ## Glossary / ## Definitions / ## Covers section supplies
-    the vocabulary. Missing sections produce zero issues.
+    Each story's ## Glossary / ## Definitions section supplies the vocabulary.
+    ``## Covers`` is coverage metadata rather than a term-definition source.
     """
     if not stories_dir.is_dir():
         return []
@@ -508,95 +477,29 @@ def scan_stories(stories_dir: Path, *, strict: bool = False) -> list[LintResult]
 
 
 # ---------------------------------------------------------------------------
-# Apply suggestions (--apply write-back)
-# ---------------------------------------------------------------------------
-
-_VOCABULARY_OPEN = "<vocabulary>"
-_VOCABULARY_CLOSE = "</vocabulary>"
-
-
-def apply_suggestions(path: Path, issues: list[LintIssue]) -> int:
-    """
-    Append non-placeholder suggestion strings to the prompt's <vocabulary> block.
-
-    Creates the block at the end of the file if absent.
-    Returns the number of new entries written.
-    Never called unless the caller explicitly passes --apply.
-    """
-    suggestions = [
-        i.suggestion
-        for i in issues
-        if i.suggestion and "<add a precise" not in i.suggestion
-    ]
-    if not suggestions:
-        return 0
-
-    return append_vocabulary_definitions(path, suggestions)
-
-
-def append_vocabulary_definitions(path: Path, suggestions: list[str]) -> int:
-    """
-    Append concrete vocabulary definitions to a prompt file.
-
-    Creates a <vocabulary> block when absent. Duplicate definition lines are
-    skipped. Returns the number of new entries written.
-    """
-    cleaned = [s.strip().lstrip("- ").strip() for s in suggestions if s.strip()]
-    if not cleaned:
-        return 0
-
-    text = path.read_text(encoding="utf-8")
-    existing = set()
-    sections = _extract_sections(text)
-    if "vocabulary" in sections:
-        for line in sections["vocabulary"].splitlines():
-            stripped = line.strip().lstrip("- ").strip()
-            if stripped:
-                existing.add(stripped)
-
-    new_suggestions = [s for s in cleaned if s not in existing]
-    if not new_suggestions:
-        return 0
-
-    new_entries = "\n".join(f"- {s}" for s in new_suggestions)
-
-    if _VOCABULARY_OPEN in text and _VOCABULARY_CLOSE in text:
-        text = text.replace(
-            _VOCABULARY_CLOSE,
-            f"{new_entries}\n{_VOCABULARY_CLOSE}",
-        )
-    else:
-        text = text.rstrip() + (
-            f"\n\n{_VOCABULARY_OPEN}\n{new_entries}\n{_VOCABULARY_CLOSE}\n"
-        )
-
-    path.write_text(text, encoding="utf-8")
-    return len(new_suggestions)
-
-
-# ---------------------------------------------------------------------------
 # Optional LLM ambiguity pass
 # ---------------------------------------------------------------------------
 
-def run_llm_ambiguity_pass(  # pylint: disable=too-many-locals
+def run_llm_ambiguity_pass(  # pylint: disable=too-many-locals,too-many-arguments
     path: Path,
+    *,
     strength: float = 0.5,
     temperature: float = 0.0,
     time: Optional[float] = None,
     verbose: bool = False,
+    use_cloud: Optional[bool] = None,
 ) -> list[LintIssue]:
     """
     Run the LLM-backed ambiguity analysis for a single prompt file.
 
     Loads pdd/prompts/prompt_lint_LLM.prompt, calls llm_invoke, and parses the
-    JSON response into LintIssue entries (level="warn").
+    JSON response into LintIssue entries (level="warn"). ``use_cloud=True``
+    selects PDD Cloud; ``False`` uses configured local providers.
 
     Safe to call: always returns [] on any error so CI never breaks on LLM failure.
     """
     try:
         from .llm_invoke import llm_invoke  # pylint: disable=import-outside-toplevel
-        from .preprocess import preprocess  # pylint: disable=import-outside-toplevel
-
         template_path = Path(__file__).parent / "prompts" / "prompt_lint_LLM.prompt"
         if not template_path.exists():
             logger.warning("prompt_lint_LLM.prompt not found; skipping LLM pass")
@@ -609,7 +512,6 @@ def run_llm_ambiguity_pass(  # pylint: disable=too-many-locals
         filled = template.replace("{prompt_content}", prompt_content).replace(
             "{vague_terms_list}", vague_terms_list
         )
-        filled = preprocess(filled, recursive=False, double_curly_brackets=False)
 
         result = llm_invoke(
             messages=[{"role": "user", "content": filled}],
@@ -617,7 +519,7 @@ def run_llm_ambiguity_pass(  # pylint: disable=too-many-locals
             temperature=temperature,
             time=time,
             verbose=verbose,
-            use_cloud=True,
+            use_cloud=use_cloud,
         )
         response_text = result["result"]
 
@@ -645,183 +547,3 @@ def run_llm_ambiguity_pass(  # pylint: disable=too-many-locals
     except Exception as exc:  # noqa: BLE001  # pylint: disable=broad-exception-caught
         logger.warning("prompt_lint LLM pass failed: %s", exc)
         return []
-
-
-def run_llm_guidance_pass(  # pylint: disable=too-many-locals
-    path: Path,
-    strength: float = 0.5,
-    temperature: float = 0.0,
-    time: Optional[float] = None,
-    verbose: bool = False,
-) -> dict:
-    """
-    Run the LLM-backed prompt coaching pass for one prompt file.
-
-    This is advisory author guidance, not a CI gate. It returns a structured
-    dictionary with vocabulary suggestions, rule rewrites, acceptance-criteria
-    improvements, and formalization notes. Failures return an error payload
-    rather than raising.
-    """
-    try:
-        from .llm_invoke import llm_invoke  # pylint: disable=import-outside-toplevel
-        from .preprocess import preprocess  # pylint: disable=import-outside-toplevel
-
-        template_path = Path(__file__).parent / "prompts" / "prompt_guidance_LLM.prompt"
-        if not template_path.exists():
-            return _empty_guidance(path, "prompt_guidance_LLM.prompt not found")
-
-        prompt_content = path.read_text(encoding="utf-8", errors="replace")
-        vague_terms_list = ", ".join(sorted(VAGUE_TERMS | VAGUE_TERMS_STRICT))
-
-        template = template_path.read_text(encoding="utf-8")
-        filled = template.replace("{prompt_content}", prompt_content).replace(
-            "{vague_terms_list}", vague_terms_list
-        )
-        filled = preprocess(filled, recursive=False, double_curly_brackets=False)
-
-        result = llm_invoke(
-            messages=[{"role": "user", "content": filled}],
-            strength=strength,
-            temperature=temperature,
-            time=time,
-            verbose=verbose,
-            use_cloud=True,
-        )
-        response_text = result["result"]
-        json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response_text, re.DOTALL)
-        raw_json = json_match.group(1) if json_match else response_text.strip()
-        parsed = json.loads(raw_json)
-        if not isinstance(parsed, dict):
-            return _empty_guidance(path, "LLM guidance response was not a JSON object")
-        return _normalize_guidance(path, parsed)
-
-    except Exception as exc:  # noqa: BLE001  # pylint: disable=broad-exception-caught
-        logger.warning("prompt guidance LLM pass failed: %s", exc)
-        return _empty_guidance(path, str(exc))
-
-
-def _empty_guidance(path: Path, error: str = "") -> dict:
-    """Return an empty guidance payload."""
-    return {
-        "path": str(path),
-        "summary": "",
-        "vocabulary_suggestions": [],
-        "rule_rewrites": [],
-        "acceptance_criteria_improvements": [],
-        "formalization_notes": [],
-        "formalization_candidates": [],
-        "error": error,
-    }
-
-
-def _normalize_guidance(path: Path, payload: dict) -> dict:
-    """Normalize an LLM guidance response into the public schema."""
-    from .prompt_lint_schemas import GuidancePayload  # pylint: disable=import-outside-toplevel
-
-    guidance = GuidancePayload.from_dict(str(path), payload)
-    result = _empty_guidance(path)
-    result["summary"] = guidance.summary
-    result["vocabulary_suggestions"] = guidance.vocabulary_suggestions
-    result["rule_rewrites"] = guidance.rule_rewrites
-    result["acceptance_criteria_improvements"] = guidance.acceptance_criteria_improvements
-    result["formalization_notes"] = guidance.formalization_notes
-    result["formalization_candidates"] = [
-        c.model_dump() for c in guidance.formalization_candidates
-    ]
-    if guidance.error:
-        result["error"] = guidance.error
-    if payload.get("error"):
-        result["error"] = str(payload["error"])
-    return result
-
-
-def run_llm_formalize_pass(  # pylint: disable=too-many-locals
-    path: Path,
-    guidance: dict,
-    *,
-    strength: float = 0.5,
-    temperature: float = 0.0,
-    time: Optional[float] = None,
-    verbose: bool = False,
-) -> dict:
-    """
-    Run the formalize-stage LLM pass to produce a mergeable contract bundle.
-
-    Returns dict with ``bundle``, ``error``, and ``formalization_rejected``.
-    """
-    empty: dict = {"bundle": None, "error": "", "formalization_rejected": []}
-    try:
-        from .llm_invoke import llm_invoke  # pylint: disable=import-outside-toplevel
-        from .preprocess import preprocess  # pylint: disable=import-outside-toplevel
-        from .prompt_lint_schemas import parse_formalize_bundle  # pylint: disable=import-outside-toplevel
-
-        template_path = Path(__file__).parent / "prompts" / "prompt_formalize_LLM.prompt"
-        if not template_path.exists():
-            empty["error"] = "prompt_formalize_LLM.prompt not found"
-            return empty
-
-        prompt_content = path.read_text(encoding="utf-8", errors="replace")
-        guidance_json = json.dumps(guidance, indent=2)
-        template = template_path.read_text(encoding="utf-8")
-        filled = (
-            template.replace("{prompt_content}", prompt_content)
-            .replace("{guidance_json}", guidance_json)
-        )
-        filled = preprocess(filled, recursive=False, double_curly_brackets=False)
-
-        result = llm_invoke(
-            messages=[{"role": "user", "content": filled}],
-            strength=strength,
-            temperature=temperature,
-            time=time,
-            verbose=verbose,
-            use_cloud=True,
-        )
-        response_text = result["result"]
-        json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response_text, re.DOTALL)
-        raw_json = json_match.group(1) if json_match else response_text.strip()
-        parsed = json.loads(raw_json)
-        if not isinstance(parsed, dict):
-            empty["error"] = "formalize response was not a JSON object"
-            return empty
-        bundle = parse_formalize_bundle(parsed)
-        if bundle is None:
-            empty["error"] = "formalize response failed schema validation"
-            return empty
-        empty["bundle"] = bundle
-        return empty
-    except Exception as exc:  # noqa: BLE001  # pylint: disable=broad-exception-caught
-        logger.warning("prompt formalize LLM pass failed: %s", exc)
-        empty["error"] = str(exc)
-        return empty
-
-
-def validate_formalize_bundle(path: Path, bundle: object) -> list[LintIssue]:
-    """Run deterministic gates on a formalize bundle before write-back."""
-    from .contract_ir import parse_prompt_contracts  # pylint: disable=import-outside-toplevel
-    from .formalization_lint import check_formalization  # pylint: disable=import-outside-toplevel
-    from .prompt_block_writeback import (  # pylint: disable=import-outside-toplevel
-        append_acceptance_tests,
-        append_contract_rules,
-        append_formalization,
-    )
-    from .prompt_lint_schemas import FormalizeBundle  # pylint: disable=import-outside-toplevel
-
-    if not isinstance(bundle, FormalizeBundle):
-        return []
-    import tempfile  # pylint: disable=import-outside-toplevel
-
-    text = path.read_text(encoding="utf-8")
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".prompt", delete=False, encoding="utf-8"
-    ) as tmp:
-        tmp.write(text)
-        tmp_path = Path(tmp.name)
-    try:
-        append_contract_rules(tmp_path, bundle.contract_rules)
-        append_acceptance_tests(tmp_path, bundle.acceptance_tests)
-        append_formalization(tmp_path, bundle.formalization)
-        ir = parse_prompt_contracts(tmp_path)
-        return check_formalization(ir, strict=True)
-    finally:
-        tmp_path.unlink(missing_ok=True)

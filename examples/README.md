@@ -28,7 +28,7 @@ source ~/.zshrc  # or source ~/.bashrc / fish equivalent
 ### Agentic Fallback
 The agentic fallback example demonstrates using agentic fallback to resolve cross-file dependencies during automated debugging.  
 The example has two files — `src/main.py` and `src/utils.py` — where `main.py` fails without reading `utils.py`.  
-With agentic fallback enabled, the CLI agent (Claude/Gemini/Codex/OpenCode) can read `utils.py`, understand the dependency, and fix `main.py`.
+With agentic fallback enabled, the CLI agent (Claude/Gemini/Antigravity/Codex/OpenCode) can read `utils.py`, understand the dependency, and fix `main.py`.
 Users may intentionally introduce errors in `src/utils.py` to test the agentic fix functionality.
 
 Additional examples demonstrating the use of agentic fallback are provided for Java, TypeScript, and JavaScript.
@@ -81,7 +81,7 @@ manual command sequence.
 ### Cost tracker strict A/B pipeline (WIP)
 [`cost_tracker_strict_ab/`](cost_tracker_strict_ab/) — authoring artifacts for a
 planned controlled A/B demo. The deterministic Experiment A driver, golden pytest
-harness, and `--live-ab` demo wrapper depend on `pdd evidence` / `pdd gate` /
+harness, and `--live-ab` demo wrapper depend on `pdd evidence` / `pdd checkup gate` /
 `pdd contracts drift`, which are not yet on this branch. The directory ships
 captured `reports/` snapshots as regression fixtures; see its README.
 
