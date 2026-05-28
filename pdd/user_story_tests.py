@@ -446,6 +446,55 @@ def _prompt_summary_line(prompt_path: Path) -> str:
     return "Prompt included in story scope."
 
 
+def _seed_covers_from_prompts(
+    prompt_paths: List[Path],
+    prompts_root: Optional[Path],
+) -> List[Tuple[str, str, str, str]]:  # (ref, rule_id, rule_summary, rule_text)
+    """Seed covers rules from prompt files using parse_prompt_contracts."""
+    from pdd.contract_ir import parse_prompt_contracts
+
+    seeded = []
+    for path in prompt_paths:
+        if not path.exists() or not path.is_file():
+            continue
+        try:
+            content = path.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        
+        rules = parse_prompt_contracts(content)
+        ref = _prompt_reference_for_metadata(path, prompts_root)
+        for rule in rules:
+            seeded.append((ref, rule["id"], rule["summary"], rule["text"]))
+    return seeded
+
+
+def _seed_negative_cases_from_rules(rules: List[Tuple[str, str, str, str]]) -> List[str]:
+    """Extract forbidden outcomes from rules containing modal MUST NOT."""
+    negatives = []
+    for _, _, _, rule_text in rules:
+        # Search for MUST NOT (case-insensitive)
+        match = re.search(r"\bmust\s+not\s+([^.\n]+)", rule_text, re.IGNORECASE)
+        if match:
+            clause = match.group(1).strip()
+            if clause:
+                # Clean and capitalize
+                cleaned = re.sub(r"^[^a-zA-Z0-9]+", "", clause).strip()
+                if cleaned:
+                    bullet = cleaned[0].upper() + cleaned[1:]
+                    if not bullet.endswith("."):
+                        bullet += "."
+                    negatives.append(bullet)
+    # Deduplicate while preserving order
+    deduped = []
+    seen = set()
+    for neg in negatives:
+        if neg.lower() not in seen:
+            deduped.append(neg)
+            seen.add(neg.lower())
+    return deduped
+
+
 def _render_story_markdown_from_prompts(
     *,
     title: str,
@@ -457,23 +506,76 @@ def _render_story_markdown_from_prompts(
         _prompt_reference_for_metadata(path, prompts_root)
         for path in prompt_paths
     ]
-    scope_lines = []
+    
+    # Covers block
+    covers_lines = []
+    seeded_rules = _seed_covers_from_prompts(prompt_paths, prompts_root)
+    if seeded_rules:
+        # Check if we should use cross-module formatting
+        use_cross = len(prompt_paths) > 1
+        for ref, rule_id, rule_summary, _ in seeded_rules:
+            if use_cross:
+                covers_lines.append(f"- {ref}#{rule_id}: {rule_summary}")
+            else:
+                covers_lines.append(f"- {rule_id}: {rule_summary}")
+    else:
+        covers_lines.append("- R1: Add contract rule IDs here after contracts are authored.")
+    covers_block = "\n".join(covers_lines)
+
+    # Negative cases block
+    negatives = _seed_negative_cases_from_rules(seeded_rules)
+    if negatives:
+        neg_block = "\n".join(f"- {neg}" for neg in negatives)
+    else:
+        neg_block = "- List forbidden outcomes this story protects against."
+
+    # Context block
+    context_lines = [
+        "Describe relevant state, assumptions, fixtures, users, records, external services, or dependencies.",
+        "",
+        "This story covers the following prompt files:"
+    ]
     for path in prompt_paths:
         ref = _prompt_reference_for_metadata(path, prompts_root)
         summary = _prompt_summary_line(path)
-        scope_lines.append(f"- `{ref}`: {summary}")
+        context_lines.append(f"- `{ref}`: {summary}")
+    context_block = "\n".join(context_lines)
 
-    scope_block = "\n".join(scope_lines)
+    metadata_line = f"<!-- {STORY_PROMPTS_METADATA_KEY}: {', '.join(metadata_refs)} -->"
+    
     return (
+        f"{metadata_line}\n\n"
         f"# User Story: {title}\n\n"
-        f"<!-- {STORY_PROMPTS_METADATA_KEY}: {', '.join(metadata_refs)} -->\n\n"
-        "## Story\n"
-        "As a user, I want the scoped prompt capabilities to compose correctly so that the full workflow works end-to-end.\n\n"
-        "## Prompt Scope\n"
-        f"{scope_block}\n\n"
-        "## Acceptance Criteria\n"
-        "- [ ] Behavior required by all listed prompts works when used together.\n"
-        "- [ ] `pdd detect --stories` reports no required prompt changes for this story.\n"
+        "## Covers\n\n"
+        f"{covers_block}\n\n"
+        "## Story\n\n"
+        "As a <persona>,\n"
+        "I want the scoped prompt capabilities to compose correctly,\n"
+        "so that the full workflow works end-to-end.\n\n"
+        "## Context\n\n"
+        f"{context_block}\n\n"
+        "## Acceptance Criteria\n\n"
+        "1. Given behavior required by all listed prompts, when used together, then all components function correctly.\n"
+        "2. Given pdd detect --stories is run, when analyzed, then it reports no required prompt changes.\n\n"
+        "## Oracle\n\n"
+        "These details matter for pass/fail:\n"
+        "- error type\n"
+        "- state transition\n"
+        "- absence/presence of external call\n"
+        "- emitted event\n"
+        "- returned value shape\n\n"
+        "## Non-Oracle\n\n"
+        "These details should not matter:\n"
+        "- private helper names\n"
+        "- internal class structure\n"
+        "- exact wording of non-user-facing messages\n"
+        "- deterministic but irrelevant ordering\n\n"
+        "## Negative Cases\n\n"
+        f"{neg_block}\n\n"
+        "## Non-Goals\n\n"
+        "What this story explicitly does not cover.\n\n"
+        "## Notes\n\n"
+        "Links, edge cases, fixtures, rationale, or implementation hints.\n"
     )
 
 

@@ -464,7 +464,7 @@ Use `<pdd-reason>`, `<pdd-interface>`, and `<pdd-dependency>` only for architect
 
 ## User Stories as Contract Coverage
 
-A user story is an example-level prompt test. A contract rule is a general obligation. A good story identifies which contract rules it covers.
+A user story is an example-level prompt test that serves as **example-level coverage** for contract rules. A contract rule is a general obligation. A good story identifies which contract rules it covers and lists them explicitly under the `## Covers` section.
 
 Every high-risk MUST or MUST NOT rule should be covered by at least one of:
 
@@ -546,6 +546,8 @@ Examples:
 ## Forbidden Outcomes
 
 List outcomes this story protects against.
+
+*(Note: The canonical on-disk template and PDD story generator use **## Negative Cases** as the heading for this section, representing the exact same intent of listing forbidden outcomes.)*
 
 For MUST NOT rules, this section is required.
 For ordinary positive stories, this section may be empty or omitted.

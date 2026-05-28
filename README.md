@@ -651,8 +651,12 @@ Story prompt linkage:
 - If metadata is missing, `pdd detect --stories` validates against the full prompt set.
 - In `--stories` mode, when `detect` identifies impacted prompts, PDD caches links back into the story metadata for future deterministic runs.
 
+Contract Coverage:
+- User stories serve as **example-level coverage** for named contract rules in your prompts. This coverage is explicitly documented under the `## Covers` section of each story (referencing rule IDs like `R1` or cross-module references like `prompts/module.prompt#R2`), which are analyzed during coverage checks.
+
 Template:
 - See `user_stories/story__template.md` for a starter format.
+- For details on contract checks and rule coverage, see `docs/coverage_contracts.md` and `docs/contract_check.md`.
 ## Global Options
 
 These options can be used with any command:
