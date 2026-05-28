@@ -1,13 +1,14 @@
 """
 CLI entry point for the agentic test generation workflow.
 Fetches a GitHub issue, extracts content and metadata describing what needs to be tested,
-then invokes the orchestrator to run the 9-step test generation process.
+then invokes the orchestrator to run the 9-step test generation process (supports UI, CLI, and API tests).
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -21,6 +22,7 @@ from rich.console import Console
 
 from .agentic_test_orchestrator import run_agentic_test_orchestrator
 from . import cmd_test_main
+from . import DEFAULT_STRENGTH, DEFAULT_TIME
 
 # Initialize console for rich output
 console = Console()
@@ -39,26 +41,19 @@ def _parse_github_url(url: str) -> Optional[Tuple[str, str, int]]:
     - https://www.github.com/{owner}/{repo}/issues/{number}
     - github.com/{owner}/{repo}/issues/{number}
     """
-    # Ensure scheme exists for urlparse to correctly identify netloc vs path
     if not url.startswith("http://") and not url.startswith("https://"):
         url = "https://" + url
 
     parsed = urlparse(url)
-    # Split path and filter out empty strings (e.g. from leading/trailing slashes)
     path_parts = [p for p in parsed.path.split("/") if p]
 
-    # Expected path structure: owner/repo/issues/number
-    # We look for the 'issues' segment to anchor our parsing
     try:
         if "issues" in path_parts:
             issues_index = path_parts.index("issues")
-            # We need at least 2 parts before 'issues' (owner, repo) and 1 after (number)
             if issues_index >= 2 and len(path_parts) > issues_index + 1:
                 owner = path_parts[issues_index - 2]
                 repo = path_parts[issues_index - 1]
                 number_str = path_parts[issues_index + 1]
-                # Handle cases where number might be followed by fragment or query (though urlparse handles those)
-                # or if there's a trailing slash that resulted in an empty part (handled by list comp)
                 return owner, repo, int(number_str)
     except ValueError:
         return None
@@ -72,26 +67,20 @@ def _fetch_issue_data(owner: str, repo: str, number: int) -> Tuple[Optional[Dict
     Returns (issue_data_dict, error_message).
     """
     try:
-        # Fetch issue details
         cmd = [
             "gh", "api",
-            f"repos/{owner}/{repo}/issues/{number}",
-            "--header", "Accept: application/vnd.github+json"
+            f"repos/{owner}/{repo}/issues/{number}"
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         issue_json = json.loads(result.stdout)
 
-        # Extract labels and state
-        labels = [l.get("name", "") for l in issue_json.get("labels", [])]
+        labels = [l.get("name", "") if isinstance(l, dict) else str(l) for l in issue_json.get("labels", [])]
         state = issue_json.get("state", "open")
 
-        # Fetch comments to provide full context
         comments_url = issue_json.get("comments_url")
         comments_text = ""
         if comments_url:
-            # The comments_url is a full URL. gh api accepts full URLs.
-            cmd_comments = ["gh", "api", comments_url, "--paginate"]
-            # We don't check=True here because comment fetching failure shouldn't block the whole process
+            cmd_comments = ["gh", "api", comments_url]
             res_comments = subprocess.run(cmd_comments, capture_output=True, text=True, check=False)
             if res_comments.returncode == 0:
                 try:
@@ -103,9 +92,8 @@ def _fetch_issue_data(owner: str, repo: str, number: int) -> Tuple[Optional[Dict
                             body = comment.get("body", "")
                             comments_text += f"\nUser: {user}\n{body}\n"
                 except json.JSONDecodeError:
-                    pass # Ignore comment parsing errors
+                    pass
 
-        # Combine body, metadata, and comments
         meta_info = f"State: {state}\nLabels: {', '.join(labels)}\n"
         full_content = meta_info + "\n" + (issue_json.get("body") or "") + comments_text
         issue_json["full_content_with_comments"] = full_content
@@ -127,7 +115,6 @@ def _ensure_repo_context(owner: str, repo: str, cwd: Path, quiet: bool) -> Tuple
     If the current directory is not the repo, clone it to a temp directory.
     Returns (success, path_or_error_msg).
     """
-    # Check current git remote
     try:
         res = subprocess.run(
             ["git", "remote", "get-url", "origin"],
@@ -137,14 +124,11 @@ def _ensure_repo_context(owner: str, repo: str, cwd: Path, quiet: bool) -> Tuple
         )
         if res.returncode == 0:
             remote_url = res.stdout.strip()
-            # Simple check if owner/repo is in the remote URL
-            # Matches github.com/owner/repo or github.com:owner/repo
             if f"{owner}/{repo}" in remote_url or f"{owner}:{repo}" in remote_url:
                 return True, str(cwd)
     except FileNotFoundError:
-        pass  # git not installed or not in path, handled later
+        pass
 
-    # If we are not in the repo, clone it into a temp dir.
     try:
         temp_dir = Path(tempfile.mkdtemp(prefix=f"pdd_test_{repo}_"))
     except Exception as e:
@@ -158,7 +142,6 @@ def _ensure_repo_context(owner: str, repo: str, cwd: Path, quiet: bool) -> Tuple
         subprocess.run(["git", "clone", clone_url, "."], cwd=temp_dir, check=True, capture_output=quiet)
         return True, str(temp_dir)
     except subprocess.CalledProcessError as e:
-        # Clean up empty temp dir if clone failed
         shutil.rmtree(temp_dir, ignore_errors=True)
         return False, f"Failed to clone repository: {e}"
 
@@ -169,21 +152,53 @@ def run_agentic_test(
     verbose: bool = False,
     quiet: bool = False,
     timeout_adder: float = 0.0,
-    use_github_state: bool = True
+    use_github_state: bool = True,
+    manual: bool = False,
+    prompt_file: Optional[str] = None,
+    code_file: Optional[str] = None,
 ) -> Tuple[bool, str, float, str, List[str]]:
     """
-    Main entry point for agentic test generation.
-    
+    Run the agentic test generation workflow for a given GitHub issue URL.
+
     Args:
-        issue_url: GitHub issue URL (e.g. https://github.com/owner/repo/issues/123)
-        verbose: Enable verbose logging
-        quiet: Suppress non-error output
-        timeout_adder: Additional seconds to add to step timeouts
-        use_github_state: Whether to persist state to GitHub comments
-        
+        issue_url: The GitHub issue URL.
+        verbose: Enable verbose logging.
+        quiet: Suppress standard logging.
+        timeout_adder: Additional time to add to each step timeout.
+        use_github_state: Whether to use GitHub issue comments for state resumption.
+        manual: If True, falls back to legacy prompt-based test generation.
+        prompt_file: Required if manual is True.
+        code_file: Required if manual is True.
+
     Returns:
-        (success, message, total_cost, model_used, changed_files)
+        A 5-tuple containing:
+        - success (bool)
+        - message (str)
+        - total_cost (float)
+        - model_used (str)
+        - changed_files (List[str])
     """
+    if manual:
+        if not prompt_file or not code_file:
+            return False, "Manual mode requires both prompt_file and code_file.", 0.0, "", []
+        
+        try:
+            import click
+            ctx = click.Context(click.Command("test"))
+            ctx.obj = {"verbose": verbose, "quiet": quiet}
+            
+            test_code, cost, model, success, err = cmd_test_main.cmd_test_main(
+                ctx=ctx,
+                prompt_file=prompt_file,
+                code_file=code_file,
+                output=None,
+                language="python",
+                strength=DEFAULT_STRENGTH,
+            )
+            return bool(success), err or "Manual test generation completed.", cost, model, []
+        except Exception as e:
+            return False, f"Manual mode failed: {str(e)}", 0.0, "", []
+
     # 1. Check prerequisites
     if not _check_gh_cli():
         msg = "GitHub CLI (gh) not found. Please install it: https://cli.github.com/"
@@ -217,12 +232,15 @@ def run_agentic_test(
     issue_author = issue_data.get("user", {}).get("login", "unknown")
     issue_content = issue_data.get("full_content_with_comments", "")
     
+    # Extract labels and state to satisfy Req 6
+    labels = issue_data.get("labels", [])
+    state = issue_data.get("state", "open")
+
     # 4. Setup Repository Context
     current_cwd = Path.cwd()
     is_repo, repo_path_str = _ensure_repo_context(owner, repo, current_cwd, quiet)
     
     if not is_repo:
-        # repo_path_str contains error message in this case
         if not quiet:
             console.print(f"[red]{repo_path_str}[/red]")
         return False, repo_path_str, 0.0, "", []
@@ -262,7 +280,8 @@ def run_agentic_test(
                     console.print(f"[yellow]Warning: Failed to cleanup temp dir: {e}[/yellow]")
 
 
-def main():
+def main() -> None:
+    """CLI entry point."""
     parser = argparse.ArgumentParser(description="Agentic Test Generation CLI")
     parser.add_argument("--manual", action="store_true", help="Use manual prompt-based generation (legacy mode)")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
@@ -270,17 +289,13 @@ def main():
     parser.add_argument("--timeout-adder", type=float, default=0.0, help="Add seconds to step timeouts")
     parser.add_argument("--no-github-state", action="store_true", help="Disable GitHub state persistence")
     
-    # We use parse_known_args because manual mode might have different positional args
     args, remaining = parser.parse_known_args()
 
     if args.manual:
-        # Delegate to cmd_test_main
-        # Remove --manual from sys.argv so cmd_test_main doesn't choke on it
         sys.argv = [arg for arg in sys.argv if arg != "--manual"]
         cmd_test_main.main()
         return
 
-    # Agentic Mode
     if not remaining:
         console.print("[red]Error: Issue URL required[/red]")
         sys.exit(1)
@@ -299,9 +314,9 @@ def main():
         sys.exit(1)
 
 
-def agentic_test_main():
+def agentic_test_main() -> None:
     """Backward-compatible alias for CLI entry point."""
-    return main()
+    main()
 
 
 if __name__ == "__main__":

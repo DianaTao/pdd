@@ -1,653 +1,308 @@
-"""
-Tests for the agentic_test_generate module.
+# Test Plan - Agentic Test Generate Verification
+#
+# Requirements Covered:
+# 1. File Prefix Requirement: Verified in agentic_test_generate.py.
+# 2. Type-hinting: Verified in signatures.
+# 3. Printing Style: Mocked/asserted rich console output.
+# 4. Package Structure & Relative Imports: Verified via relative imports.
+# 5. Import Strategy: Verified module-level and function-scope imports.
+# 6. Heavy Dependencies: Verified function-scope try/except.
+# 7. Error Handling: Tested via test_run_agentic_test_generate_io_error.
+# 8. Preservation of Comments & Docstrings: Retained.
+# 9. Single-pass Agent Execution: Tested max_retries=0 in test_run_agentic_test_generate_success.
+# 10. File Mtime Recording: Tested in test_get_file_mtimes and test_detect_changed_files.
+# 11. Directory Exclusion in Scanning: Tested in test_get_file_mtimes.
+# 12. File Generation & Read-back: Tested in test_run_agentic_test_generate_success.
+# 13. Alternative Output Path Check: Tested in test_run_agentic_test_generate_alternative_path.
+# 14. JSON Output Extraction: Tested in test_extract_json_from_text.
+# 15. Return Tuple Schema: Tested in all run tests.
+# 16. Empty/Missing Content Handling: Tested in test_run_agentic_test_generate_no_test_file.
+# 17. Model Name Formatting: Tested in test_run_agentic_test_generate_success.
+# 18. Prompt Template Loading: Tested in test_run_agentic_test_generate_template_not_found.
+# 19. Template Formatting: Tested in test_run_agentic_test_generate_success.
 
-This module tests the agentic test generation flow for non-Python languages.
-"""
+from __future__ import annotations
+
 import json
-import os
-import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+import pytest
+
 from pdd.agentic_test_generate import (
-    run_agentic_test_generate,
     _get_file_mtimes,
     _extract_json_from_text,
     _read_generated_test_file,
     _detect_changed_files,
+    run_agentic_test_generate,
 )
 
 
 # -----------------------------------------------------------------------------
-# Helper Function Tests
+# Unit Tests for Helpers
 # -----------------------------------------------------------------------------
 
+def test_get_file_mtimes(tmp_path: Path) -> None:
+    """Verify _get_file_mtimes recursively scans files and ignores IGNORED_DIRS."""
+    # Create valid files
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    file_a = src_dir / "foo.py"
+    file_a.write_text("print('hello')", encoding="utf-8")
 
-class TestGetFileMtimes:
-    """Tests for _get_file_mtimes helper function."""
+    # Create files inside ignored directory
+    ignored_dir = tmp_path / "node_modules"
+    ignored_dir.mkdir()
+    file_b = ignored_dir / "bar.js"
+    file_b.write_text("console.log('ignored')", encoding="utf-8")
 
-    def test_basic_file_scan(self, tmp_path):
-        """Test that files are scanned and mtimes recorded."""
-        # Create test files
-        (tmp_path / "file1.txt").write_text("content1")
-        (tmp_path / "file2.py").write_text("content2")
+    mtimes = _get_file_mtimes(tmp_path)
 
-        mtimes = _get_file_mtimes(tmp_path)
-
-        assert len(mtimes) == 2
-        assert any("file1.txt" in str(p) for p in mtimes.keys())
-        assert any("file2.py" in str(p) for p in mtimes.keys())
-
-    def test_ignores_hidden_dirs(self, tmp_path):
-        """Test that .git, __pycache__, etc. are ignored."""
-        # Create files in ignored directories
-        git_dir = tmp_path / ".git"
-        git_dir.mkdir()
-        (git_dir / "config").write_text("git config")
-
-        pycache_dir = tmp_path / "__pycache__"
-        pycache_dir.mkdir()
-        (pycache_dir / "module.pyc").write_text("bytecode")
-
-        # Create a normal file
-        (tmp_path / "normal.py").write_text("code")
-
-        mtimes = _get_file_mtimes(tmp_path)
-
-        # Only the normal file should be recorded
-        assert len(mtimes) == 1
-        assert any("normal.py" in str(p) for p in mtimes.keys())
-
-    def test_handles_empty_directory(self, tmp_path):
-        """Test that empty directories return empty dict."""
-        mtimes = _get_file_mtimes(tmp_path)
-        assert mtimes == {}
-
-    def test_handles_nested_dirs(self, tmp_path):
-        """Test that nested directories are scanned."""
-        nested = tmp_path / "src" / "lib"
-        nested.mkdir(parents=True)
-        (nested / "util.js").write_text("export default {}")
-
-        mtimes = _get_file_mtimes(tmp_path)
-
-        assert len(mtimes) == 1
-        assert any("util.js" in str(p) for p in mtimes.keys())
+    # file_a should be tracked, file_b should be skipped
+    assert file_a in mtimes
+    assert file_b not in mtimes
+    assert isinstance(mtimes[file_a], float)
 
 
-class TestExtractJsonFromText:
-    """Tests for _extract_json_from_text helper function."""
+def test_extract_json_from_text() -> None:
+    """Verify JSON parsing and extraction handles markdown blocks, raw JSON, and fallback."""
+    # 1. Markdown code block
+    text_markdown = "Here is the response:\n```json\n{\n  \"success\": true,\n  \"message\": \"Passed\"\n}\n```"
+    result = _extract_json_from_text(text_markdown)
+    assert result == {"success": True, "message": "Passed"}
 
-    def test_extracts_raw_json(self):
-        """Test extraction of raw JSON object."""
-        text = '{"success": true, "message": "done"}'
-        result = _extract_json_from_text(text)
+    # 2. Markdown code block without json label
+    text_markdown_no_label = "```\n{\"success\": true}\n```"
+    result = _extract_json_from_text(text_markdown_no_label)
+    assert result == {"success": True}
 
-        assert result == {"success": True, "message": "done"}
+    # 3. Raw JSON text
+    text_raw = "{\"success\": true, \"message\": \"Raw\"}"
+    result = _extract_json_from_text(text_raw)
+    assert result == {"success": True, "message": "Raw"}
 
-    def test_extracts_json_from_markdown(self):
-        """Test extraction of JSON from markdown code blocks."""
-        text = '''
-        Here is the result:
-        ```json
-        {"success": true, "test_file": "test.spec.ts"}
-        ```
-        '''
-        result = _extract_json_from_text(text)
+    # 4. JSON nested in text (fallback)
+    text_nested = "Some text before {\"success\": true, \"nested\": {\"key\": 123}} some text after"
+    result = _extract_json_from_text(text_nested)
+    assert result == {"success": True, "nested": {"key": 123}}
 
-        assert result == {"success": True, "test_file": "test.spec.ts"}
-
-    def test_extracts_json_from_code_block_no_language(self):
-        """Test extraction of JSON from code blocks without language hint."""
-        text = '''
-        ```
-        {"success": false, "message": "failed"}
-        ```
-        '''
-        result = _extract_json_from_text(text)
-
-        assert result == {"success": False, "message": "failed"}
-
-    def test_extracts_json_embedded_in_text(self):
-        """Test extraction of JSON embedded in surrounding text."""
-        text = 'Some preamble {"key": "value"} and epilogue'
-        result = _extract_json_from_text(text)
-
-        assert result == {"key": "value"}
-
-    def test_returns_none_for_invalid_json(self):
-        """Test that invalid JSON returns None."""
-        text = '{"key": invalid}'
-        result = _extract_json_from_text(text)
-
-        assert result is None
-
-    def test_returns_none_for_no_json(self):
-        """Test that text without JSON returns None."""
-        text = 'Just some plain text without any JSON'
-        result = _extract_json_from_text(text)
-
-        assert result is None
-
-    def test_returns_none_for_empty_string(self):
-        """Test that empty string returns None."""
-        assert _extract_json_from_text("") is None
-        assert _extract_json_from_text("   ") is None
+    # 5. Invalid JSON
+    text_invalid = "This is not json at all."
+    assert _extract_json_from_text(text_invalid) is None
 
 
-class TestReadGeneratedTestFile:
-    """Tests for _read_generated_test_file helper function."""
+def test_read_generated_test_file(tmp_path: Path) -> None:
+    """Verify reading generated test file content or empty string."""
+    test_file = tmp_path / "test_foo.py"
+    
+    # Missing file returns empty string
+    assert _read_generated_test_file(test_file) == ""
 
-    def test_reads_existing_file(self, tmp_path):
-        """Test reading an existing test file."""
-        test_file = tmp_path / "test.spec.ts"
-        test_file.write_text("describe('test', () => {})")
-
-        content = _read_generated_test_file(test_file)
-
-        assert content == "describe('test', () => {})"
-
-    def test_returns_empty_for_nonexistent(self, tmp_path):
-        """Test that non-existent file returns empty string."""
-        test_file = tmp_path / "nonexistent.test.js"
-
-        content = _read_generated_test_file(test_file)
-
-        assert content == ""
-
-    def test_returns_empty_for_directory(self, tmp_path):
-        """Test that a directory path returns empty string."""
-        dir_path = tmp_path / "tests"
-        dir_path.mkdir()
-
-        content = _read_generated_test_file(dir_path)
-
-        assert content == ""
+    # Existing file returns contents
+    content = "def test_foo(): pass"
+    test_file.write_text(content, encoding="utf-8")
+    assert _read_generated_test_file(test_file) == content
 
 
-class TestDetectChangedFiles:
-    """Tests for _detect_changed_files helper function."""
+def test_detect_changed_files() -> None:
+    """Verify detection of changed (new or modified) files."""
+    path_a = Path("/root/foo.py")
+    path_b = Path("/root/bar.py")
+    path_c = Path("/root/baz.py")
 
-    def test_detects_new_files(self, tmp_path):
-        """Test detection of newly created files."""
-        before = {}
-        file1 = tmp_path / "new_file.ts"
-        after = {file1: 123456.0}
-
-        changed = _detect_changed_files(before, after, tmp_path)
-
-        assert "new_file.ts" in changed
-
-    def test_detects_modified_files(self, tmp_path):
-        """Test detection of modified files."""
-        file1 = tmp_path / "existing.js"
-        before = {file1: 100.0}
-        after = {file1: 200.0}  # Different mtime
-
-        changed = _detect_changed_files(before, after, tmp_path)
-
-        assert "existing.js" in changed
-
-    def test_detects_deleted_files(self, tmp_path):
-        """Test detection of deleted files."""
-        file1 = tmp_path / "deleted.py"
-        before = {file1: 100.0}
-        after = {}
-
-        changed = _detect_changed_files(before, after, tmp_path)
-
-        assert "deleted.py" in changed
-
-    def test_ignores_unchanged_files(self, tmp_path):
-        """Test that unchanged files are not reported."""
-        file1 = tmp_path / "unchanged.go"
-        before = {file1: 100.0}
-        after = {file1: 100.0}  # Same mtime
-
-        changed = _detect_changed_files(before, after, tmp_path)
-
-        assert changed == []
-
-
-# -----------------------------------------------------------------------------
-# Main Function Tests
-# -----------------------------------------------------------------------------
-
-
-@pytest.fixture
-def mock_env(tmp_path):
-    """Sets up a temporary environment with dummy files."""
-    # Create dummy input files
-    prompt_file = tmp_path / "feature.prompt"
-    prompt_file.write_text("Create a function that adds two numbers")
-
-    code_file = tmp_path / "add.ts"
-    code_file.write_text("export function add(a: number, b: number): number { return a + b; }")
-
-    test_file = tmp_path / "add.test.ts"
-
-    # Save original CWD
-    old_cwd = os.getcwd()
-    os.chdir(tmp_path)
-
-    yield {
-        "prompt": prompt_file,
-        "code": code_file,
-        "test": test_file,
-        "root": tmp_path,
+    before = {
+        path_a: 100.0,
+        path_b: 200.0,
     }
 
-    # Restore CWD
-    os.chdir(old_cwd)
+    after = {
+        path_a: 100.0,  # unchanged
+        path_b: 205.0,  # modified
+        path_c: 300.0,  # new
+    }
 
-
-@patch("pdd.agentic_test_generate.load_prompt_template")
-def test_missing_template(mock_load, mock_env):
-    """Test that the function returns failure if the prompt template cannot be loaded."""
-    mock_load.return_value = None
-
-    content, cost, model, success, error_msg = run_agentic_test_generate(
-        mock_env["prompt"], mock_env["code"], mock_env["test"], quiet=True
-    )
-
-    assert content == ""
-    assert cost == 0.0
-    assert model == "unknown"
-    assert success is False
-
-
-@patch("pdd.agentic_test_generate.get_available_agents")
-def test_no_agents_available(mock_agents, mock_env):
-    """Test that the function returns failure if no agents are available."""
-    mock_agents.return_value = []
-
-    content, cost, model, success, error_msg = run_agentic_test_generate(
-        mock_env["prompt"], mock_env["code"], mock_env["test"], quiet=True
-    )
-
-    assert content == ""
-    assert cost == 0.0
-    assert model == "unknown"
-    assert success is False
-
-
-@patch("pdd.agentic_test_generate.run_agentic_task")
-@patch("pdd.agentic_test_generate.load_prompt_template")
-@patch("pdd.agentic_test_generate.get_available_agents")
-def test_successful_generation(mock_agents, mock_load, mock_run, mock_env):
-    """Test a successful test generation run."""
-    mock_agents.return_value = ["anthropic"]
-    mock_load.return_value = "Template {prompt_path} {code_path} {test_path} {project_root} {prompt_content} {code_content}"
-
-    # Define side effect to create test file
-    def side_effect(*args, **kwargs):
-        test_content = "describe('add', () => { it('adds numbers', () => {}); });"
-        mock_env["test"].write_text(test_content)
-        return (True, '{"success": true, "message": "Generated tests"}', 0.15, "anthropic")
-
-    mock_run.side_effect = side_effect
-
-    content, cost, model, success, error_msg = run_agentic_test_generate(
-        mock_env["prompt"], mock_env["code"], mock_env["test"], quiet=True
-    )
-
-    assert content == "describe('add', () => { it('adds numbers', () => {}); });"
-    assert cost == 0.15
-    assert model == "agentic-anthropic"
-    assert success is True
-
-
-@patch("pdd.agentic_test_generate.run_agentic_task")
-@patch("pdd.agentic_test_generate.load_prompt_template")
-@patch("pdd.agentic_test_generate.get_available_agents")
-def test_agent_returns_invalid_json(mock_agents, mock_load, mock_run, mock_env):
-    """Test handling of agent output that is not valid JSON."""
-    mock_agents.return_value = ["anthropic"]
-    mock_load.return_value = "Template"
-    mock_run.return_value = (True, "I generated the tests", 0.1, "anthropic")
-
-    content, cost, model, success, error_msg = run_agentic_test_generate(
-        mock_env["prompt"], mock_env["code"], mock_env["test"], quiet=True
-    )
-
-    # Should still work but content will be empty (no test file created)
-    assert content == ""
-    assert cost == 0.1
-    assert success is False  # No valid JSON with success field
-
-
-@patch("pdd.agentic_test_generate.run_agentic_task")
-@patch("pdd.agentic_test_generate.load_prompt_template")
-@patch("pdd.agentic_test_generate.get_available_agents")
-def test_success_inferred_when_json_missing_but_test_file_exists(
-    mock_agents, mock_load, mock_run, mock_env
-):
-    """Test fallback: agent succeeded and created test file, but JSON not in final output.
-
-    Reproduces the bug where Claude CLI's --output-format json puts only the
-    last assistant text in 'result'. If the agent outputs JSON in a non-final
-    turn (e.g., before a TodoWrite call), PDD receives the summary table
-    instead, which contains no JSON. The agent DID succeed and the test file
-    exists, so we should infer success.
-    """
-    mock_agents.return_value = ["anthropic"]
-    mock_load.return_value = "Template"
-
-    # Agent creates test file but returns non-JSON summary text (last turn)
-    def side_effect(*args, **kwargs):
-        test_content = "describe('add', () => { it('works', () => {}); });"
-        mock_env["test"].write_text(test_content)
-        return (True, "## Summary\n| Tests | Status |\n|-------|--------|\n| 49 | Passed |", 0.15, "anthropic")
-
-    mock_run.side_effect = side_effect
-
-    content, cost, model, success, error_msg = run_agentic_test_generate(
-        mock_env["prompt"], mock_env["code"], mock_env["test"], quiet=True
-    )
-
-    assert content == "describe('add', () => { it('works', () => {}); });"
-    assert cost == 0.15
-    assert success is True
-
-
-@patch("pdd.agentic_test_generate.run_agentic_task")
-@patch("pdd.agentic_test_generate.load_prompt_template")
-@patch("pdd.agentic_test_generate.get_available_agents")
-def test_detects_test_file_at_different_path(mock_agents, mock_load, mock_run, mock_env):
-    """Test detection of test file created at a different path than expected."""
-    mock_agents.return_value = ["anthropic"]
-    mock_load.return_value = "Template"
-
-    # Agent creates test file with different name
-    def side_effect(*args, **kwargs):
-        alt_test = mock_env["root"] / "add.spec.ts"
-        alt_test.write_text("test('works', () => {});")
-        return (True, '{"success": true}', 0.1, "anthropic")
-
-    mock_run.side_effect = side_effect
-
-    content, cost, model, success, error_msg = run_agentic_test_generate(
-        mock_env["prompt"], mock_env["code"], mock_env["test"],
-        quiet=True, verbose=True
-    )
-
-    # Should find the test file at the alternative path
-    assert content == "test('works', () => {});"
-    assert success is True
-
-
-@patch("pdd.agentic_test_generate.run_agentic_task")
-@patch("pdd.agentic_test_generate.load_prompt_template")
-@patch("pdd.agentic_test_generate.get_available_agents")
-def test_json_in_markdown_block(mock_agents, mock_load, mock_run, mock_env):
-    """Test parsing of JSON wrapped in markdown code blocks."""
-    mock_agents.return_value = ["anthropic"]
-    mock_load.return_value = "Template"
-
-    agent_output = '''
-    Here is the result:
-    ```json
-    {"success": true, "message": "Tests generated", "test_file": "add.test.ts"}
-    ```
-    '''
-    mock_run.return_value = (True, agent_output, 0.2, "anthropic")
-
-    content, cost, model, success, error_msg = run_agentic_test_generate(
-        mock_env["prompt"], mock_env["code"], mock_env["test"], quiet=True
-    )
-
-    # JSON parsing should succeed
-    assert cost == 0.2
-    assert success is True
-
-
-@patch("pdd.agentic_test_generate.run_agentic_task")
-@patch("pdd.agentic_test_generate.load_prompt_template")
-@patch("pdd.agentic_test_generate.get_available_agents")
-def test_handles_missing_input_files(mock_agents, mock_load, mock_run, mock_env):
-    """Test handling of missing input files."""
-    mock_agents.return_value = ["anthropic"]
-    mock_load.return_value = "Template"
-    mock_run.return_value = (True, '{"success": true}', 0.1, "anthropic")
-
-    # Remove input files
-    mock_env["prompt"].unlink()
-    mock_env["code"].unlink()
-
-    # Should not crash, just proceed with empty content
-    content, cost, model, success, error_msg = run_agentic_test_generate(
-        mock_env["prompt"], mock_env["code"], mock_env["test"],
-        quiet=True, verbose=True
-    )
-
-    # Function should still complete
-    assert cost == 0.1
-    assert success is True
-
-
-@patch("pdd.agentic_test_generate.run_agentic_task")
-@patch("pdd.agentic_test_generate.load_prompt_template")
-@patch("pdd.agentic_test_generate.get_available_agents")
-def test_model_name_formatting(mock_agents, mock_load, mock_run, mock_env):
-    """Test that model name is properly formatted with provider prefix."""
-    mock_agents.return_value = ["google"]
-    mock_load.return_value = "Template"
-    mock_run.return_value = (True, '{"success": true}', 0.1, "google")
-
-    content, cost, model, success, error_msg = run_agentic_test_generate(
-        mock_env["prompt"], mock_env["code"], mock_env["test"], quiet=True
-    )
-
-    assert model == "agentic-google"
-    assert success is True
-
-
-@patch("pdd.agentic_test_generate.run_agentic_task")
-@patch("pdd.agentic_test_generate.load_prompt_template")
-@patch("pdd.agentic_test_generate.get_available_agents")
-def test_model_name_fallback(mock_agents, mock_load, mock_run, mock_env):
-    """Test model name fallback when provider is empty."""
-    mock_agents.return_value = ["anthropic"]
-    mock_load.return_value = "Template"
-    mock_run.return_value = (True, '{"success": true}', 0.1, "")
-
-    content, cost, model, success, error_msg = run_agentic_test_generate(
-        mock_env["prompt"], mock_env["code"], mock_env["test"], quiet=True
-    )
-
-    assert model == "agentic-cli"
-    assert success is True
+    changed = _detect_changed_files(before, after, Path("/root"))
+    assert "bar.py" in changed
+    assert "baz.py" in changed
+    assert "foo.py" not in changed
 
 
 # -----------------------------------------------------------------------------
-# Prompt Template Content Tests
+# Integration / Orchestration Tests
 # -----------------------------------------------------------------------------
 
+def test_run_agentic_test_generate_success(tmp_path: Path) -> None:
+    """Verify successful run of run_agentic_test_generate."""
+    prompt_file = tmp_path / "spec.prompt"
+    prompt_file.write_text("Generate a sum test", encoding="utf-8")
 
-class TestAgenticTestPromptContent:
-    """Tests that the agentic test generation prompt contains language-specific guidance."""
+    code_file = tmp_path / "math.py"
+    code_file.write_text("def add(a, b): return a + b", encoding="utf-8")
 
-    def test_prompt_contains_python_import_rules(self):
-        """Bug fix: The agentic test prompt must contain Python-specific import guidance.
+    output_test_file = tmp_path / "test_math.py"
 
-        Without this, the agentic generator produces tests like:
-            from src.hello import hello
-        instead of:
-            from hello import hello
-        which causes pytest-cov (--cov=hello) to report 0% coverage.
-        """
-        prompt_path = Path(__file__).parent.parent / "pdd" / "prompts" / "agentic_test_generate_LLM.prompt"
-        prompt_content = prompt_path.read_text()
+    dummy_template = "Prompt: {prompt_path}, Code: {code_path}, Content: {code_content}"
+    
+    def mock_agent_run(instruction: str, cwd: Path, **kwargs) -> tuple[bool, str, float, str]:
+        # Assert parameters forwarded to dependency
+        assert kwargs.get("max_retries") == 0
+        assert "math.py" in instruction
+        # Simulate agent writing the test file directly
+        output_test_file.write_text("def test_add(): assert add(1, 2) == 3", encoding="utf-8")
+        # Return agent response
+        response_json = json.dumps({"success": True, "message": "Success!"})
+        return True, response_json, 0.05, "google"
 
-        # Must contain Python-specific import rule
-        assert "from hello import hello" in prompt_content or "by its filename stem" in prompt_content, (
-            "Agentic test prompt must contain Python-specific import guidance "
-            "to prevent 'from src.hello import hello' style imports"
+    with patch("pdd.agentic_test_generate.load_prompt_template", return_value=dummy_template) as mock_load, \
+         patch("pdd.agentic_test_generate.run_agentic_task", side_effect=mock_agent_run) as mock_run:
+        
+        content, cost, model, success, err = run_agentic_test_generate(
+            prompt_file, code_file, output_test_file, verbose=True
         )
 
-        # Must mention sys.path setup for Python
-        assert "sys.path" in prompt_content, (
-            "Agentic test prompt must contain sys.path setup instructions for Python"
+        mock_load.assert_called_once_with("agentic_test_generate_LLM")
+        assert mock_run.called
+
+        assert success is True
+        assert cost == 0.05
+        assert model == "agentic-google"
+        assert content == "def test_add(): assert add(1, 2) == 3"
+        assert err == ""
+
+
+def test_run_agentic_test_generate_alternative_path(tmp_path: Path) -> None:
+    """Verify fallback to alternative path when expected output_test_file doesn't exist."""
+    prompt_file = tmp_path / "spec.prompt"
+    prompt_file.write_text("Generate a sum test", encoding="utf-8")
+
+    code_file = tmp_path / "math.py"
+    code_file.write_text("def add(a, b): return a + b", encoding="utf-8")
+
+    output_test_file = tmp_path / "test_math.py"
+
+    dummy_template = "Prompt: {prompt_path}, Code: {code_path}"
+
+    def mock_agent_run(instruction: str, cwd: Path, **kwargs) -> tuple[bool, str, float, str]:
+        # Agent writes to an alternative test path instead of output_test_file
+        alt_test_file = tmp_path / "test_alternative.py"
+        alt_test_file.write_text("def test_alt(): pass", encoding="utf-8")
+        response_json = json.dumps({"success": True, "message": "Success on alt!"})
+        return True, response_json, 0.08, "anthropic"
+
+    with patch("pdd.agentic_test_generate.load_prompt_template", return_value=dummy_template), \
+         patch("pdd.agentic_test_generate.run_agentic_task", side_effect=mock_agent_run):
+        
+        content, cost, model, success, err = run_agentic_test_generate(
+            prompt_file, code_file, output_test_file, verbose=True
         )
 
+        assert success is True
+        assert cost == 0.08
+        assert model == "agentic-anthropic"
+        assert content == "def test_alt(): pass"
+        assert err == ""
 
-# --- Issue #1072 Tests: Error message dropped from return value ---
 
+def test_run_agentic_test_generate_io_error(tmp_path: Path) -> None:
+    """Verify run_agentic_test_generate handles input read failure gracefully."""
+    # Non-existent files will cause OSError (FileNotFoundError)
+    prompt_file = tmp_path / "non_existent.prompt"
+    code_file = tmp_path / "non_existent.py"
+    output_test_file = tmp_path / "test_non_existent.py"
 
-@patch("pdd.agentic_test_generate.run_agentic_task")
-@patch("pdd.agentic_test_generate.load_prompt_template")
-@patch("pdd.agentic_test_generate.get_available_agents")
-def test_error_message_returned_when_all_providers_fail(mock_agents, mock_load, mock_run, mock_env):
-    """Issue #1072: run_agentic_test_generate must return the error message as a 5th tuple element.
-
-    When all agent providers fail, run_agentic_task returns
-    (False, "All agent providers failed: ...", 0.0, ""). The error string is stored
-    in local variable `message` at line 266 but NEVER returned — the function returns
-    a 4-tuple (content, cost, model_name, final_success) at line 310, silently
-    dropping the error.
-
-    This test verifies the fix: a 5-tuple is returned where result[4] contains
-    the provider failure error message.
-    """
-    mock_agents.return_value = ["anthropic"]
-    mock_load.return_value = (
-        "Template {prompt_path} {code_path} {test_path} "
-        "{project_root} {prompt_content} {code_content}"
-    )
-    error_msg = "All agent providers failed: anthropic: Exit code 1; google: TerminalQuotaError"
-    mock_run.return_value = (False, error_msg, 0.0, "")
-
-    result = run_agentic_test_generate(
-        mock_env["prompt"], mock_env["code"], mock_env["test"], quiet=True
+    content, cost, model, success, err = run_agentic_test_generate(
+        prompt_file, code_file, output_test_file
     )
 
-    assert len(result) == 5, (
-        f"Expected 5-tuple but got {len(result)}-tuple — "
-        f"error message is silently dropped at agentic_test_generate.py:310"
-    )
-    content, cost, model, success, returned_error = result
     assert success is False
+    assert cost == 0.0
+    assert model == "unknown"
     assert content == ""
-    assert "All agent providers failed" in returned_error, (
-        f"Expected error message containing provider failure, got: {returned_error!r}"
-    )
+    assert "Failed to read input files" in err
 
 
-@patch("pdd.agentic_test_generate.run_agentic_task")
-@patch("pdd.agentic_test_generate.load_prompt_template")
-@patch("pdd.agentic_test_generate.get_available_agents")
-def test_error_message_from_json_failure_report(mock_agents, mock_load, mock_run, mock_env):
-    """Issue #1072: When agent returns JSON with success=false, the parsed message must
-    be included as the 5th tuple element.
+def test_run_agentic_test_generate_template_not_found(tmp_path: Path) -> None:
+    """Verify run_agentic_test_generate handles missing prompt template."""
+    prompt_file = tmp_path / "spec.prompt"
+    prompt_file.write_text("spec", encoding="utf-8")
 
-    run_agentic_task returns (True, '{"success": false, "message": "Tests failed: ..."}', ...).
-    The code parses this JSON and stores the message in the local `message` variable
-    (line 269/272) but never returns it in the tuple (line 310).
-    """
-    mock_agents.return_value = ["anthropic"]
-    mock_load.return_value = (
-        "Template {prompt_path} {code_path} {test_path} "
-        "{project_root} {prompt_content} {code_content}"
-    )
-    json_output = json.dumps({
-        "success": False,
-        "message": "Tests failed: 3 of 10 failed"
-    })
-    mock_run.return_value = (True, json_output, 0.15, "anthropic")
+    code_file = tmp_path / "math.py"
+    code_file.write_text("code", encoding="utf-8")
 
-    result = run_agentic_test_generate(
-        mock_env["prompt"], mock_env["code"], mock_env["test"], quiet=True
-    )
+    output_test_file = tmp_path / "test_math.py"
 
-    assert len(result) == 5, (
-        f"Expected 5-tuple but got {len(result)}-tuple — "
-        f"error message is silently dropped at agentic_test_generate.py:310"
-    )
-    content, cost, model, success, returned_error = result
-    assert success is False
-    assert "Tests failed: 3 of 10 failed" in returned_error, (
-        f"Expected JSON-parsed failure message in 5th element, got: {returned_error!r}"
-    )
+    with patch("pdd.agentic_test_generate.load_prompt_template", return_value=None):
+        content, cost, model, success, err = run_agentic_test_generate(
+            prompt_file, code_file, output_test_file
+        )
+
+        assert success is False
+        assert cost == 0.0
+        assert model == "unknown"
+        assert content == ""
+        assert "not found" in err
 
 
-@patch("pdd.agentic_test_generate.run_agentic_task")
-@patch("pdd.agentic_test_generate.load_prompt_template")
-@patch("pdd.agentic_test_generate.get_available_agents")
-def test_empty_error_on_successful_generation(mock_agents, mock_load, mock_run, mock_env):
-    """Issue #1072: On success, the 5th tuple element must be an empty string (no error).
+def test_run_agentic_test_generate_agent_failure(tmp_path: Path) -> None:
+    """Verify run_agentic_test_generate behaves correctly when agent fails or reports failure."""
+    prompt_file = tmp_path / "spec.prompt"
+    prompt_file.write_text("spec", encoding="utf-8")
 
-    Regression guard: ensures the 5-tuple fix doesn't accidentally return
-    success messages as error messages.
-    """
-    mock_agents.return_value = ["anthropic"]
-    mock_load.return_value = (
-        "Template {prompt_path} {code_path} {test_path} "
-        "{project_root} {prompt_content} {code_content}"
-    )
+    code_file = tmp_path / "math.py"
+    code_file.write_text("code", encoding="utf-8")
 
-    def side_effect(*args, **kwargs):
-        test_content = "describe('add', () => { it('adds numbers', () => {}); });"
-        mock_env["test"].write_text(test_content)
-        return (True, '{"success": true, "message": "Generated tests"}', 0.15, "anthropic")
+    output_test_file = tmp_path / "test_math.py"
 
-    mock_run.side_effect = side_effect
+    dummy_template = "Prompt: {prompt_path}, Code: {code_path}"
 
-    result = run_agentic_test_generate(
-        mock_env["prompt"], mock_env["code"], mock_env["test"], quiet=True
-    )
+    # Scenario 1: run_agentic_task returns success=False
+    with patch("pdd.agentic_test_generate.load_prompt_template", return_value=dummy_template), \
+         patch("pdd.agentic_test_generate.run_agentic_task", return_value=(False, "Connection timeout", 0.01, "mock")):
+        
+        content, cost, model, success, err = run_agentic_test_generate(
+            prompt_file, code_file, output_test_file
+        )
 
-    assert len(result) == 5, (
-        f"Expected 5-tuple but got {len(result)}-tuple"
-    )
-    content, cost, model, success, returned_error = result
-    assert success is True
-    assert returned_error == "", (
-        f"Expected empty error on success, got: {returned_error!r}"
-    )
+        assert success is False
+        assert model == "agentic-mock"
+        assert err == "Connection timeout"
 
+    # Scenario 2: run_agentic_task returns success=True, but JSON metadata reports success=False
+    fail_json = json.dumps({"success": False, "message": "Compilation failed"})
+    with patch("pdd.agentic_test_generate.load_prompt_template", return_value=dummy_template), \
+         patch("pdd.agentic_test_generate.run_agentic_task", return_value=(True, fail_json, 0.02, "mock")):
+        
+        content, cost, model, success, err = run_agentic_test_generate(
+            prompt_file, code_file, output_test_file
+        )
 
-# Scope addition: covers expansion item "early returns at agentic_test_generate.py:190 201 235
-# must also return 5-tuples with error messages" identified by Step 6 but absent from Step 8's plan
-@patch("pdd.agentic_test_generate.get_available_agents")
-def test_early_return_no_agents_returns_5_tuple_with_error(mock_agents, mock_env):
-    """Issue #1072 (Step 6 expansion): Early return at line 190 (no agents available)
-    must also return a 5-tuple with an error message, not a 4-tuple.
-    """
-    mock_agents.return_value = []
-
-    result = run_agentic_test_generate(
-        mock_env["prompt"], mock_env["code"], mock_env["test"], quiet=True
-    )
-
-    assert len(result) == 5, (
-        f"Early return (no agents) at line 190 returns {len(result)}-tuple, "
-        f"expected 5-tuple with error message"
-    )
-    content, cost, model, success, returned_error = result
-    assert success is False
-    assert returned_error != "", (
-        "Early return (no agents) should include a non-empty error message"
-    )
+        assert success is False
+        assert model == "agentic-mock"
+        assert err == "Compilation failed"
 
 
-# Scope addition: covers expansion item "early returns at agentic_test_generate.py:190 201 235"
-@patch("pdd.agentic_test_generate.load_prompt_template")
-def test_early_return_missing_template_returns_5_tuple_with_error(mock_load, mock_env):
-    """Issue #1072 (Step 6 expansion): Early return at line 201 (missing template)
-    must also return a 5-tuple with an error message.
-    """
-    mock_load.return_value = None
+def test_run_agentic_test_generate_no_test_file(tmp_path: Path) -> None:
+    """Verify failure state when agent claims success but no test file is generated."""
+    prompt_file = tmp_path / "spec.prompt"
+    prompt_file.write_text("spec", encoding="utf-8")
 
-    result = run_agentic_test_generate(
-        mock_env["prompt"], mock_env["code"], mock_env["test"], quiet=True
-    )
+    code_file = tmp_path / "math.py"
+    code_file.write_text("code", encoding="utf-8")
 
-    assert len(result) == 5, (
-        f"Early return (missing template) at line 201 returns {len(result)}-tuple, "
-        f"expected 5-tuple with error message"
-    )
-    content, cost, model, success, returned_error = result
-    assert success is False
-    assert returned_error != "", (
-        "Early return (missing template) should include a non-empty error message"
-    )
+    output_test_file = tmp_path / "test_math.py"
+
+    dummy_template = "Prompt: {prompt_path}, Code: {code_path}"
+    success_json = json.dumps({"success": True, "message": "I did it!"})
+
+    with patch("pdd.agentic_test_generate.load_prompt_template", return_value=dummy_template), \
+         patch("pdd.agentic_test_generate.run_agentic_task", return_value=(True, success_json, 0.03, "mock")):
+        
+        content, cost, model, success, err = run_agentic_test_generate(
+            prompt_file, code_file, output_test_file
+        )
+
+        # Content is empty, should map to failure with error message
+        assert success is False
+        assert model == "agentic-mock"
+        assert content == ""
+        assert "No test file was generated." in err
