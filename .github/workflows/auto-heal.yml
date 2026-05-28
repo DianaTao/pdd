@@ -20,8 +20,9 @@ name: auto-heal
 #     (gemini-dispatch-gh-app-private-key).
 #
 # ---- Security boundaries ----
-# - `pull_request_target` runs workflow code from main, never from PR head,
-#   so a fork PR cannot modify the auth gate. PR code only runs inside
+# - `pull_request_target` runs workflow code from the repo default branch
+#   (`main`), never from the PR head, so a fork PR cannot modify the auth gate.
+#   PR code only runs inside
 #   Cloud Build, which has no access to this workflow's GHA secrets.
 # - The dispatcher SA is impersonable ONLY by this exact workflow file at
 #   refs/heads/main (WIF attribute_condition + principalSet pinning to
@@ -222,8 +223,8 @@ jobs:
           steps.pf.outputs.fork == 'false' &&
           steps.heal_cfg.outputs.available == 'true'
         id: app_token
-        # SHA-pinned to v3.1.1 (https://github.com/actions/create-github-app-token/releases/tag/v3.1.1)
-        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+        # SHA-pinned to v3.2.0 (https://github.com/actions/create-github-app-token/releases/tag/v3.2.0)
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           client-id: ${{ secrets.PDD_CLOUD_APP_ID }}
           private-key: ${{ secrets.PDD_CLOUD_APP_PRIVATE_KEY }}

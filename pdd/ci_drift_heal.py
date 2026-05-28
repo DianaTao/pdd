@@ -26,8 +26,31 @@ from rich.table import Table
 
 console = Console()
 
-_HEAL_SUBPROCESS_TIMEOUT = 1200
+_HEAL_SUBPROCESS_TIMEOUT_DEFAULT = 2400
 _HEAL_PROMPT_CHURN_MAX_RATIO_DEFAULT = 5.0
+
+
+def _heal_subprocess_timeout() -> int:
+    """Resolve the per-module heal subprocess timeout in seconds.
+
+    Reads `PDD_HEAL_SUBPROCESS_TIMEOUT` from the environment on each call (so
+    callers and tests that mutate the env between invocations see the new
+    value). Invalid values — non-integer, non-positive, empty, or float
+    strings — fall back to `_HEAL_SUBPROCESS_TIMEOUT_DEFAULT` without raising.
+    """
+    raw = os.environ.get("PDD_HEAL_SUBPROCESS_TIMEOUT")
+    if raw is None:
+        return _HEAL_SUBPROCESS_TIMEOUT_DEFAULT
+    raw = raw.strip()
+    if not raw:
+        return _HEAL_SUBPROCESS_TIMEOUT_DEFAULT
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return _HEAL_SUBPROCESS_TIMEOUT_DEFAULT
+    if value <= 0:
+        return _HEAL_SUBPROCESS_TIMEOUT_DEFAULT
+    return value
 _AUTO_HEAL_SUCCESS_TRAILER = "PDD-Auto-Heal-Checkpoint: success"
 
 _PROTECTED_PATHS = [".pdd/meta", "project_dependencies.csv"]
@@ -98,6 +121,28 @@ def _repo_root() -> Path:
 def _safe_basename(basename: str) -> str:
     """Flatten subdirectory basenames for metadata path semantics."""
     return basename.replace("/", "_").replace("\\", "_")
+
+
+def _subproject_root_for(drift: Any) -> Path:
+    """Return the subproject root for *drift* by walking up from its paths.
+
+    Walks up from prompt_path first, then code_path, looking for .pddrc.
+    Falls back to _repo_root() when no .pddrc ancestor is found.
+    Issue #1211: snapshot/restore must use the subproject root so that
+    .pdd/meta paths resolve under the subproject, not the parent repo.
+    """
+    for attr in ("prompt_path", "code_path"):
+        raw = getattr(drift, attr, None)
+        if not raw:
+            continue
+        try:
+            candidate = Path(raw).resolve()
+        except Exception:
+            continue
+        for parent in [candidate.parent, *candidate.parents]:
+            if (parent / ".pddrc").exists():
+                return parent
+    return _repo_root()
 
 
 def _git_relative_path_candidates(path: Any, repo_root: Path) -> Set[str]:
@@ -529,19 +574,20 @@ def _run_pdd_command(cmd: List[str], env: Dict[str, str], label: str) -> bool:
     """Run a `pdd ...` subprocess with protected-paths rollback on failure."""
     rollback_eligible = _capture_rollback_state(cmd, env)
 
+    timeout = _heal_subprocess_timeout()
     try:
         result = subprocess.run(
             cmd,
             env=env,
             capture_output=True,
             text=True,
-            timeout=_HEAL_SUBPROCESS_TIMEOUT,
+            timeout=timeout,
         )
         success = result.returncode == 0
         stderr = getattr(result, "stderr", "") or ""
     except subprocess.TimeoutExpired:
         success = False
-        stderr = f"timeout after {_HEAL_SUBPROCESS_TIMEOUT}s"
+        stderr = f"timeout after {timeout}s"
     except FileNotFoundError:
         return False
     except Exception as exc:
@@ -624,10 +670,12 @@ def _metadata_snapshot_paths(basename: str, language: str) -> Tuple[str, str, st
 def _snapshot_metadata_state_for(drift: Any) -> Dict[str, Optional[bytes]]:
     """Capture per-module bytes of architecture.json + fingerprint + run-report.
 
-    Returns a dict keyed by repo-relative path; None values mean the file
-    did not exist at snapshot time.
+    Returns a dict keyed by subproject-relative path; None values mean the
+    file did not exist at snapshot time.  Issue #1211: uses
+    _subproject_root_for so that .pdd/meta paths resolve under the subproject,
+    not the parent git root.
     """
-    repo_root = _repo_root()
+    repo_root = _subproject_root_for(drift)
     basename = getattr(drift, "basename", "")
     language = getattr(drift, "language", "python")
     arch_rel, fp_rel, rr_rel = _metadata_snapshot_paths(basename, language)
@@ -645,13 +693,18 @@ def _snapshot_metadata_state_for(drift: Any) -> Dict[str, Optional[bytes]]:
     return snapshot
 
 
-def _restore_metadata_state_for(snapshot: Dict[str, Optional[bytes]]) -> None:
-    """Restore the per-module bytes captured by `_snapshot_metadata_state_for`."""
+def _restore_metadata_state_for(snapshot: Dict[str, Optional[bytes]], root: Path) -> None:
+    """Restore the per-module bytes captured by `_snapshot_metadata_state_for`.
+
+    *root* must be the same subproject root that was used when the snapshot was
+    taken — pass ``_subproject_root_for(drift)`` at every call site.
+    Issue #1211: using an explicit root avoids a second _repo_root() call that
+    would re-resolve to the parent git root on the restore path.
+    """
     if not isinstance(snapshot, dict):
         return
-    repo_root = _repo_root()
     for rel, content in snapshot.items():
-        full = repo_root / rel
+        full = root / rel
         if content is None:
             if full.exists():
                 try:
@@ -706,17 +759,25 @@ def _run_metadata_sync_safe(
     if ok:
         try:
             from pdd.operation_log import infer_module_identity, save_fingerprint
-            from pdd.sync_determine_operation import get_pdd_file_paths, read_fingerprint
+            from pdd.sync_determine_operation import read_fingerprint
 
             basename, language = infer_module_identity(str(p))
-            paths = get_pdd_file_paths(basename, language)
-            if not paths or not paths.get("prompt") or not paths.get("code"):
-                raise ValueError("authoritative prompt/code paths unavailable")
+            if basename is None or language is None:
+                raise ValueError("could not determine module identity from prompt path")
+            # Issue #1211: build paths directly from the known subproject
+            # paths rather than calling get_pdd_file_paths (which resolves
+            # from CWD and would return parent-repo paths in parent-CWD mode).
+            # Example/test-file hash validation is skipped here since those
+            # keys are not present in this minimal paths dict; that gap is
+            # tracked at issue #870 alongside LLM-first tag refresh.
+            if code_p is None:
+                raise ValueError("authoritative prompt/code paths unavailable: code_path not provided")
+            paths: Dict[str, Any] = {"prompt": p, "code": code_p}
             # Preserve the previous user-facing command so the released
             # `sync_determine_operation._is_workflow_complete` (which only
             # accepts verify/test/fix/update as complete) keeps recognizing
             # the workflow as synced after this internal refresh.
-            prev_fp_for_cmd = read_fingerprint(basename, language)
+            prev_fp_for_cmd = read_fingerprint(basename, language, paths=paths)
             prev_cmd = getattr(prev_fp_for_cmd, "command", None) if prev_fp_for_cmd else None
             preserved_command = (
                 prev_cmd
@@ -731,19 +792,13 @@ def _run_metadata_sync_safe(
                 cost=0.0,
                 model="metadata_sync",
             )
-            fingerprint = read_fingerprint(basename, language)
+            fingerprint = read_fingerprint(basename, language, paths=paths)
             if (
                 fingerprint is None
                 or not fingerprint.prompt_hash
                 or not fingerprint.code_hash
             ):
                 raise ValueError("fingerprint missing prompt/code hashes")
-            example_path = paths.get("example")
-            if isinstance(example_path, Path) and example_path.exists() and not fingerprint.example_hash:
-                raise ValueError("fingerprint missing example hash")
-            test_files = paths.get("test_files")
-            if test_files and not fingerprint.test_files:
-                raise ValueError("fingerprint missing test file hashes")
         except Exception:
             basename = str(prompt_path)
             print(f"metadata finalization failed: fingerprint refresh failed for {basename}")
@@ -1286,6 +1341,7 @@ def _heal_update(drift: DriftInfo, env: Dict[str, str], skip_set: Set[str]) -> O
     # the previous `if prompt_exists:` guard is now unconditional — keep the
     # snapshot/revert flow inline.
     snapshot = _snapshot_metadata_state_for(drift)
+    subproject_root = _subproject_root_for(drift)
     meta_ok = _run_metadata_sync_safe(str(prompt_path), str(code_path) if code_path else None)
     if not meta_ok:
         try:
@@ -1293,7 +1349,7 @@ def _heal_update(drift: DriftInfo, env: Dict[str, str], skip_set: Set[str]) -> O
         except PromptRevertError:
             raise
         if snapshot is not None:
-            _restore_metadata_state_for(snapshot)
+            _restore_metadata_state_for(snapshot, subproject_root)
         # Metadata finalization is a hard requirement (Issue #1006): a
         # successful auto-heal commit must include the updated fingerprint,
         # so this failure must surface distinctly from advisory subprocess
@@ -1325,7 +1381,7 @@ def _heal_update(drift: DriftInfo, env: Dict[str, str], skip_set: Set[str]) -> O
         except PromptRevertError:
             raise
         if snapshot is not None:
-            _restore_metadata_state_for(snapshot)
+            _restore_metadata_state_for(snapshot, subproject_root)
         return False
     return True
 

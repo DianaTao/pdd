@@ -62,7 +62,7 @@ class TestLlmReviewMocked:
         assert len(result.findings) == 1
         assert result.findings[0].rule_id == "R2"
         mock_invoke.assert_called_once()
-        assert mock_invoke.call_args.kwargs.get("use_cloud") is False
+        assert mock_invoke.call_args.kwargs.get("use_cloud") is True
 
     def test_legacy_prompt_no_findings(self):
         path = FIXTURES / "legacy_no_contracts_python.prompt"

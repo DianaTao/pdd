@@ -14,6 +14,7 @@
   "amount": <int>, "currency": "<iso4217>"}
 - graceful provider failure: HTTP 502 with JSON {"code": "PROVIDER_ERROR",
   "retry_after": <seconds>}
+- gracefully: same observable behavior as graceful provider failure (HTTP 502 with retry_after)
 </vocabulary>
 
 <contract_rules>

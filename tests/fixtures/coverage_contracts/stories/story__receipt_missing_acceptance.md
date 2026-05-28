@@ -15,4 +15,3 @@ so that I can keep a record of the transaction.
 ## Notes
 
 This fixture intentionally omits acceptance criteria so coverage reports `failed`.
-

@@ -128,6 +128,9 @@ def contracts_group() -> None:
     """Contract authoring quality utilities."""
 
 
+contracts_cli = contracts_group
+
+
 @contracts_group.command("check")
 @click.argument("target", type=click.Path(exists=True))
 @click.option(

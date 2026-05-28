@@ -694,7 +694,7 @@ class TestApplyWriteback:
         )
         runner.invoke(
             cli.cli,
-            ["--quiet", "prompt", "lint", "--ambiguity", "--apply", str(prompt)],
+            ["--quiet", "prompt", "lint", "--ambiguity", "--llm", "--apply", str(prompt)],
             catch_exceptions=False,
         )
         text = prompt.read_text(encoding="utf-8")

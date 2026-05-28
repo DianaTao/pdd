@@ -3425,6 +3425,64 @@ class TestStripLanguageSuffixWithSubdir:
         )
         assert result == "ci_validation"
 
+    # ------------------------------------------------------------------
+    # Issue #1211 (Step 6a fix): honor .pddrc prompts_dir as the anchor
+    # instead of hard-coding the literal "prompts/" segment.
+    # ------------------------------------------------------------------
+
+    def test_prompts_dir_override_strips_full_anchor(self):
+        """When prompts_dir="prompts/backend" matches the path, no leading 'backend/' leaks into basename.
+
+        Pre-fix: anchor was the literal "prompts" segment, so "backend" became a
+        subdir under the anchor and the basename was "backend/admin_get_users",
+        producing a double-nested output path like backend/functions/backend/...
+        """
+        result = _strip_language_suffix_with_subdir(
+            Path("prompts/backend/admin_get_users_python.prompt"),
+            prompts_dir="prompts/backend",
+        )
+        assert result == "admin_get_users"
+
+    def test_prompts_dir_override_preserves_nested_subdir(self):
+        """Subdirectories below the configured prompts_dir are still preserved."""
+        result = _strip_language_suffix_with_subdir(
+            Path("prompts/backend/services/billing/charge_python.prompt"),
+            prompts_dir="prompts/backend",
+        )
+        assert result == str(Path("services") / "billing" / "charge")
+
+    def test_prompts_dir_override_absolute_path(self):
+        """Anchor matching works on absolute paths too."""
+        result = _strip_language_suffix_with_subdir(
+            Path("/repo/extensions/app/prompts/src/routers/webhook_handlers_Python.prompt"),
+            prompts_dir="prompts",
+        )
+        assert result == str(Path("src") / "routers" / "webhook_handlers")
+
+    def test_prompts_dir_override_with_trailing_slash(self):
+        """Trailing slash on prompts_dir is normalized and still matches."""
+        result = _strip_language_suffix_with_subdir(
+            Path("prompts/backend/admin_python.prompt"),
+            prompts_dir="prompts/backend/",
+        )
+        assert result == "admin"
+
+    def test_prompts_dir_override_no_match_falls_back_to_literal_prompts(self):
+        """When prompts_dir is configured but doesn't appear in the path, the literal 'prompts/' anchor still works."""
+        result = _strip_language_suffix_with_subdir(
+            Path("prompts/commands/fix_python.prompt"),
+            prompts_dir="some/other/dir",
+        )
+        assert result == str(Path("commands") / "fix")
+
+    def test_prompts_dir_none_preserves_legacy_behavior(self):
+        """Omitting prompts_dir (legacy callers) keeps the literal 'prompts/' anchor."""
+        result = _strip_language_suffix_with_subdir(
+            Path("prompts/commands/fix_python.prompt"),
+            prompts_dir=None,
+        )
+        assert result == str(Path("commands") / "fix")
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Issue #1165: pdd sync ignores prompts_dir from .pddrc when resolving basenames
@@ -3769,3 +3827,39 @@ def test_construct_paths_generate_legacy_context_back_compat_from_subdir(tmp_pat
         )
 
     assert resolved_config["examples_dir"] == "context"
+
+
+# ---------------------------------------------------------------------------
+# Issue #1205 regression tests: BUILTIN_EXT_MAP entries for markdown / yml
+# ---------------------------------------------------------------------------
+
+def test_builtin_ext_map_markdown_maps_to_dot_md():
+    """Bug #1205: BUILTIN_EXT_MAP must have 'markdown' → '.md'.
+
+    Without this entry the fallback f".{lang_key}" synthesises '.markdown',
+    causing --output foo.md to silently land at foo.markdown. This test fails
+    on the buggy code and passes once the entry is added.
+    """
+    from pdd.construct_paths import BUILTIN_EXT_MAP
+
+    result = BUILTIN_EXT_MAP.get('markdown')
+    assert result == '.md', (
+        f"Bug #1205: BUILTIN_EXT_MAP['markdown'] should be '.md' but got {result!r}. "
+        f"Without this entry the fallback f'.{{lang_key}}' synthesises '.markdown', "
+        f"causing --output foo.md to land at foo.markdown."
+    )
+
+
+def test_builtin_ext_map_yml_maps_to_dot_yml():
+    """Regression guard: BUILTIN_EXT_MAP['yml'] must map to '.yml' (not '.yaml').
+
+    This ensures the map correctly preserves the '.yml' extension when the user
+    explicitly requests it, and that the fix does not accidentally break the
+    'yml' entry.
+    """
+    from pdd.construct_paths import BUILTIN_EXT_MAP
+
+    result = BUILTIN_EXT_MAP.get('yml')
+    assert result == '.yml', (
+        f"BUILTIN_EXT_MAP['yml'] should be '.yml' but got {result!r}."
+    )

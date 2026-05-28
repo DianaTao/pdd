@@ -41,6 +41,7 @@ VAGUE_TERMS: frozenset[str] = frozenset({
     "recent",
     "duplicate",
     "graceful",
+    "gracefully",
     "reasonable",
     "authorized",
     "unauthorized",
@@ -578,12 +579,14 @@ def append_vocabulary_definitions(path: Path, suggestions: list[str]) -> int:
 # Optional LLM ambiguity pass
 # ---------------------------------------------------------------------------
 
-def run_llm_ambiguity_pass(  # pylint: disable=too-many-locals
+def run_llm_ambiguity_pass(  # pylint: disable=too-many-locals,too-many-arguments
     path: Path,
+    *,
     strength: float = 0.5,
     temperature: float = 0.0,
     time: Optional[float] = None,
     verbose: bool = False,
+    use_cloud: Optional[bool] = None,
 ) -> list[LintIssue]:
     """
     Run the LLM-backed ambiguity analysis for a single prompt file.
@@ -617,7 +620,7 @@ def run_llm_ambiguity_pass(  # pylint: disable=too-many-locals
             temperature=temperature,
             time=time,
             verbose=verbose,
-            use_cloud=True,
+            use_cloud=use_cloud,
         )
         response_text = result["result"]
 
@@ -647,12 +650,14 @@ def run_llm_ambiguity_pass(  # pylint: disable=too-many-locals
         return []
 
 
-def run_llm_guidance_pass(  # pylint: disable=too-many-locals
+def run_llm_guidance_pass(  # pylint: disable=too-many-locals,too-many-arguments
     path: Path,
+    *,
     strength: float = 0.5,
     temperature: float = 0.0,
     time: Optional[float] = None,
     verbose: bool = False,
+    use_cloud: Optional[bool] = None,
 ) -> dict:
     """
     Run the LLM-backed prompt coaching pass for one prompt file.
@@ -685,7 +690,7 @@ def run_llm_guidance_pass(  # pylint: disable=too-many-locals
             temperature=temperature,
             time=time,
             verbose=verbose,
-            use_cloud=True,
+            use_cloud=use_cloud,
         )
         response_text = result["result"]
         json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response_text, re.DOTALL)

@@ -6,6 +6,7 @@
 - reasonable time: completes within 500 ms at p99 under standard load
 - duplicate request: a request whose idempotency key matches a previously accepted request within the last 24 hours
 - graceful rejection: returns HTTP 409 with a JSON error body {"code": "DUPLICATE", "message": "..."}
+- gracefully: same observable outcome as graceful rejection
 - authorized user: a user whose JWT token is present, unexpired, and has the "write" scope
 - active user: a user whose account status field equals "active" in the accounts table
 - complete: all required fields (name, email, role) are non-empty strings

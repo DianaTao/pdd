@@ -4,15 +4,13 @@ Coverage commands — contract coverage matrix.
 
 Usage examples::
 
-    pdd coverage --contracts prompts/refund_payment_python.prompt
-    pdd coverage --contracts prompts/
-    pdd coverage --contracts --json prompts/
-    pdd coverage --contracts --stories-dir user_stories --tests-dir tests prompts/
+    pdd checkup coverage prompts/refund_payment_python.prompt
+    pdd checkup coverage prompts/
+    pdd checkup coverage --json prompts/
 """
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from typing import Optional
 
@@ -28,13 +26,11 @@ from ..coverage_contracts import (
     STATUS_UNCHECKED,
     STATUS_WAIVED,
     STATUS_FAILED,
-    STATUS_FORMAL_ONLY,
     CoverageResult,
     RuleCoverage,
     build_coverage,
     build_coverage_directory,
 )
-from ..contract_review import run_llm_review_pass
 
 console = Console(stderr=True)
 stdout_console = Console()
@@ -47,7 +43,6 @@ _STATUS_STYLE: dict[str, str] = {
     STATUS_UNCHECKED: "red",
     STATUS_WAIVED: "dim",
     STATUS_FAILED: "bold red",
-    STATUS_FORMAL_ONLY: "magenta",
 }
 
 _STATUS_LABEL: dict[str, str] = {
@@ -57,7 +52,6 @@ _STATUS_LABEL: dict[str, str] = {
     STATUS_UNCHECKED: "unchecked",
     STATUS_WAIVED: "waived",
     STATUS_FAILED: "failed",
-    STATUS_FORMAL_ONLY: "formal-only",
 }
 
 
@@ -73,6 +67,11 @@ def _render_result_table(result: CoverageResult) -> None:
     if result.error:
         stdout_console.print(f"  [red]Error:[/red] {result.error}")
         return
+
+    if result.read_errors:
+        stdout_console.print("  [yellow]Scanner read errors:[/yellow]")
+        for message in result.read_errors:
+            stdout_console.print(f"    {message}")
 
     if not result.has_contract_rules:
         stdout_console.print("  [dim]No <contract_rules> section — no contract coverage data.[/dim]")
@@ -130,8 +129,9 @@ def _render_result_table(result: CoverageResult) -> None:
     "--contracts",
     "use_contracts",
     is_flag=True,
-    required=True,
-    help="Build a rule-to-evidence coverage matrix from <contract_rules>.",
+    default=False,
+    hidden=True,
+    help="Compatibility alias; contract coverage is implied by this command.",
 )
 @click.option(
     "--json",
@@ -142,10 +142,14 @@ def _render_result_table(result: CoverageResult) -> None:
 )
 @click.option(
     "--stories-dir",
+    "--stories",
     "stories_dir",
     default=None,
     type=click.Path(file_okay=False),
-    help="Directory containing story__*.md files (default: user_stories/).",
+    help=(
+        "Directory containing story__*.md files (default: user_stories/). "
+        "Alias: --stories (same flag as pdd contracts check)."
+    ),
 )
 @click.option(
     "--tests-dir",
@@ -153,19 +157,6 @@ def _render_result_table(result: CoverageResult) -> None:
     default=None,
     type=click.Path(file_okay=False),
     help="Directory containing test_*.py files (default: tests/).",
-)
-@click.option(
-    "--strict",
-    is_flag=True,
-    default=False,
-    help="Exit 2 when MUST/MUST NOT rules are unchecked or evidence failed.",
-)
-@click.option(
-    "--review-llm",
-    "review_llm",
-    is_flag=True,
-    default=False,
-    help="Advisory LLM review of coverage gaps (never changes status).",
 )
 @click.argument(
     "target",
@@ -179,19 +170,21 @@ def coverage_cmd(
     as_json: bool,
     stories_dir: Optional[str],
     tests_dir: Optional[str],
-    strict: bool,
-    review_llm: bool,
     target: str,
 ) -> None:
     """Build a contract coverage matrix mapping rules to stories and tests.
 
     TARGET can be a single .prompt file or a directory (default: prompts/).
-    Requires --contracts flag.
+    Contract coverage is implied by the command name.
 
     Exit codes:
-      0  all rules checked or waived
-      1  at least one unchecked, story-only, or test-only rule
-      2  error (file not found, parse failure)
+      0  all rules checked or waived, no scanner read errors
+      1  coverage gaps and/or unreadable story/test files under scan dirs
+      2  fatal error (missing TARGET, unreadable prompt file)
+
+    JSON output uses an envelope ``{results, total_prompts, ...}``; see
+    docs/coverage_contracts.md. ``pdd contracts check --json`` emits a
+    top-level array of contract-check results instead.
     """
     stories_path = Path(stories_dir) if stories_dir else None
     tests_path = Path(tests_dir) if tests_dir else None
@@ -205,21 +198,16 @@ def coverage_cmd(
             print(json.dumps({"error": error_msg, "results": []}))
         else:
             console.print(f"[red]Error:[/red] {error_msg}")
-        sys.exit(2)
+        raise click.exceptions.Exit(2)
 
     if target_path.is_file():
-        results.append(
-            build_coverage(target_path, stories_path, tests_path, strict=strict)
-        )
+        results.append(build_coverage(target_path, stories_path, tests_path))
     else:
-        results = build_coverage_directory(
-            target_path, stories_path, tests_path, strict=strict
-        )
+        results = build_coverage_directory(target_path, stories_path, tests_path)
 
-    # Determine exit code
-    has_error = any(r.error for r in results)
-    if strict and has_error:
-        has_gap = True
+    # Determine exit code: fatal prompt errors (2) vs gaps/read issues (1)
+    has_fatal = any(r.error for r in results)
+    has_read_errors = any(r.read_errors for r in results)
     has_gap = any(
         rc.status in (STATUS_UNCHECKED, STATUS_STORY_ONLY, STATUS_TEST_ONLY)
         or rc.status == STATUS_FAILED
@@ -227,32 +215,12 @@ def coverage_cmd(
         for rc in r.rules
     )
 
-    review_findings: list[dict] = []
-    if review_llm:
-        obj = ctx.obj or {}
-        for result in results:
-            if not result.has_contract_rules:
-                continue
-            review = run_llm_review_pass(
-                result.path,
-                stories_dir=stories_path,
-                tests_dir=tests_path,
-                include_coverage=True,
-                strength=obj.get("strength", 0.5),
-                temperature=obj.get("temperature", 0.0),
-                time=obj.get("time"),
-                verbose=obj.get("verbose", False),
-            )
-            review_findings.extend(f.as_dict() for f in review.findings)
-
     if as_json:
         output = {
             "results": [r.as_dict() for r in results],
             "total_prompts": len(results),
             "prompts_with_contracts": sum(1 for r in results if r.has_contract_rules),
         }
-        if review_findings:
-            output["review_findings"] = review_findings
         print(json.dumps(output, indent=2))
     else:
         if not results:
@@ -260,16 +228,8 @@ def coverage_cmd(
         else:
             for result in results:
                 _render_result_table(result)
-            if review_findings:
-                stdout_console.print("\n[bold]Advisory LLM review[/bold] (does not change status):")
-                for finding in review_findings:
-                    stdout_console.print(
-                        f"  [{finding.get('finding_id', '')}] "
-                        f"{finding.get('type', '')}: {finding.get('message', '')}"
-                    )
 
-    if has_error:
-        sys.exit(2)
-    elif has_gap:
-        sys.exit(1)
-    sys.exit(0)
+    if has_fatal:
+        raise click.exceptions.Exit(2)
+    if has_gap or has_read_errors:
+        raise click.exceptions.Exit(1)

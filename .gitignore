@@ -62,6 +62,11 @@ downloads/
 eggs/
 .eggs/
 lib/
+# E2E demo drivers (checked in for CI; not Python packaging libs)
+!examples/contract_commands_cost_tracker_e2e_demo/lib/
+!examples/contract_commands_cost_tracker_e2e_demo/lib/**
+!examples/prompt_lint_e2e_demo/lib/
+!examples/prompt_lint_e2e_demo/lib/run_e2e.py
 lib64/
 parts/
 sdist/
@@ -251,12 +256,15 @@ yarn.lock
 !.pdd/meta/agentic_verify_python.json
 !.pdd/meta/checkup_review_loop_python.json
 !.pdd/meta/commands_checkup_python.json
+!.pdd/meta/commands_prompt_python.json
+!.pdd/meta/prompt_lint_python.json
 !.pdd/meta/core_cloud_python.json
 !.pdd/meta/fix_code_loop_python.json
 !.pdd/meta/get_comment_python.json
 !.pdd/meta/get_test_command_python.json
 !.pdd/meta/git_update_python.json
 !.pdd/meta/llm_invoke_python.json
+!.pdd/meta/preprocess_python.json
 !.pdd/meta/summarize_directory_python.json
 .pdd/meta/*_run.json
 # Issue #1006 follow-up: these two modules' tests pass quickly but

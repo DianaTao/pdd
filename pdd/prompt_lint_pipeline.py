@@ -329,7 +329,6 @@ def _build_coverage_gaps(path: Path, options: PromptLintPipelineOptions) -> dict
         path,
         options.stories_dir,
         options.tests_dir,
-        strict=options.strict,
     )
     cov_dict = cov.as_dict()
     from .contract_ir import parse_prompt_contracts  # pylint: disable=import-outside-toplevel
