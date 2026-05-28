@@ -681,8 +681,18 @@ def _build_vocabulary_terms(sections: dict[str, str]) -> set[str]:
 # ---------------------------------------------------------------------------
 
 
-def parse_prompt_contracts(path: Path) -> PromptContractIR:
-    """Parse one prompt file into the shared authoring IR."""
+def parse_prompt_contracts(
+    path: Path,
+    *,
+    stories_dir: Optional[Path] = None,
+    tests_dir: Optional[Path] = None,
+) -> PromptContractIR:
+    """
+    Parse one prompt file into the shared authoring IR.
+
+    When ``stories_dir`` / ``tests_dir`` are provided, optional evidence maps
+    are populated (same scanners as coverage).
+    """
     parsed = PromptContractIR(path=path)
 
     try:
@@ -717,9 +727,27 @@ def parse_prompt_contracts(path: Path) -> PromptContractIR:
     if formal_text.strip():
         parsed.formalizations = _parse_formalization_section(formal_text)
 
+    if stories_dir is not None:
+        from .coverage_contracts import scan_story_evidence  # pylint: disable=import-outside-toplevel
+
+        parsed.story_covers = scan_story_evidence(stories_dir, path)
+
+    if tests_dir is not None:
+        from .coverage_contracts import scan_test_evidence  # pylint: disable=import-outside-toplevel
+
+        parsed.test_refs = scan_test_evidence(tests_dir)
+
     return parsed
 
 
-def parse_directory(directory: Path) -> list[PromptContractIR]:
+def parse_directory(
+    directory: Path,
+    *,
+    stories_dir: Optional[Path] = None,
+    tests_dir: Optional[Path] = None,
+) -> list[PromptContractIR]:
     """Parse every ``*.prompt`` file under a directory."""
-    return [parse_prompt_contracts(p) for p in sorted(directory.rglob("*.prompt"))]
+    return [
+        parse_prompt_contracts(p, stories_dir=stories_dir, tests_dir=tests_dir)
+        for p in sorted(directory.rglob("*.prompt"))
+    ]
