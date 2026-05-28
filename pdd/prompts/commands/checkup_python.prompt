@@ -3,7 +3,7 @@
 <include>context/python_preamble.prompt</include>
 
 % Requirements
-- Click command: `@click.command("checkup")`, `@click.pass_context`, `@track_cost`.
+- Click command: `@click.command("checkup", context_settings={"ignore_unknown_options": True, "allow_extra_args": True}, add_help_option=False)`, `@click.pass_context`, `@track_cost`.
 - Params:
   - `target` arg (positional, optional — required for issue mode)
   - `--no-fix` flag
@@ -30,6 +30,7 @@
   - `--blocking-severities` (comma-separated highest-priority severities for review-loop reporting and prompt guidance; the fixer still receives every valid reviewer finding; default `blocker,critical,medium`; unknown severities silently dropped)
   - `--clean-reviewer-states` (compatibility parser for downstream reviewer-status gates; default `clean`; the tokens `failed`, `degraded`, and `missing` are always treated as not-clean regardless of this flag)
 - Signature returns `Optional[Tuple[str, float, str]]`.
+- Subcommand dispatch: support `pdd checkup gate ...` by routing `target == "gate"` + `ctx.args` to `gate_cmd.main(...)` with `prog_name="pdd checkup gate"` and `standalone_mode=False`; do not register a top-level `pdd gate` command.
 - Mode validation:
   - If `--validate-arch-includes` is set: `target`, `--pr`, `--issue` must all be `None`; dispatch to `run_validate_arch_includes_cli(...)` and return.
   - If `--review-only` is set without `--review-loop`: reject it.

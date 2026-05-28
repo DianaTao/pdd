@@ -5,7 +5,7 @@ top of [`contract_commands_cost_tracker_e2e_demo/`](../contract_commands_cost_tr
 
 It is **not a runnable demo on this branch.** The deterministic runner, golden
 pytest harness, and `demo.sh` wrapper are tracked as follow-on work alongside
-`pdd evidence`, `pdd gate`, and `pdd contracts drift`. The relevant CI tests
+`pdd evidence`, `pdd checkup gate`, and `pdd contracts drift`. The relevant CI tests
 (`tests/test_cost_tracker_strict_ab.py`) skip themselves when those scripts are
 absent.
 
