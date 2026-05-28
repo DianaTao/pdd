@@ -14,6 +14,7 @@ from ..track_cost import track_cost
 from ..core.errors import handle_error
 from ..core.utils import echo_model_line
 from .contracts import contracts_cli
+from .coverage import coverage_cmd
 from .drift import drift_cmd
 from .prompt import prompt_lint
 
@@ -355,12 +356,14 @@ def checkup(  # pylint: disable=too-many-arguments,too-many-positional-arguments
       pdd checkup lint TARGET [OPTIONS]  →  lint prompts and user stories for quality and ambiguity.
     Contract checks:
       pdd checkup contract check [OPTIONS] TARGET  (alias: ``pdd contracts check``)
+    Contract coverage:
+      pdd checkup coverage [OPTIONS] TARGET
     Regeneration drift:
       pdd checkup drift <DEVUNIT> [OPTIONS]
     """
     ctx.ensure_object(dict)
 
-    if show_help and target not in {"lint", "contract", "contracts", "drift"}:
+    if show_help and target not in {"lint", "contract", "contracts", "coverage", "drift"}:
         click.echo(ctx.command.get_help(ctx))
         return None
 
@@ -386,7 +389,12 @@ def checkup(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     if target in {"contract", "contracts"}:
         contract_args = list(ctx.args)
         if strict:
-            contract_args.insert(0, "--strict")
+            # Forward strict to the *subcommand* (e.g. "check"), not the group.
+            # Otherwise Click treats it as an option to the "contracts" group.
+            if contract_args and contract_args[0] == "check":
+                contract_args.insert(1, "--strict")
+            else:
+                contract_args.insert(0, "--strict")
         if show_help:
             # Because `checkup` owns `--help` (add_help_option=False) Click will eagerly
             # consume a trailing `--help` and not forward it to `contracts`. For the
@@ -402,7 +410,22 @@ def checkup(  # pylint: disable=too-many-arguments,too-many-positional-arguments
                 return None
         exit_code = contracts_cli.main(
             args=contract_args,
-            prog_name=f"pdd checkup {target}",
+            prog_name=f"pdd checkup {target} check",
+            standalone_mode=False,
+            obj=ctx.obj,
+        )
+        if exit_code:
+            raise click.exceptions.Exit(exit_code)
+        return None
+    if target == "coverage":
+        if show_help:
+            click.echo(
+                coverage_cmd.get_help(click.Context(coverage_cmd, info_name="pdd checkup coverage"))
+            )
+            return None
+        exit_code = coverage_cmd.main(
+            args=list(ctx.args),
+            prog_name="pdd checkup coverage",
             standalone_mode=False,
             obj=ctx.obj,
         )

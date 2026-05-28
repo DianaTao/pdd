@@ -1,5 +1,5 @@
 """
-CLI integration tests for `pdd coverage --contracts`.
+CLI integration tests for `pdd checkup coverage`.
 
 Tests cover:
   - Basic usage on a single file
@@ -13,6 +13,9 @@ Tests cover:
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
@@ -21,16 +24,10 @@ from click.testing import CliRunner
 
 from pdd import cli
 from pdd.commands.coverage import coverage_cmd
+from pdd.commands.checkup import checkup
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "coverage_contracts"
-
-
-def _cli_runner() -> CliRunner:
-    """CliRunner compatible with older Click (<8.2) that lacks mix_stderr."""
-    try:
-        return CliRunner(mix_stderr=False)
-    except TypeError:
-        return CliRunner()
+REPO_ROOT = Path(__file__).parents[2]
 
 
 def _write(tmp_path: Path, name: str, content: str) -> Path:
@@ -74,8 +71,8 @@ class TestCoverageBasic:
         prompt = _write(tmp_path, "foo_python.prompt", REFUND_PROMPT)
         runner = CliRunner()
         result = runner.invoke(coverage_cmd, ["--contracts", str(prompt)])
-        # Rich tables may wrap long paths across lines on narrow CI terminals.
-        assert "foo_python.prompt" in result.output.replace("\n", "")
+        clean_output = result.output.replace("\n", "").replace(" ", "")
+        assert "foo_python.prompt" in clean_output
 
     def test_output_contains_rule_ids(self, tmp_path):
         prompt = _write(tmp_path, "foo_python.prompt", REFUND_PROMPT)
@@ -124,10 +121,12 @@ W1:
         result = runner.invoke(coverage_cmd, ["--contracts"])
         assert result.exit_code in (0, 1, 2)  # at minimum no crash
 
-    def test_requires_contracts_flag(self):
+    def test_checkup_coverage_does_not_require_contracts_flag(self, tmp_path):
+        prompt = _write(tmp_path, "legacy_python.prompt", LEGACY_PROMPT)
         runner = CliRunner()
-        result = runner.invoke(coverage_cmd, ["prompts/"])
-        assert result.exit_code != 0  # missing required --contracts flag
+        result = runner.invoke(checkup, ["coverage", str(prompt)])
+        assert result.exit_code == 0
+        assert "no contract coverage data" in result.output.lower()
 
 
 # ===========================================================================
@@ -169,6 +168,22 @@ class TestCoverageJsonOutput:
         assert "rules" in item
         assert "summary" in item
         assert "error" in item
+        assert "read_errors" in item
+
+    def test_stories_alias_matches_stories_dir(self, tmp_path):
+        prompt = _write(tmp_path, "foo_python.prompt", REFUND_PROMPT)
+        runner = CliRunner()
+        none_dir = str(tmp_path / "none")
+        result_dir = runner.invoke(
+            coverage_cmd,
+            ["--contracts", "--stories-dir", none_dir, "--tests-dir", none_dir, str(prompt)],
+        )
+        result_alias = runner.invoke(
+            coverage_cmd,
+            ["--contracts", "--stories", none_dir, "--tests-dir", none_dir, str(prompt)],
+        )
+        assert result_dir.exit_code == result_alias.exit_code
+        assert "R1" in result_alias.output
 
     def test_json_rule_item_keys(self, tmp_path):
         result = self._run_json(tmp_path, REFUND_PROMPT)
@@ -236,7 +251,7 @@ class TestCoverageMissingFile:
         assert "error" in parsed
 
     def test_missing_file_error_message(self, tmp_path):
-        runner = _cli_runner()
+        runner = CliRunner()
         result = runner.invoke(
             coverage_cmd, ["--contracts", str(tmp_path / "nonexistent.prompt")]
         )
@@ -401,13 +416,100 @@ The system MUST reject invalid input.
 
 
 class TestCoverageCliRegistration:
-    def test_registered_pdd_coverage_command_runs(self, tmp_path):
+    def test_registered_pdd_checkup_coverage_command_runs(self, tmp_path):
         prompt = _write(tmp_path, "legacy_python.prompt", LEGACY_PROMPT)
         runner = CliRunner()
         result = runner.invoke(
             cli.cli,
-            ["--quiet", "coverage", "--contracts", str(prompt)],
+            ["--quiet", "checkup", "coverage", str(prompt)],
             catch_exceptions=False,
         )
         assert result.exit_code == 0
         assert "no contract coverage data" in result.output.lower()
+
+    @pytest.mark.parametrize(
+        ("target", "expected_exit_code"),
+        [
+            (FIXTURES / "legacy_no_contracts_python.prompt", 0),
+            (FIXTURES / "missing_python.prompt", 2),
+        ],
+    )
+    def test_real_cli_json_stdout_is_parseable_only(
+        self, target: Path, expected_exit_code: int
+    ) -> None:
+        env = os.environ.copy()
+        env.update(
+            {
+                "PDD_PATH": str(REPO_ROOT / "pdd"),
+                "PYTHONPATH": str(REPO_ROOT),
+                "PDD_AUTO_UPDATE": "false",
+            }
+        )
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pdd",
+                "checkup",
+                "coverage",
+                "--json",
+                str(target),
+            ],
+            cwd=REPO_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == expected_exit_code
+        payload = json.loads(result.stdout)
+        assert isinstance(payload, dict)
+
+    def test_checkup_coverage_json_stdout_is_parseable_with_default_update_env(
+        self,
+    ) -> None:
+        """Regression: checkup JSON mode must suppress update chatter on stdout."""
+        target = FIXTURES / "legacy_no_contracts_python.prompt"
+        env = os.environ.copy()
+        env.update(
+            {
+                "PDD_PATH": str(REPO_ROOT / "pdd"),
+                "PYTHONPATH": str(REPO_ROOT),
+                "PDD_AUTO_UPDATE": "true",
+            }
+        )
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pdd",
+                "checkup",
+                "coverage",
+                "--json",
+                str(target),
+            ],
+            cwd=REPO_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        payload = json.loads(result.stdout)
+        assert isinstance(payload, dict)
+
+    def test_checkup_coverage_help_renders_coverage_command_help(self) -> None:
+        runner = CliRunner()
+        result = runner.invoke(
+            checkup,
+            ["coverage", "--help"],
+            obj={"quiet": True},
+        )
+        assert result.exit_code == 0
+        assert "--json" in result.output
+        assert "--stories-dir, --stories" in result.output
+        assert "--tests-dir" in result.output
+        # Regression: generic checkup options should not appear here.
+        assert "--review-loop" not in result.output
