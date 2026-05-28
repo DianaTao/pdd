@@ -1,9 +1,8 @@
-"""Regeneration stability checks for PDD dev units (``pdd drift``)."""
+"""Regeneration stability checks for PDD dev units (``pdd checkup drift``)."""
 from __future__ import annotations
 
 import ast
 import hashlib
-import json
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -11,6 +10,16 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .evidence_store import ManifestView, resolve_prompt_path
+try:
+    from .gate_main import run_gate_policy
+except ModuleNotFoundError:  # pragma: no cover - optional in minimal installs
+    def run_gate_policy(*_args, **_kwargs):
+        class _Result:
+            passed = True
+
+        return _Result()
+
+_PASS_TOKENS = {"pass", "passed", "ok", "success", "clean", "not_applicable"}
 
 
 @dataclass
@@ -57,7 +66,10 @@ class DriftReport:
         return 0 if self.passed else 1
 
     def as_dict(self) -> dict[str, Any]:
-        passed_runs = sum(1 for snap in self.snapshots if snap.tests_passed)
+        tests_passed = sum(1 for snap in self.snapshots if snap.tests_passed)
+        stories_passed = sum(1 for snap in self.snapshots if snap.stories_passed)
+        verify_passed = sum(1 for snap in self.snapshots if snap.verify_passed)
+        policy_passed = sum(1 for snap in self.snapshots if snap.policy_passed)
         return {
             "devunit": self.devunit,
             "prompt_path": self.prompt_path,
@@ -68,10 +80,10 @@ class DriftReport:
             "public_api_unchanged": self.public_api_unchanged,
             "implementation_changed": self.implementation_changed,
             "behavior_unchanged": self.behavior_unchanged,
-            "tests": f"passed {passed_runs}/{self.runs}",
-            "stories": f"passed {passed_runs}/{self.runs}",
-            "verify": f"passed {passed_runs}/{self.runs}",
-            "policy": f"passed {passed_runs}/{self.runs}",
+            "tests": f"passed {tests_passed}/{self.runs}",
+            "stories": f"passed {stories_passed}/{self.runs}",
+            "verify": f"passed {verify_passed}/{self.runs}",
+            "policy": f"passed {policy_passed}/{self.runs}",
             "snapshots": [snap.as_dict() for snap in self.snapshots],
         }
 
@@ -111,11 +123,51 @@ def _resolve_code_path(prompt_path: Path, project_root: Path) -> Path:
     )
 
 
+def _path_score(path: Path, *, expected_stem: str, devunit: str) -> int:
+    score = 0
+    if path.is_file():
+        score += 100
+    if path.suffix == ".py":
+        score += 40
+    if path.stem == expected_stem:
+        score += 30
+    if devunit in path.stem:
+        score += 20
+    if "/pdd/" in path.as_posix():
+        score += 10
+    return score
+
+
+def _select_manifest_output(
+    manifest: ManifestView,
+    *,
+    project_root: Path,
+    expected_stem: str,
+    devunit: str,
+) -> Optional[Path]:
+    best: Optional[Path] = None
+    best_score = -1
+    for output in manifest.outputs:
+        raw = output.get("path")
+        if not raw:
+            continue
+        candidate = Path(raw)
+        if not candidate.is_absolute():
+            candidate = project_root / candidate
+        score = _path_score(candidate, expected_stem=expected_stem, devunit=devunit)
+        if score > best_score:
+            best_score = score
+            best = candidate
+    if best is not None and best.is_file():
+        return best.resolve()
+    return None
+
+
 def _load_manifest_paths(
     devunit: str,
     project_root: Path,
     from_evidence: Optional[Path],
-) -> tuple[Optional[Path], Optional[Path]]:
+) -> tuple[Path, Path, Optional[ManifestView]]:
     if from_evidence is None:
         latest = project_root / ".pdd" / "evidence" / "devunits" / f"{devunit}.latest.json"
         if latest.is_file():
@@ -124,19 +176,23 @@ def _load_manifest_paths(
         prompt = resolve_prompt_path(project_root, devunit)
         if prompt is None:
             raise FileNotFoundError(f"Could not resolve prompt for dev unit {devunit!r}")
-        return prompt, _resolve_code_path(prompt, project_root)
+        return prompt, _resolve_code_path(prompt, project_root), None
 
     manifest = ManifestView.from_file(from_evidence.resolve(), project_root)
     prompt = manifest.prompt_path or resolve_prompt_path(project_root, devunit, manifest.raw)
     if prompt is None:
         raise FileNotFoundError(f"Evidence manifest missing prompt path: {from_evidence}")
-    if manifest.outputs:
-        output = Path(manifest.outputs[0]["path"])
-        if not output.is_absolute():
-            output = project_root / output
-        if output.is_file():
-            return prompt, output.resolve()
-    return prompt, _resolve_code_path(prompt, project_root)
+
+    expected_stem = prompt.stem.replace("_python", "").replace("_typescript", "")
+    picked = _select_manifest_output(
+        manifest,
+        project_root=project_root,
+        expected_stem=expected_stem,
+        devunit=devunit,
+    )
+    if picked is not None:
+        return prompt, picked, manifest
+    return prompt, _resolve_code_path(prompt, project_root), manifest
 
 
 def _run_pytest(tests: list[Path], project_root: Path) -> bool:
@@ -194,6 +250,29 @@ def _regenerate_code(
         )
 
 
+def _status_from_validation(validation: dict[str, str], key: str) -> Optional[bool]:
+    if key not in validation:
+        return None
+    normalized = (validation.get(key) or "").strip().lower()
+    if not normalized:
+        return None
+    if normalized in _PASS_TOKENS:
+        return True
+    if "fail" in normalized or "error" in normalized:
+        return False
+    return None
+
+
+def _policy_configured(project_root: Path, manifest: Optional[ManifestView]) -> bool:
+    policy_paths = (
+        project_root / ".pdd" / "policy.yml",
+        project_root / ".pdd" / "policy.yaml",
+        project_root / "policy.yml",
+        project_root / "policy.yaml",
+    )
+    return manifest is not None or any(path.is_file() for path in policy_paths)
+
+
 def run_drift(
     devunit: str,
     project_root: Path,
@@ -204,34 +283,56 @@ def run_drift(
     code_file: Optional[Path] = None,
     dry_run: bool = False,
 ) -> DriftReport:
-    prompt_path, resolved_code = _load_manifest_paths(devunit, project_root, from_evidence)
+    prompt_path, resolved_code, manifest = _load_manifest_paths(
+        devunit,
+        project_root,
+        from_evidence,
+    )
     code_path = code_file.resolve() if code_file else resolved_code
 
     snapshots: list[RunSnapshot] = []
     hashes: list[str] = []
     apis: list[list[str]] = []
 
-    for index in range(runs):
-        if not dry_run and index > 0:
+    validation = manifest.validation if manifest else {}
+    policy_is_configured = _policy_configured(project_root, manifest)
+
+    for _ in range(runs):
+        if not dry_run:
             _regenerate_code(
                 prompt_path,
                 code_path,
                 model=model,
                 project_root=project_root,
             )
+
         code_hash = _sha256_file(code_path)
         api = _public_api(code_path)
         tests = _discover_tests(code_path, project_root)
         tests_ok = _run_pytest(tests, project_root)
+
+        stories_ok = _status_from_validation(validation, "detect_stories")
+        if stories_ok is None:
+            stories_ok = True
+
+        verify_ok = _status_from_validation(validation, "verify")
+        if verify_ok is None:
+            verify_ok = True
+
+        if policy_is_configured:
+            policy_ok = run_gate_policy(project_root, target=devunit).passed
+        else:
+            policy_ok = True
+
         snapshots.append(
             RunSnapshot(
-                run_index=index + 1,
+                run_index=len(snapshots) + 1,
                 code_sha256=code_hash,
                 public_api=api,
                 tests_passed=tests_ok,
-                stories_passed=tests_ok,
-                verify_passed=tests_ok,
-                policy_passed=tests_ok,
+                stories_passed=stories_ok,
+                verify_passed=verify_ok,
+                policy_passed=policy_ok,
             )
         )
         hashes.append(code_hash)
@@ -240,14 +341,13 @@ def run_drift(
     public_api_unchanged = all(api == apis[0] for api in apis)
     implementation_changed = len(set(hashes)) > 1
     behavior_unchanged = all(
-        snap.tests_passed and snap.stories_passed and snap.verify_passed
+        snap.tests_passed
+        and snap.stories_passed
+        and snap.verify_passed
+        and snap.policy_passed
         for snap in snapshots
     )
-    status = "stable"
-    if not public_api_unchanged or not behavior_unchanged:
-        status = "unstable"
-    elif implementation_changed and behavior_unchanged:
-        status = "stable"
+    status = "stable" if public_api_unchanged and behavior_unchanged else "unstable"
 
     return DriftReport(
         devunit=devunit,

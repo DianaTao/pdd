@@ -1,4 +1,4 @@
-"""Top-level ``pdd drift`` command — regeneration stability checks."""
+"""``pdd checkup drift`` subcommand implementation."""
 from __future__ import annotations
 
 import json

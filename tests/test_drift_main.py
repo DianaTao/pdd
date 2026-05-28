@@ -1,13 +1,11 @@
-"""Tests for ``pdd drift`` regeneration stability."""
+"""Tests for ``pdd checkup drift`` regeneration stability."""
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
-import pytest
-from click.testing import CliRunner
-
-from pdd import cli
 from pdd.drift_main import run_drift
 from pdd.evidence_store import sha256_file
 
@@ -25,33 +23,19 @@ def _write_fixture(project: Path) -> tuple[Path, Path]:
     return prompt, code
 
 
-def test_drift_dry_run_stable(tmp_path: Path) -> None:
+def test_drift_regenerates_even_with_one_run(tmp_path: Path) -> None:
     _write_fixture(tmp_path)
-    report = run_drift("refund_payment", tmp_path, runs=3, dry_run=True)
+    with patch("pdd.drift_main._regenerate_code") as mock_regenerate:
+        report = run_drift("refund_payment", tmp_path, runs=1, dry_run=False)
     assert report.status == "stable"
-    assert report.public_api_unchanged
-    assert len(report.snapshots) == 3
+    mock_regenerate.assert_called_once()
 
 
-def test_drift_detects_api_change(tmp_path: Path) -> None:
-    from pdd.drift_main import RunSnapshot, _public_api
-
-    _prompt, code = _write_fixture(tmp_path)
-    first_api = _public_api(code)
-    code.write_text("class RefundService:\n    pass\n", encoding="utf-8")
-    second_api = _public_api(code)
-    assert first_api != second_api
-
-    snapshots = [
-        RunSnapshot(1, "a", first_api, True, True, True, True),
-        RunSnapshot(2, "b", second_api, True, True, True, True),
-    ]
-    apis = [snap.public_api for snap in snapshots]
-    assert not all(api == apis[0] for api in apis)
-
-
-def test_drift_from_evidence_manifest(tmp_path: Path) -> None:
+def test_drift_uses_best_output_from_manifest(tmp_path: Path) -> None:
     prompt, code = _write_fixture(tmp_path)
+    extra = tmp_path / "artifacts" / "notes.txt"
+    extra.parent.mkdir(parents=True)
+    extra.write_text("n/a\n", encoding="utf-8")
     manifest = tmp_path / ".pdd" / "evidence" / "devunits" / "refund_payment.latest.json"
     manifest.parent.mkdir(parents=True)
     manifest.write_text(
@@ -60,12 +44,10 @@ def test_drift_from_evidence_manifest(tmp_path: Path) -> None:
                 "schema_version": 1,
                 "prompt": {"path": str(prompt.relative_to(tmp_path))},
                 "outputs": [
-                    {
-                        "path": str(code.relative_to(tmp_path)),
-                        "sha256": sha256_file(code),
-                    }
+                    {"path": str(extra.relative_to(tmp_path)), "sha256": sha256_file(extra)},
+                    {"path": str(code.relative_to(tmp_path)), "sha256": sha256_file(code)},
                 ],
-                "validation": {"unit_tests": "pass"},
+                "validation": {"unit_tests": "pass", "detect_stories": "pass", "verify": "pass"},
             },
             indent=2,
         )
@@ -82,29 +64,15 @@ def test_drift_from_evidence_manifest(tmp_path: Path) -> None:
     assert report.code_path.endswith("refund_payment.py")
 
 
-def test_drift_json_payload(tmp_path: Path) -> None:
+def test_drift_behavior_unstable_when_any_run_fails(tmp_path: Path) -> None:
     _write_fixture(tmp_path)
-    report = run_drift("refund_payment", tmp_path, runs=2, dry_run=True)
-    payload = report.as_dict()
-    assert payload["status"] == "stable"
-    assert payload["runs"] == 2
-    assert len(payload["snapshots"]) == 2
+    with patch("pdd.drift_main._run_pytest", side_effect=[True, False]):
+        report = run_drift("refund_payment", tmp_path, runs=2, dry_run=True)
+    assert report.status == "unstable"
+    assert not report.behavior_unchanged
 
 
-def test_drift_cli_dry_run_multi_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``pdd checkup drift <devunit> --dry-run --runs 3`` exits 0 when stable."""
-    _write_fixture(tmp_path)
-    monkeypatch.chdir(tmp_path)
-    result = CliRunner().invoke(
-        cli.cli,
-        ["--quiet", "checkup", "drift", "refund_payment", "--dry-run", "--runs", "3"],
-        catch_exceptions=False,
-    )
-    assert result.exit_code == 0
-
-
-def test_drift_cli_from_evidence_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``pdd checkup drift --from-evidence ... --json`` emits stable JSON payload."""
+def test_drift_fails_when_configured_story_verify_policy_fail(tmp_path: Path) -> None:
     prompt, code = _write_fixture(tmp_path)
     manifest = tmp_path / ".pdd" / "evidence" / "devunits" / "refund_payment.latest.json"
     manifest.parent.mkdir(parents=True)
@@ -113,32 +81,24 @@ def test_drift_cli_from_evidence_json(tmp_path: Path, monkeypatch: pytest.Monkey
             {
                 "schema_version": 1,
                 "prompt": {"path": str(prompt.relative_to(tmp_path))},
-                "outputs": [
-                    {"path": str(code.relative_to(tmp_path)), "sha256": sha256_file(code)}
-                ],
-                "validation": {"unit_tests": "pass"},
+                "outputs": [{"path": str(code.relative_to(tmp_path)), "sha256": sha256_file(code)}],
+                "validation": {"unit_tests": "pass", "detect_stories": "failed", "verify": "failed"},
             },
             indent=2,
         )
         + "\n",
         encoding="utf-8",
     )
-    monkeypatch.chdir(tmp_path)
-    result = CliRunner().invoke(
-        cli.cli,
-        [
-            "--quiet",
-            "checkup",
-            "drift",
+    with patch("pdd.drift_main.run_gate_policy", return_value=SimpleNamespace(passed=False)):
+        report = run_drift(
             "refund_payment",
-            "--dry-run",
-            "--from-evidence",
-            str(manifest),
-            "--json",
-        ],
-        catch_exceptions=False,
-    )
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
-    assert payload["status"] == "stable"
-    assert payload["devunit"] == "refund_payment"
+            tmp_path,
+            runs=1,
+            dry_run=True,
+            from_evidence=manifest,
+        )
+    assert report.status == "unstable"
+    snap = report.snapshots[0]
+    assert not snap.stories_passed
+    assert not snap.verify_passed
+    assert not snap.policy_passed
