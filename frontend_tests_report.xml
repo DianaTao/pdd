@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="49" failures="0" errors="0" time="0.586995824">
+    <testsuite name="tests/compact-font-direct-zoom.test.tsx" timestamp="2026-05-28T19:42:06.952Z" hostname="localhost" tests="4" failures="0" errors="0" skipped="0" time="0.053500411">
+        <testcase classname="tests/compact-font-direct-zoom.test.tsx" name="ModuleNode compact mode — font-size uses zoom directly &gt; at zoom=0.3 the label font-size is Math.round(14/0.3)=47 px" time="0.038125413">
+        </testcase>
+        <testcase classname="tests/compact-font-direct-zoom.test.tsx" name="ModuleNode compact mode — font-size uses zoom directly &gt; at zoom=0.4 the label font-size is Math.round(14/0.4)=35 px" time="0.005162772">
+        </testcase>
+        <testcase classname="tests/compact-font-direct-zoom.test.tsx" name="ModuleNode compact mode — font-size uses zoom directly &gt; at zoom=0.25 the label font-size is Math.round(14/0.25)=56 px" time="0.004337621">
+        </testcase>
+        <testcase classname="tests/compact-font-direct-zoom.test.tsx" name="ModuleNode compact mode — font-size uses zoom directly &gt; does NOT use a CSS variable for the font-size" time="0.003793589">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/compact-font-size.test.ts" timestamp="2026-05-28T19:42:06.955Z" hostname="localhost" tests="5" failures="0" errors="0" skipped="0" time="0.004359691">
+        <testcase classname="tests/compact-font-size.test.ts" name="getCompactFontPx — mirrors calc(14px / var(--vp-zoom, 1)) &gt; grows larger as zoom decreases so text stays readable on screen" time="0.001357853">
+        </testcase>
+        <testcase classname="tests/compact-font-size.test.ts" name="getCompactFontPx — mirrors calc(14px / var(--vp-zoom, 1)) &gt; at zoom=0.5 returns 28px — apparent screen size = 28 × 0.5 = 14px" time="0.000286161">
+        </testcase>
+        <testcase classname="tests/compact-font-size.test.ts" name="getCompactFontPx — mirrors calc(14px / var(--vp-zoom, 1)) &gt; at zoom=0.25 returns 56px — apparent screen size = 56 × 0.25 = 14px" time="0.000236101">
+        </testcase>
+        <testcase classname="tests/compact-font-size.test.ts" name="getCompactFontPx — mirrors calc(14px / var(--vp-zoom, 1)) &gt; maintains constant ~14px apparent size: fontPx × zoom ≈ 14 for any zoom" time="0.000742831">
+        </testcase>
+        <testcase classname="tests/compact-font-size.test.ts" name="getCompactFontPx — mirrors calc(14px / var(--vp-zoom, 1)) &gt; doubles font size when zoom halves (inverse proportional)" time="0.00023487">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/group-layout.test.ts" timestamp="2026-05-28T19:42:06.956Z" hostname="localhost" tests="9" failures="0" errors="0" skipped="0" time="0.007264348">
+        <testcase classname="tests/group-layout.test.ts" name="computeGroupLayout &gt; 1 child → 1 column, containerW fits one node" time="0.001465594">
+        </testcase>
+        <testcase classname="tests/group-layout.test.ts" name="computeGroupLayout &gt; 2 children → 2 columns, containerW fits two nodes + gap" time="0.00020739">
+        </testcase>
+        <testcase classname="tests/group-layout.test.ts" name="computeGroupLayout &gt; 3 children → 2 columns, 2 rows, containerH fits header + 2 rows" time="0.000185581">
+        </testcase>
+        <testcase classname="tests/group-layout.test.ts" name="computeGroupLayout &gt; 4 children → 2×2 grid" time="0.001213903">
+        </testcase>
+        <testcase classname="tests/group-layout.test.ts" name="computeGroupLayout &gt; child[0] relative position: x=INNER_PAD, y=HEADER_HEIGHT+INNER_PAD" time="0.000352621">
+        </testcase>
+        <testcase classname="tests/group-layout.test.ts" name="computeGroupLayout &gt; child[1] relative position: x=INNER_PAD+(NODE_WIDTH+CHILD_GAP), y=same row" time="0.000231431">
+        </testcase>
+        <testcase classname="tests/group-layout.test.ts" name="computeGroupLayout &gt; child[2] relative position: x=INNER_PAD, y=next row (wraps to row 2)" time="0.00018235">
+        </testcase>
+        <testcase classname="tests/group-layout.test.ts" name="computeGroupLayout &gt; containerH = HEADER_HEIGHT + INNER_PAD*2 + rows*(NODE_HEIGHT+CHILD_GAP) - CHILD_GAP" time="0.000304541">
+        </testcase>
+        <testcase classname="tests/group-layout.test.ts" name="computeGroupLayout &gt; childPositions contain correct filename for each child" time="0.000824962">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/group-subflow-nodes.test.tsx" timestamp="2026-05-28T19:42:06.957Z" hostname="localhost" tests="9" failures="0" errors="0" skipped="0" time="0.140187332">
+        <testcase classname="tests/group-subflow-nodes.test.tsx" name="DependencyViewer sub-flow nodes (expanded group) &gt; child nodes have parentNode set to group container ID" time="0.059949257">
+        </testcase>
+        <testcase classname="tests/group-subflow-nodes.test.tsx" name="DependencyViewer sub-flow nodes (expanded group) &gt; child nodes have positions relative to container (matching computeGroupLayout)" time="0.009695064">
+        </testcase>
+        <testcase classname="tests/group-subflow-nodes.test.tsx" name="DependencyViewer sub-flow nodes (expanded group) &gt; child nodes have draggable: false" time="0.009599283">
+        </testcase>
+        <testcase classname="tests/group-subflow-nodes.test.tsx" name="DependencyViewer sub-flow nodes (expanded group) &gt; group container node has style.width = computeGroupLayout containerW" time="0.011754689">
+        </testcase>
+        <testcase classname="tests/group-subflow-nodes.test.tsx" name="DependencyViewer sub-flow nodes (expanded group) &gt; group container node has style.height = computeGroupLayout containerH" time="0.007582419">
+        </testcase>
+        <testcase classname="tests/group-subflow-nodes.test.tsx" name="DependencyViewer sub-flow nodes (expanded group) &gt; no __bg__ nodes are present in initialNodes" time="0.010326305">
+        </testcase>
+        <testcase classname="tests/group-subflow-nodes.test.tsx" name="DependencyViewer sub-flow nodes (expanded group) &gt; collapsed group children are absent from nodes entirely" time="0.010433365">
+        </testcase>
+        <testcase classname="tests/group-subflow-nodes.test.tsx" name="DependencyViewer sub-flow nodes (expanded group) &gt; ungrouped module nodes have no parentNode" time="0.00831902">
+        </testcase>
+        <testcase classname="tests/group-subflow-nodes.test.tsx" name="DependencyViewer sub-flow nodes (expanded group) &gt; child nodes of expanded group have extent: &quot;parent&quot;" time="0.010376155">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/module-needs-sync.test.tsx" timestamp="2026-05-28T19:42:06.964Z" hostname="localhost" tests="8" failures="0" errors="0" skipped="0" time="0.004463071">
+        <testcase classname="tests/module-needs-sync.test.tsx" name="moduleNeedsSync &gt; returns true when info is undefined" time="0.001367363">
+        </testcase>
+        <testcase classname="tests/module-needs-sync.test.tsx" name="moduleNeedsSync &gt; returns true when code is missing (default outputs)" time="0.000203021">
+        </testcase>
+        <testcase classname="tests/module-needs-sync.test.tsx" name="moduleNeedsSync &gt; returns true when test is missing (default outputs)" time="0.00016647">
+        </testcase>
+        <testcase classname="tests/module-needs-sync.test.tsx" name="moduleNeedsSync &gt; returns true when example is missing (default outputs)" time="0.000255821">
+        </testcase>
+        <testcase classname="tests/module-needs-sync.test.tsx" name="moduleNeedsSync &gt; returns false when all default outputs present" time="0.000263111">
+        </testcase>
+        <testcase classname="tests/module-needs-sync.test.tsx" name="moduleNeedsSync &gt; returns false for code-only language when code exists" time="0.00019175">
+        </testcase>
+        <testcase classname="tests/module-needs-sync.test.tsx" name="moduleNeedsSync &gt; returns true for code-only language when code is missing" time="0.000148751">
+        </testcase>
+        <testcase classname="tests/module-needs-sync.test.tsx" name="moduleNeedsSync &gt; falls back to requiring all three when expected_outputs is undefined" time="0.00014584">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/rearrange-discard.test.tsx" timestamp="2026-05-28T19:42:06.966Z" hostname="localhost" tests="1" failures="0" errors="0" skipped="0" time="0.097040837">
+        <testcase classname="tests/rearrange-discard.test.tsx" name="Discard after Re-arrange &gt; increments rearrangeVersion on Discard so React Flow resyncs" time="0.093839159">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/rearrange-positions.test.tsx" timestamp="2026-05-28T19:42:06.966Z" hostname="localhost" tests="1" failures="0" errors="0" skipped="0" time="0.099766353">
+        <testcase classname="tests/rearrange-positions.test.tsx" name="Re-arrange positions &gt; increments rearrangeVersion on DependencyViewer after successful rearrange" time="0.097882929">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/sync-completed-refresh.test.tsx" timestamp="2026-05-28T19:42:06.967Z" hostname="localhost" tests="4" failures="0" errors="0" skipped="0" time="0.1346844">
+        <testcase classname="tests/sync-completed-refresh.test.tsx" name="ArchitectureView syncCompletedCounter refresh &gt; calls listPrompts again when syncCompletedCounter increments" time="0.056506668">
+        </testcase>
+        <testcase classname="tests/sync-completed-refresh.test.tsx" name="ArchitectureView syncCompletedCounter refresh &gt; does NOT call listPrompts again when counter stays the same" time="0.013577063">
+        </testcase>
+        <testcase classname="tests/sync-completed-refresh.test.tsx" name="ArchitectureView syncCompletedCounter refresh &gt; updates remainingModulesCount after refresh with new data" time="0.02853975">
+        </testcase>
+        <testcase classname="tests/sync-completed-refresh.test.tsx" name="App.tsx onTaskComplete counter logic &gt; increments counter only for successful SYNC tasks" time="0.034116153">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/vp-zoom-sync.test.tsx" timestamp="2026-05-28T19:42:06.967Z" hostname="localhost" tests="4" failures="0" errors="0" skipped="0" time="0.026600685">
+        <testcase classname="tests/vp-zoom-sync.test.tsx" name="VpZoomSync &gt; sets --vp-zoom on the target element to the current viewport zoom" time="0.017554292">
+        </testcase>
+        <testcase classname="tests/vp-zoom-sync.test.tsx" name="VpZoomSync &gt; updates --vp-zoom when zoom changes" time="0.002758166">
+        </testcase>
+        <testcase classname="tests/vp-zoom-sync.test.tsx" name="VpZoomSync &gt; sets --vp-zoom on fitView initial zoom (not just user interaction)" time="0.002226846">
+        </testcase>
+        <testcase classname="tests/vp-zoom-sync.test.tsx" name="VpZoomSync &gt; renders nothing visible" time="0.002089325">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/waypoint-edge.test.ts" timestamp="2026-05-28T19:42:06.968Z" hostname="localhost" tests="4" failures="0" errors="0" skipped="0" time="0.019128696">
+        <testcase classname="tests/waypoint-edge.test.ts" name="buildEdgePath – smooth curves through waypoints &gt; uses Q (quadratic bezier) commands instead of L (line) commands" time="0.001904764">
+        </testcase>
+        <testcase classname="tests/waypoint-edge.test.ts" name="buildEdgePath – smooth curves through waypoints &gt; single waypoint: Q control=waypoint end=target" time="0.000448491">
+        </testcase>
+        <testcase classname="tests/waypoint-edge.test.ts" name="buildEdgePath – smooth curves through waypoints &gt; two waypoints: first segment ends at midpoint, second ends at target" time="0.000199401">
+        </testcase>
+        <testcase classname="tests/waypoint-edge.test.ts" name="getLayoutedElements – waypoint edges &gt; attaches type: waypointEdge and data.waypoints to every edge" time="0.014848166">
+        </testcase>
+    </testsuite>
+</testsuites>

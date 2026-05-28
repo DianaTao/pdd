@@ -45,7 +45,7 @@ class AppState:
         self.version = "0.1.0"  # In a real app, load from package metadata
 
         # Store server config for port access
-        self.config = config or ServerConfig()
+        self.config = config or ServerConfig(host="127.0.0.1", port=9876)
 
         # Initialize managers
         self.path_validator = PathValidator(self.project_root)

@@ -109,3 +109,5 @@ def checkup_simplify(  # pylint: disable=too-many-arguments
 
     if result.exit_code:
         raise click.exceptions.Exit(result.exit_code)
+
+    return (result.provider, result.cost, str(result.evidence_path) if result.evidence_path else "")

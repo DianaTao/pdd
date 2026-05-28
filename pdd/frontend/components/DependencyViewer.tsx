@@ -184,15 +184,17 @@ export const getLayoutedElements = (
     const nodeWithPosition = g.node(node.id);
     const w = (node.style as any)?.width ?? NODE_WIDTH;
     const h = (node.style as any)?.height ?? NODE_HEIGHT;
+
+    // Defensive check for missing Dagre position
+    const position = (nodeWithPosition
+      ? { x: nodeWithPosition.x - w / 2, y: nodeWithPosition.y - h / 2 }
+      : node.position || { x: 0, y: 0 }) as { x: number; y: number };
+
     return {
       ...node,
-      position: {
-        x: nodeWithPosition.x - w / 2,
-        y: nodeWithPosition.y - h / 2,
-      },
+      position,
     };
-  });
-
+  }) as Node<ModuleNodeData | GroupNodeData>[];
   const layoutedEdges = edges.map((edge) => {
     const dagreEdge = g.edge({ v: edge.source, w: edge.target });
     return {
@@ -501,7 +503,7 @@ const DependencyViewer: React.FC<DependencyViewerProps> = ({
 
     // Separate top-level nodes (go into Dagre) from child nodes (inside expanded group containers)
     const topLevelNodes = allNodes.filter(n => !n.parentNode);
-    const childNodes = allNodes.filter(n => n.parentNode);
+    const childNodes = allNodes.filter(n => !!n.parentNode) as Node<ModuleNodeData | GroupNodeData>[];
 
     // Run Dagre layout on top-level nodes only (children have pre-computed relative positions)
     const layouted = getLayoutedElements(topLevelNodes, edges, 'TB');
@@ -509,20 +511,20 @@ const DependencyViewer: React.FC<DependencyViewerProps> = ({
     let positionedTopLevelNodes: Node<ModuleNodeData | GroupNodeData>[];
     if (!noneHavePositions) {
       // Hybrid: use Dagre positions but override top-level module nodes with saved positions
-      const savedPositions = new Map(
+      const savedPositions = new Map<string, { x: number; y: number }>(
         visibleModules
           .filter((m) => m.position && !(m.group && expandedGroups.has(m.group)))
           .map((m) => [m.filename, m.position!])
       );
       positionedTopLevelNodes = layouted.nodes.map((node) => {
         const savedPos = savedPositions.get(node.id);
-        return savedPos ? { ...node, position: savedPos } : node;
+        return (savedPos ? { ...node, position: savedPos } : node) as Node<ModuleNodeData | GroupNodeData>;
       });
     } else {
       positionedTopLevelNodes = layouted.nodes;
     }
 
-    return { initialNodes: [...positionedTopLevelNodes, ...childNodes], initialEdges: layouted.edges };
+    return { initialNodes: [...positionedTopLevelNodes, ...childNodes] as Node<ModuleNodeData | GroupNodeData>[], initialEdges: layouted.edges };
   }, [
     architecture, existingPrompts, promptInfoMap, onModuleClick, onRunSync,
     editMode, onModuleEdit, onModuleDelete, highlightedModules, batches,
