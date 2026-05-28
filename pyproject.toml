@@ -38,7 +38,6 @@ dependencies = [
     "aiofiles==25.1.0",
     "click==8.4.1",
     "firecrawl-py==4.28.0",
-    "firebase_admin==7.4.0",
     "httpx==0.28.1",
     "keyring==25.7.0",
     "keyrings.alt==5.0.2",
@@ -70,7 +69,6 @@ dependencies = [
     "python-dotenv==1.2.2",
     "PyYAML==6.0.3",
     "jsonschema==4.26.0",
-    "z3-solver==4.16.0.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "websockets>=13.0",
@@ -114,7 +112,8 @@ dev = [
     "pytest-asyncio",
     "pytest-timeout",
     "build",
-    "twine"
+    "twine",
+    "z3-solver==4.16.0.0"
 ]
 
 # Optional defaults for `pdd checkup simplify` (multi-provider harness).
