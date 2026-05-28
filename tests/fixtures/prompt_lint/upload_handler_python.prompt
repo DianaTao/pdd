@@ -4,7 +4,7 @@
 
 <contract_rules>
 R2 - Duplicate upload rejection
-When the same duplicate upload is submitted twice, the service MUST reject the second request.
+When ...
 </contract_rules>
 
 <requirements>
