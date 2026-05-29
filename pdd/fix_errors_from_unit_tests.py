@@ -3,7 +3,6 @@ import tempfile  # Added missing import
 from datetime import datetime
 from typing import Tuple, Optional
 from pydantic import BaseModel, Field, ValidationError
-from rich import print as rprint
 from rich.markdown import Markdown
 from rich.console import Console
 from rich.panel import Panel

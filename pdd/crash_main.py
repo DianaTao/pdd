@@ -1,4 +1,3 @@
-import sys
 from typing import Tuple, Optional, Dict, Any
 import json
 import click
@@ -14,7 +13,6 @@ from .config_resolution import resolve_effective_config
 from .construct_paths import construct_paths
 from .fix_code_loop import fix_code_loop
 from .core.cloud import CloudConfig, get_cloud_timeout, get_cloud_request_timeout
-from .get_language import get_language
 
 # Import fix_code_module_errors conditionally or ensure it's always available
 try:

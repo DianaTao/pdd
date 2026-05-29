@@ -3,7 +3,7 @@ import glob
 import re
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import click
 from rich.console import Console
@@ -20,8 +20,6 @@ from .construct_paths import (
     _find_pddrc_file,
     _get_relative_basename,
     _load_pddrc_config,
-    _detect_context,
-    _get_context_config,
     get_extension
 )
 from .sync_determine_operation import get_pdd_file_paths

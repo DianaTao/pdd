@@ -8,7 +8,6 @@ from rich.console import Console
 from rich.table import Table
 import math # For isnan check, although pd.isna is preferred
 from pathlib import Path
-from rich.text import Text # Import Text for explicit string conversion if needed
 
 # Initialize Rich Console for pretty printing
 console = Console()

@@ -5,7 +5,6 @@ import os
 import re
 from typing import Callable, List, Optional, Tuple
 from pathlib import Path
-from rich import print
 from pydantic import BaseModel, Field
 
 from .llm_invoke import llm_invoke

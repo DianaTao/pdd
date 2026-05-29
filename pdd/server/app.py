@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, List, Union
+from typing import Optional, List, Any
 
 import uvicorn
 from fastapi import FastAPI, Request, status
@@ -45,7 +44,14 @@ class AppState:
         self.version = "0.1.0"  # In a real app, load from package metadata
 
         # Store server config for port access
-        self.config = config or ServerConfig()
+        self.config = config or ServerConfig(
+            host="127.0.0.1",
+            port=9876,
+            token=None,
+            allow_remote=False,
+            allowed_origins=None,
+            log_level="info"
+        )
 
         # Initialize managers
         self.path_validator = PathValidator(self.project_root)
@@ -99,23 +105,27 @@ def get_server_port() -> int:
 # Exception Handlers
 # ============================================================================
 
-async def security_exception_handler(request: Request, exc: SecurityError):
+async def security_exception_handler(request: Request, exc: Any):
     """Handle security violations (403)."""
     # Log the full error with code for server-side debugging
-    console.print(f"[bold red]Security Violation:[/bold red] {exc.message} ({exc.code})")
+    message = getattr(exc, "message", str(exc))
+    code = getattr(exc, "code", "unknown")
+    console.print(f"[bold red]Security Violation:[/bold red] {message} ({code})")
     
     # Return only the message to the client to match expected log output behavior
     return JSONResponse(
         status_code=status.HTTP_403_FORBIDDEN,
-        content={"detail": exc.message},
+        content={"detail": message},
     )
 
 
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
+async def validation_exception_handler(request: Request, exc: Any):
     """Handle Pydantic validation errors (422)."""
+    errors: Any = getattr(exc, "errors", lambda: [])()
+    body = getattr(exc, "body", None)
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={"detail": exc.errors(), "body": str(exc.body)},
+        content={"detail": errors, "body": str(body)},
     )
 
 

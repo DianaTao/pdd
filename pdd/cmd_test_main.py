@@ -14,7 +14,7 @@ from rich.panel import Panel
 
 from .config_resolution import resolve_effective_config
 from .construct_paths import construct_paths
-from .core.cloud import CloudConfig, get_cloud_timeout, get_cloud_request_timeout
+from .core.cloud import CloudConfig, get_cloud_request_timeout
 from .generate_test import generate_test
 from .increase_tests import increase_tests
 from .test_result import TestResult

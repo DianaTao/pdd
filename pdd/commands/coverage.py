@@ -27,7 +27,6 @@ from ..coverage_contracts import (
     STATUS_WAIVED,
     STATUS_FAILED,
     CoverageResult,
-    RuleCoverage,
     build_coverage,
     build_coverage_directory,
 )

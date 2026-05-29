@@ -352,8 +352,8 @@ def evaluate_manifest(
     project_root: Path,
     policy: GatePolicy,
     *,
-    stories_dir: Optional[Path],
-    tests_dir: Optional[Path],
+    stories_dir: Optional[Path] = None,
+    tests_dir: Optional[Path] = None,
 ) -> list[GateFailure]:
     """Run all gate checks for a single evidence manifest."""
     failures: list[GateFailure] = []

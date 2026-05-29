@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import re
-from typing import Tuple, Optional
+from typing import Tuple
 
 from rich.console import Console
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 
 from . import DEFAULT_STRENGTH, DEFAULT_TIME
 from .load_prompt_template import load_prompt_template

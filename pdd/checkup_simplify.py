@@ -17,12 +17,6 @@ import tomllib
 from rich.console import Console
 
 from .checkup_file_selection import discover_simplify_targets, resolve_simplify_repo_root
-from .checkup_simplify_claude import (  # pylint: disable=unused-import
-    _parse_claude_code_version,
-    build_simplify_slash_message as _build_simplify_slash_message,
-    check_claude_code_simplify_available,
-    run_claude_simplify_command,
-)
 from .checkup_simplify_engines import (
     build_simplify_command_repr,
     check_simplify_engine_available,

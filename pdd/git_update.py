@@ -1,6 +1,5 @@
 import os
 from typing import Tuple, Optional
-from rich import print
 from rich.console import Console
 from rich.panel import Panel
 from .update_prompt import update_prompt

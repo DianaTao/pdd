@@ -76,11 +76,6 @@
             "returns": "bool"
           },
           {
-            "name": "_extract_step_report",
-            "signature": "(text: Optional[str]) -> Optional[str]",
-            "returns": "Optional[str]"
-          },
-          {
             "name": "extract_step_report",
             "signature": "(text: Optional[str]) -> Optional[str]",
             "returns": "Optional[str]"
@@ -94,11 +89,6 @@
             "name": "post_step_comment_once",
             "signature": "(*, repo_owner: str, repo_name: str, issue_number: int, step_num: int, body: str, posted_steps: Set[int], cwd: Path) -> bool",
             "returns": "bool"
-          },
-          {
-            "name": "_sanitize_comment_body",
-            "signature": "(body: Optional[str], max_chars: int = 25_000) -> str",
-            "returns": "str"
           },
           {
             "name": "post_pr_comment",
@@ -4187,38 +4177,6 @@
     "position": {
       "x": 4800,
       "y": 1100
-    }
-  },
-  {
-    "reason": "Module that post-process the string output of a LLM so that the code can be run.",
-    "description": "Implements functionality to post-process the string output of a LLM so that the code can be run. Integrates with PDD workflow.",
-    "dependencies": [],
-    "priority": 120,
-    "filename": "postprocess_0_python.prompt",
-    "filepath": "pdd/postprocess_0.py",
-    "tags": [
-      "module",
-      "processing",
-      "python"
-    ],
-    "interface": {
-      "type": "module",
-      "module": {
-        "functions": [
-          {
-            "name": "postprocess_0",
-            "signature": "(llm_output: str, language: str) -> str",
-            "returns": "str",
-            "sideEffects": [
-              "None"
-            ]
-          }
-        ]
-      }
-    },
-    "position": {
-      "x": 10160,
-      "y": 1320
     }
   },
   {

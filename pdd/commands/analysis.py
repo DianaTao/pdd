@@ -1,8 +1,8 @@
-from __future__ import annotations
-
 """
 Analysis commands (detect-change, conflicts, bug, crash, trace).
 """
+from __future__ import annotations
+
 import os
 import re
 import click

@@ -45,8 +45,8 @@ class StderrMessage(WSMessage):
 
 
 class ProgressMessage(WSMessage):
-    def __init__(self, current, total, message, timestamp):
-        super().__init__(type="progress", data=None, current=current, total=total, message=message, timestamp=timestamp)
+    def __init__(self, current, total, message, timestamp, data=None):
+        super().__init__(type="progress", data=data, current=current, total=total, message=message, timestamp=timestamp)
 
 
 class JobStatus(Enum):

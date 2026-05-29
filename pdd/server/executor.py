@@ -7,7 +7,6 @@ from typing import Any, Callable, Dict, Optional
 from unittest.mock import MagicMock
 
 import click
-from rich.console import Console
 
 # Attempt to import global constants, falling back to safe defaults if package structure varies
 try:
@@ -87,11 +86,11 @@ class OutputCapture:
         sys.stderr = StreamingWriter(self._stderr_buffer, self._callback, "stderr")  # type: ignore
         return self
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> bool:
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         # Restore streams
         sys.stdout = self._original_stdout
         sys.stderr = self._original_stderr
-        return False  # Propagate exceptions
+        return None  # Propagate exceptions
 
     @property
     def stdout(self) -> str:

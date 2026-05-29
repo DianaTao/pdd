@@ -25,9 +25,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union, Any
+from typing import Dict, List, Optional, Tuple, Union
 
 from rich.console import Console
 from rich.markup import escape

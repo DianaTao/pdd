@@ -1,4 +1,3 @@
-from pathlib import Path
 from typing import Optional
 from rich import print
 from pdd.path_resolution import get_default_resolver

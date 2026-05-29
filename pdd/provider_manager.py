@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import csv
-import io
 import os
 import re
 import shlex

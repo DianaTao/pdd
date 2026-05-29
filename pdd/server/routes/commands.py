@@ -20,27 +20,27 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-
-try:
-    from rich.console import Console
-    console = Console()
-except ImportError:
-    class Console:
-        def print(self, *args, **kwargs):
-            import builtins
-            builtins.print(*args)
-    console = Console()
-
 from pydantic import BaseModel
 
 from ..models import CommandRequest, JobHandle, JobResult, JobStatus
 from ..jobs import JobManager
-from ..click_executor import ClickCommandExecutor, get_pdd_command
+from ..terminal_spawner import TerminalSpawner
 
 # Import construct_paths functions for smart output path detection
 from ...construct_paths import (
     detect_context_for_file,
 )
+
+try:
+    from rich.console import Console as RichConsole
+    Console = RichConsole
+except ImportError:
+    class DummyConsole: # type: ignore
+        def print(self, *args: Any, **kwargs: Any) -> None:
+            import builtins
+            builtins.print(*args)
+    Console = DummyConsole # type: ignore
+console = Console()
 
 
 class RunResult(BaseModel):
@@ -673,11 +673,11 @@ async def run_command_in_terminal(
     # Print completion message
     if exit_code == 0:
         console.print(f"\n[bold green]{'='*60}[/bold green]")
-        console.print(f"[bold green]Command completed successfully[/bold green]")
+        console.print("[bold green]Command completed successfully[/bold green]")
         console.print(f"[green]{'='*60}[/green]\n")
     elif exit_code == -signal.SIGTERM or exit_code == -signal.SIGKILL:
         console.print(f"\n[bold yellow]{'='*60}[/bold yellow]")
-        console.print(f"[bold yellow]Command was cancelled[/bold yellow]")
+        console.print("[bold yellow]Command was cancelled[/bold yellow]")
         console.print(f"[yellow]{'='*60}[/yellow]\n")
         return RunResult(
             success=False,
@@ -742,8 +742,6 @@ async def get_command_status():
 # ============================================================================
 # Terminal Spawning - Run commands in separate terminal windows
 # ============================================================================
-
-from ..terminal_spawner import TerminalSpawner
 
 
 class SpawnTerminalResponse(BaseModel):

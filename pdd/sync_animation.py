@@ -1,8 +1,8 @@
 import time
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 import threading
-from typing import List, Dict, Optional, Tuple, Any
+from typing import List, Dict, Optional, Tuple
 
 from rich.console import Console
 from rich.live import Live
@@ -11,7 +11,6 @@ from rich.panel import Panel
 from rich.text import Text
 from rich.align import Align
 from rich.table import Table
-from rich.progress_bar import ProgressBar # For cost/budget display if needed
 
 from . import logo_animation
 

@@ -281,8 +281,12 @@ def test_gate_fails_when_prompt_changed_after_manifest(tmp_path: Path) -> None:
         },
     )
     # Ensure prompt is newer than manifest to trigger stale story validation.
+    import os
+    import time
     prompt.write_text("v2\n", encoding="utf-8")
+    os.utime(prompt, (time.time() + 1, time.time() + 1))
     result = run_gate_policy(project, target="refund")
+
     assert not result.passed
     assert any(f.code == "stories_stale_after_prompt_change" for f in result.failures)
 

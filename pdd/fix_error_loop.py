@@ -6,7 +6,7 @@ import shutil
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Tuple, Optional
+from typing import Tuple
 
 import requests
 from rich import print as rprint
@@ -19,7 +19,6 @@ from .fix_errors_from_unit_tests import fix_errors_from_unit_tests
 from . import DEFAULT_TIME  # Import DEFAULT_TIME
 from .python_env_detector import detect_host_python_executable
 from .agentic_fix import run_agentic_fix
-from .agentic_langtest import default_verify_cmd_for
 from .get_test_command import get_test_command_for_file
 from .core.cloud import CloudConfig, get_cloud_timeout, get_cloud_request_timeout
 # Moved import to top level to allow mocking in tests

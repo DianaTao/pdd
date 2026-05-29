@@ -38,6 +38,12 @@ router = APIRouter(prefix="/api/v1/architecture", tags=["architecture"])
 _rearrange_executor = ThreadPoolExecutor(max_workers=2)
 
 
+class NodePosition(BaseModel):
+    """Graph position for a module node."""
+    x: float
+    y: float
+
+
 class ArchitectureModule(BaseModel):
     """Schema for an architecture module."""
 
@@ -50,6 +56,7 @@ class ArchitectureModule(BaseModel):
     tags: List[str] = Field(default_factory=list)
     interface: Optional[Dict[str, Any]] = None
     group: Optional[str] = None
+    position: Optional[NodePosition] = None
 
 
 class ValidationError(BaseModel):

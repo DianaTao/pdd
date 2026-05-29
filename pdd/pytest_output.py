@@ -5,7 +5,6 @@ import os
 import re
 import signal
 import sys
-import pytest
 import subprocess
 from pathlib import Path
 from rich.console import Console

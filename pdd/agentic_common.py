@@ -7,7 +7,6 @@ import sys
 import json
 import shutil
 import subprocess
-import tempfile
 import time
 import uuid
 import re
@@ -3933,8 +3932,9 @@ def _extract_step_report(text: Optional[str]) -> Optional[str]:
     return matches[-1].strip()
 
 
-# Public alias for orchestrator callers; same semantics as ``_extract_step_report``.
-extract_step_report = _extract_step_report
+def extract_step_report(text: Optional[str]) -> Optional[str]:
+    """Public alias for orchestrator callers; same semantics as ``_extract_step_report``."""
+    return _extract_step_report(text)
 
 
 def normalize_step_comments_state(raw: Any) -> Set[int]:

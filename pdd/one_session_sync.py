@@ -24,7 +24,6 @@ from .code_generator_main import (
     TestChurnError,
     _env_flag_enabled,
     _get_test_churn_threshold,
-    _is_test_output_path,
     _prompt_allows_test_churn,
     _verify_public_surface_regression,
     _verify_test_churn,

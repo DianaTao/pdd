@@ -11,9 +11,7 @@ from __future__ import annotations
 import ast
 import json
 import re
-import textwrap
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 
 from rich.console import Console
 from rich.theme import Theme

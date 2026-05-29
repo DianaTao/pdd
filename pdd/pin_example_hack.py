@@ -13,12 +13,11 @@ import re
 import os
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Callable
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 import tempfile
 import sys
 
 import click
-import logging
 
 # --- Constants ---
 MAX_CONSECUTIVE_TESTS = 3  # Allow up to 3 consecutive test attempts
@@ -31,7 +30,6 @@ from .sync_determine_operation import (
     sync_determine_operation,
     get_pdd_file_paths,
     RunReport,
-    SyncDecision,
     PDD_DIR,
     META_DIR,
     SyncLock,
@@ -49,7 +47,6 @@ from .cmd_test_main import cmd_test_main
 from .fix_main import fix_main
 from .update_main import update_main
 from .python_env_detector import detect_host_python_executable
-from .get_run_command import get_run_command_for_file
 from .pytest_output import extract_failing_files_from_output, _find_project_root
 from . import DEFAULT_STRENGTH
 

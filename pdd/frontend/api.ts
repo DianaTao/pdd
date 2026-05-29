@@ -5,7 +5,7 @@
  * file operations, and real-time streaming.
  */
 
-import YAML from 'yaml';
+import * as YAML from 'yaml';
 import type { PddrcConfig } from './types';
 
 // API Configuration

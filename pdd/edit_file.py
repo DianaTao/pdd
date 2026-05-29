@@ -23,9 +23,8 @@ import hashlib
 import logging
 import subprocess
 import sys
-from typing import TypedDict, Annotated, Optional, List, Tuple, Union, Sequence, Literal
+from typing import TypedDict, Annotated, Optional, Tuple, Sequence, Literal
 import aiofiles
-from pathlib import Path
 import importlib.resources
 
 # LangGraph imports
@@ -37,12 +36,9 @@ from langgraph.prebuilt import ToolNode
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage
 # Replace with your preferred LLM provider if needed, e.g., langchain_anthropic
 # from langchain_openai import ChatOpenAI
-from pydantic import BaseModel, Field
-from langchain_core.tools import BaseTool # Import BaseTool
 
 # Anthropic imports for Claude 3.7
 from langchain_anthropic import ChatAnthropic
-from langchain_core.prompts import ChatPromptTemplate
 
 # Import LangChain caching - use community package
 from langchain import globals as langchain_globals

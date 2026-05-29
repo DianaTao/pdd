@@ -1,0 +1,23 @@
+
+> prompt-driven-development-ide@0.0.0 test
+> vitest run --run
+
+
+ RUN  v4.0.18 /tmp/pdd_job_ZsO2CuA2KP7qlMtdNJl4_l5ufrcuc/.pdd/worktrees/checkup-issue-28/pdd/frontend
+
+ ✓ tests/group-subflow-nodes.test.tsx (9 tests) 148ms
+ ✓ tests/rearrange-positions.test.tsx (1 test) 81ms
+ ✓ tests/sync-completed-refresh.test.tsx (4 tests) 139ms
+ ✓ tests/compact-font-direct-zoom.test.tsx (4 tests) 64ms
+ ✓ tests/rearrange-discard.test.tsx (1 test) 122ms
+ ✓ tests/vp-zoom-sync.test.tsx (4 tests) 35ms
+ ✓ tests/group-layout.test.ts (9 tests) 8ms
+ ✓ tests/waypoint-edge.test.ts (4 tests) 22ms
+ ✓ tests/module-needs-sync.test.tsx (8 tests) 5ms
+ ✓ tests/compact-font-size.test.ts (5 tests) 4ms
+
+ Test Files  10 passed (10)
+      Tests  49 passed (49)
+   Start at  02:23:45
+   Duration  6.57s (transform 1.97s, setup 865ms, import 4.21s, tests 627ms, environment 9.28s)
+
