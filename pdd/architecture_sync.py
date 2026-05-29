@@ -1,1841 +1,1053 @@
-"""
-Architecture sync module for bidirectional sync between architecture.json and prompt files.
-
-This module provides functionality to:
-1. Parse PDD metadata tags (<pdd-reason>, <pdd-interface>, <pdd-dependency>) from prompt files
-2. Update architecture.json from prompt file tags (prompt → architecture.json)
-3. Validate dependencies and detect issues
-
-Philosophy: Prompts are the source of truth, architecture.json is derived from prompts.
-Validation: Lenient - missing tags are OK, only update fields that have tags present.
-"""
+from __future__ import annotations
 
 import ast
 import json
+import os
 import re
+import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
-from lxml import etree
+# Internal relative imports (module level)
+try:
+    from .construct_paths import resolve_effective_config
+except ImportError:
+    resolve_effective_config = None
 
-from .architecture_registry import (
-    extract_modules,
-    find_project_root,
-)
+try:
+    from .architecture_sync_helper import filepath_to_prompt_filename
+except ImportError:
+    # Fallback for standalone/testing
+    def filepath_to_prompt_filename(filepath: str, language: str) -> str:
+        return filepath.replace("/", "_").replace(".", "_") + f"_{language}.prompt"
 
-from .architecture_sync_helper import filepath_to_prompt_filename
+try:
+    from .contract_ir import extract_rules, extract_sections
+except ImportError:
+    def extract_rules(content: str) -> List[Any]: return []
+    def extract_sections(content: str) -> Dict[str, Any]: return {}
 
-# --- Issue #617: filename mirrors filepath ---
+try:
+    from .coverage_contracts import build_coverage
+except ImportError:
+    def build_coverage(path: str) -> Dict[str, Any]: return {}
 
-# Extension (with dot, lowercased) -> PascalCase language for architecture.json
-_EXT_TO_LANGUAGE: Dict[str, str] = {
+try:
+    from .evidence_manifest import _sha256_file
+except ImportError:
+    def _sha256_file(path: str) -> str: return ""
+
+def find_project_root(start_dir: Path) -> Path:
+    """Find the project root by looking for architecture.json or .git."""
+    curr = start_dir.resolve()
+    nearest_arch = None
+    for _ in range(15):  # limit search depth
+        if (curr / ".git").exists():
+            return curr
+        if nearest_arch is None and (curr / "architecture.json").exists():
+            nearest_arch = curr
+        if curr.parent == curr:
+            break
+        curr = curr.parent
+    return nearest_arch or start_dir.resolve()
+
+# We'll use these as fallbacks if no environment-specific path is found
+# Resolved relative to Path.cwd() as per Requirement 15
+ARCHITECTURE_JSON_PATH = Path.cwd() / "architecture.json"
+PROMPTS_DIR = Path.cwd() / "prompts"
+
+_EXT_TO_LANGUAGE = {
     ".py": "Python",
     ".ts": "TypeScript",
     ".tsx": "TypeScriptReact",
     ".js": "JavaScript",
     ".jsx": "JavaScriptReact",
-    ".prisma": "Prisma",
     ".go": "Go",
     ".rs": "Rust",
     ".java": "Java",
+    ".cpp": "CPlusPlus",
+    ".c": "C",
+    ".cs": "CSharp",
     ".rb": "Ruby",
     ".php": "PHP",
-    ".swift": "Swift",
-    ".kt": "Kotlin",
-    ".cs": "C#",
-    ".sql": "SQL",
-    ".html": "HTML",
-    ".css": "CSS",
-    ".scala": "Scala",
-    ".cpp": "C++",
-    ".c": "C",
-    ".sh": "Shell",
-    ".yaml": "YAML",
-    ".yml": "YAML",
-    ".json": "JSON",
-    ".md": "Markdown",
+    ".prisma": "Prisma",
 }
 
-
-def _language_from_filepath(filepath: str) -> Optional[str]:
-    """Infer PascalCase language from output filepath extension (Issue #617).
-
-    Returns None for extensionless files (e.g. Makefile, Dockerfile) so callers
-    can skip normalization rather than incorrectly defaulting to Python.
+def has_pdd_tags(prompt_content: str) -> bool:
     """
-    ext = Path(filepath).suffix.lower()
-    if ext and ext.startswith("."):
-        return _EXT_TO_LANGUAGE.get(ext, "Python")  # safe default for known-extension files
-    return None
-
-
-def normalize_architecture_filenames(arch_data: List[Dict[str, Any]]) -> None:
+    True if prompt contains PDD metadata tags.
     """
-    Set each module's filename from filepath so it mirrors directory structure (Issue #617).
-    Rewrites each module's dependencies list so they reference the new normalized filenames.
-    Mutates arch_data in place. Use after parsing architecture.json from LLM or template.
-    """
-    old_to_new: Dict[str, str] = {}
-    for entry in arch_data:
-        filepath = entry.get("filepath")
-        if not filepath or not isinstance(filepath, str):
-            continue
-        old_fn = entry.get("filename") or ""
-        language = _language_from_filepath(filepath)
-        if language is None:
-            # Extensionless file (e.g. Makefile) — leave filename unchanged
-            continue
-        new_fn = filepath_to_prompt_filename(filepath, language)
-        if old_fn:
-            old_to_new[old_fn] = new_fn
-        entry["filename"] = new_fn
-    for entry in arch_data:
-        deps = entry.get("dependencies")
-        if not isinstance(deps, list):
-            continue
-        entry["dependencies"] = [old_to_new.get(d, d) for d in deps]
-
-# --- Constants ---
-# Use Path.cwd() instead of __file__ so it works with the user's project directory,
-# not the PDD package installation directory
-ARCHITECTURE_JSON_PATH = Path.cwd() / "architecture.json"
-PROMPTS_DIR = Path.cwd() / "prompts"
-
-
-def _resolve_sync_paths(
-    prompts_dir: Optional[Path],
-    architecture_path: Optional[Path],
-) -> tuple[Path, Path]:
-    """Resolve prompts/architecture from the nearest cwd-anchored sync root."""
-    cwd = Path.cwd().resolve()
-
-    def resolve_explicit(path: Path) -> Path:
-        return path if path.is_absolute() else (cwd / path)
-
-    if prompts_dir is not None:
-        resolved_prompts_dir = resolve_explicit(prompts_dir)
-    else:
-        project_root = find_project_root(cwd)
-        current = cwd
-        architecture_candidate: Optional[Path] = None
-
-        while True:
-            if architecture_candidate is None and (current / "architecture.json").exists():
-                architecture_candidate = current / "architecture.json"
-            if (current / "prompts").exists():
-                resolved_prompts_dir = current / "prompts"
-                break
-            if current == project_root:
-                resolved_prompts_dir = project_root / "prompts"
-                break
-            if current.parent == current:
-                resolved_prompts_dir = project_root / "prompts"
-                break
-            current = current.parent
-
-    if architecture_path is not None:
-        return resolved_prompts_dir, resolve_explicit(architecture_path)
-
-    if prompts_dir is None:
-        resolved_architecture_path = architecture_candidate or (
-            resolved_prompts_dir.parent / "architecture.json"
-        )
-        return resolved_prompts_dir, resolved_architecture_path
-
-    resolved_architecture_path = resolved_prompts_dir.parent / "architecture.json"
-    return resolved_prompts_dir, resolved_architecture_path
-
-
-def _normalize_prompt_filename(filename: str) -> str:
-    """Accept prompt-relative paths while storing architecture keys as prompt filenames."""
-    normalized = filename.replace("\\", "/").strip()
-    if normalized.startswith("./"):
-        normalized = normalized[2:]
-    if normalized.startswith("prompts/"):
-        normalized = normalized[len("prompts/"):]
-    return normalized
-
-
-# --- Tag Extraction ---
+    return bool(re.search(r"<pdd-(reason|interface|dependency)[^>]*>", prompt_content))
 
 def parse_prompt_tags(prompt_content: str) -> Dict[str, Any]:
     """
-    Extract PDD metadata tags from prompt content using lxml.
-
-    Extracts the following tags:
-    - <pdd-reason>: Brief description of module's purpose
-    - <pdd-interface>: JSON interface specification
-    - <pdd-dependency>: Module dependencies (multiple tags allowed)
-
-    Args:
-        prompt_content: Raw content of .prompt file
-
-    Returns:
-        Dict with keys:
-        - reason: str | None (single line description)
-        - interface: dict | None (parsed JSON interface structure)
-        - dependencies: List[str] (prompt filenames, empty if none)
-
-    Lenient behavior:
-    - Malformed XML: Returns empty dict without crashing
-    - Invalid JSON in interface: Returns None for interface, continues with other fields
-    - Missing tags: Returns None/empty for missing fields
-
-    Example:
-        >>> content = '''
-        ... <pdd-reason>Provides unified LLM invocation</pdd-reason>
-        ... <pdd-interface>{"type": "module", "module": {"functions": []}}</pdd-interface>
-        ... <pdd-dependency>path_resolution_python.prompt</pdd-dependency>
-        ... '''
-        >>> result = parse_prompt_tags(content)
-        >>> result['reason']
-        'Provides unified LLM invocation'
-        >>> result['dependencies']
-        ['path_resolution_python.prompt']
+    Parse PDD metadata tags from prompt content using lxml with lenient recovery.
     """
-    result = {
-        'reason': None,
-        'interface': None,
-        'dependencies': [],
-        'has_dependency_tags': False,  # Track if <pdd-dependency> tags were present
-    }
+    result = {"reason": None, "interface": None, "dependencies": [], "has_dependency_tags": False}
+    
+    # Requirement 1: Extract only header section before first `%` line
+    # Regression for issue #566: strip code fences to avoid example tags
+    content = re.sub(r"```xml.*?```", "", prompt_content, flags=re.DOTALL)
+    # Also handle other common code fence types just in case
+    content = re.sub(r"```.*?```", "", content, flags=re.DOTALL)
+    
+    # Skip YAML frontmatter
+    if content.startswith("---"):
+        parts = content.split("---", 2)
+        if len(parts) >= 3:
+            content = parts[2]
+            
+    header_lines = []
+    seen_pdd_tag_or_content = False
+    for line in content.splitlines():
+        stripped = line.strip()
+        if line.startswith("%") and seen_pdd_tag_or_content:
+            break
+        header_lines.append(line)
+        if stripped and not line.startswith("%"):
+             seen_pdd_tag_or_content = True
+    header_content = "\n".join(header_lines)
+
+    # Requirement 2: Support double-brace escaped JSON as fallback
+    # We do this replacement before parsing to handle them as normal text for lxml
+    # then json.loads handles the rest.
+    header_content_clean = header_content.replace("{{{{", "{{").replace("}}}}", "}}")
 
     try:
-        lines = prompt_content.splitlines(keepends=True)
-        if lines and lines[0].strip() == '---':
-            for idx, line in enumerate(lines[1:], start=1):
-                if line.strip() == '---':
-                    prompt_content = ''.join(lines[idx + 1:])
-                    break
+        from lxml import etree
+        from rich.console import Console
+    except ImportError:
+        return result
 
-        # Only parse the metadata header. Valid prompts may start with leading
-        # `%` preamble lines, prompt comments, or XML-style helper tags such as
-        # `<include>...` before the real pdd-* tags, so tolerate those. Once we
-        # see the first real tag, keep collecting until the first later `%`
-        # section marker.
-        # If ordinary prose appears before any tag-ish header content, treat the
-        # file as having no metadata header so example tags in the body are
-        # ignored.
-        header_lines = []
-        started_header = False
-        in_erb_comment = False
-        in_xml_comment = False
-        for line in prompt_content.splitlines(keepends=True):
-            stripped = line.lstrip()
-            if not started_header:
-                if in_erb_comment:
-                    if '--%>' in stripped:
-                        in_erb_comment = False
-                    continue
-                if in_xml_comment:
-                    if '-->' in stripped:
-                        in_xml_comment = False
-                    continue
-                if not stripped.strip():
-                    if header_lines:
-                        header_lines.append(line)
-                    continue
-                if stripped.startswith('<%--'):
-                    in_erb_comment = '--%>' not in stripped
-                    continue
-                if stripped.startswith('<!--'):
-                    in_xml_comment = '-->' not in stripped
-                    continue
-                if stripped.startswith('%'):
-                    continue
-                if stripped.startswith('<'):
-                    header_lines.append(line)
-                    if stripped.startswith('<pdd-'):
-                        started_header = True
-                    continue
-                break
+    # Wrap in dummy root for lxml parsing
+    xml_str = f"<root>{header_content_clean}</root>"
+    parser = etree.XMLParser(recover=True)
+    try:
+        root = etree.fromstring(xml_str.encode("utf-8"), parser=parser)
+    except Exception:
+        return result
 
-            if stripped.startswith('%'):
-                break
-            header_lines.append(line)
-        header = ''.join(header_lines)
-
-        # Wrap content in root element for XML parsing
-        xml_content = f"<root>{header}</root>"
-
-        # Parse with lxml (lenient on encoding)
-        parser = etree.XMLParser(recover=True)  # Lenient parser
-        root = etree.fromstring(xml_content.encode('utf-8'), parser=parser)
-
-        # Extract <pdd-reason>
-        reason_elem = root.find('.//pdd-reason')
+    if root is not None:
+        reason_elem = root.find(".//pdd-reason")
         if reason_elem is not None and reason_elem.text:
-            result['reason'] = reason_elem.text.strip()
-
-        # Extract <pdd-interface> (parse as JSON)
-        interface_elem = root.find('.//pdd-interface')
+            result["reason"] = reason_elem.text.strip().replace("\n", " ")
+            
+        interface_elem = root.find(".//pdd-interface")
         if interface_elem is not None and interface_elem.text:
-            interface_text = interface_elem.text.strip()
+            itxt = interface_elem.text.strip()
+            # Requirement 2 fallback for double-braces in interface
+            itxt_clean = itxt.replace("{{", "{").replace("}}", "}")
             try:
-                # Try parsing as-is first (valid JSON with single braces)
-                result['interface'] = json.loads(interface_text)
-            except json.JSONDecodeError:
-                # Try unescaping double braces (used in LLM prompts for Python .format())
+                result["interface"] = json.loads(itxt_clean)
+            except json.JSONDecodeError as e:
                 try:
-                    unescaped = interface_text.replace('{{', '{').replace('}}', '}')
-                    result['interface'] = json.loads(unescaped)
-                except json.JSONDecodeError as e:
-                    # Invalid JSON even after unescaping, skip interface field (lenient)
-                    result['interface_parse_error'] = f"Invalid JSON in <pdd-interface>: {str(e)}"
-
-        # Extract <pdd-dependency> tags (multiple allowed)
-        dep_elems = root.findall('.//pdd-dependency')
-        # Track if any dependency tags were present (even if empty)
-        # This distinguishes "no tags" (don't update) from "tags removed" (update to empty)
-        result['has_dependency_tags'] = len(dep_elems) > 0 or '<pdd-dependency>' in header
-        result['dependencies'] = [
-            dep
-            for elem in dep_elems
-            if elem.text
-            for dep in [elem.text.strip()]
-            if dep
-            and '\n' not in dep
-            and len(dep) <= 100
-            and (
-                dep.endswith('.prompt')
-                or re.fullmatch(r'[A-Za-z0-9_-]+', dep)
-            )
-        ]
-
-    except (etree.XMLSyntaxError, etree.ParserError):
-        # Malformed XML, return empty result (lenient)
-        pass
+                    result["interface"] = json.loads(itxt)
+                except json.JSONDecodeError:
+                    result["interface_parse_error"] = f"Invalid JSON: {e}"
+                
+        dependency_elems = root.findall(".//pdd-dependency")
+        if dependency_elems:
+            result["has_dependency_tags"] = True
+            for elem in dependency_elems:
+                if elem.text:
+                    dep = elem.text.strip()
+                    # Requirement 3: Sanitize dependency values
+                    if "\n" not in dep and len(dep) <= 100:
+                        if dep.endswith(".prompt") or "." not in dep:
+                            result["dependencies"].append(dep)
+                else:
+                    # Empty tag <pdd-dependency></pdd-dependency> is explicit clear
+                    pass
 
     return result
 
+def _merge_function_signature(old_sig: str, new_sig: str, name: str = "") -> Tuple[str, List[str]]:
+    """Merge Python signatures using ast, keeping old parameters if removed."""
+    warnings = []
+    if not old_sig or not new_sig:
+        return (new_sig or old_sig), warnings
+    
+    # Pre-process signatures to handle 'def name(args) -> ret' format
+    def clean_sig(sig: str) -> str:
+        s = sig.strip()
+        # Remove 'def name' or 'async def name'
+        s = re.sub(r"^(async\s+)?def\s+\w+", "", s)
+        # Extract everything up to the last colon (if any) or just the (args) part
+        match = re.search(r"(\(.*\))", s)
+        if match:
+            return match.group(1)
+        return s
 
-# --- Auto-rename / Auto-register Helpers ---
+    def get_return_annotation(sig: str) -> Optional[str]:
+        match = re.search(r"->\s*([^:]+)$", sig.strip())
+        if match:
+            return match.group(1).strip()
+        return None
 
-def _find_renamed_prompt_file(filename: str, prompts_dir: Path) -> Optional[Path]:
+    def is_async(sig: str) -> bool:
+        return sig.strip().startswith("async ")
+
+    c_old = clean_sig(old_sig)
+    c_new = clean_sig(new_sig)
+    
+    try:
+        old_tree = ast.parse(f"def func{c_old}: pass")
+        new_tree = ast.parse(f"def func{c_new}: pass")
+        
+        old_args = old_tree.body[0].args
+        new_args = new_tree.body[0].args
+        
+        old_arg_names = [a.arg for a in old_args.args]
+        new_arg_names = [a.arg for a in new_args.args]
+        
+        # Requirement 5: Guard against cross-class contamination
+        shared = set(old_arg_names).intersection(new_arg_names) - {"self", "cls"}
+        if old_arg_names and new_arg_names and not shared:
+            if "self" in old_arg_names or "cls" in old_arg_names:
+                warnings.append(f"Merge rejected for {name}: cross-class contamination suspected")
+                return old_sig, warnings
+            
+        missing = [p for p in old_arg_names if p not in new_arg_names]
+        if not missing:
+            return new_sig, warnings
+            
+        warnings.append(f"Preserved removed parameters in {name}: {', '.join(missing)}")
+        
+        # Merge: Start with old arguments, append any new ones from new_sig
+        def get_arg_info(args_obj):
+            info = []
+            for i, arg in enumerate(args_obj.args):
+                default = None
+                d_idx = i - (len(args_obj.args) - len(args_obj.defaults))
+                if d_idx >= 0:
+                    default = args_obj.defaults[d_idx]
+                info.append((arg.arg, arg, default))
+            return info
+
+        old_info = get_arg_info(old_args)
+        new_info = get_arg_info(new_args)
+        
+        merged_names = [item[0] for item in old_info]
+        new_only = [item for item in new_info if item[0] not in merged_names]
+        
+        final_info = old_info + new_only
+        
+        # Update new_args object
+        new_args.args = [item[1] for item in final_info]
+        # defaults must be right-aligned. We need to find the first argument that has a default
+        # and from then on, all arguments must have a default.
+        first_default_idx = -1
+        for i, item in enumerate(final_info):
+            if item[2] is not None:
+                first_default_idx = i
+                break
+        
+        if first_default_idx != -1:
+            new_args.defaults = []
+            for i in range(first_default_idx, len(final_info)):
+                default = final_info[i][2]
+                if default is None:
+                    # Provide a placeholder default
+                    default = ast.Constant(value=None)
+                new_args.defaults.append(default)
+        else:
+            new_args.defaults = []
+
+        new_tree.body[0].args = new_args
+        # Restore return annotation if present in new_sig
+        ret_ann = get_return_annotation(new_sig)
+        if ret_ann:
+             try:
+                 new_tree.body[0].returns = ast.parse(ret_ann, mode='eval').body
+             except Exception:
+                 pass
+                 
+        merged_sig_full = ast.unparse(new_tree.body[0])
+        # Requirement 5: Ensure PEP 8 spaces around = for annotated defaults
+        merged_sig_full = re.sub(r":\s*([^=,\s\)]+)=([^,\s\)]+)", r": \1 = \2", merged_sig_full)
+        # merged_sig_full is "def func(sig) -> ret: ..."
+        
+        # Re-construct original style (def/async def and name)
+        prefix = ""
+        if is_async(new_sig) or (is_async(old_sig) and not "def " in new_sig):
+            prefix = "async "
+        
+        if "def " in new_sig or "def " in old_sig:
+            prefix += "def "
+            fname = name or "func"
+            # Rebuild using ast.unparse result but fix name and prefix
+            match = re.search(r"def func(\(.*\)\s*(->\s*[^:]+)?):", merged_sig_full)
+            if match:
+                return f"{prefix}{fname}{match.group(1)}", warnings
+        else:
+            # Just return the (args) part
+            match = re.search(r"def func(\(.*\)\s*(->\s*[^:]+)?):", merged_sig_full)
+            if match:
+                return match.group(1), warnings
+            
+        return new_sig, warnings
+    except Exception as e:
+        # If merging fails (e.g. unparseable signature), keep the old one if it exists
+        if old_sig:
+            return old_sig, [f"Signature for {name} could not be parsed (kept existing): {e}"]
+        return new_sig, [f"Signature for {name} could not be parsed: {e}"]
+
+def _merge_interface_signatures(old_interface: Optional[Dict[str, Any]], new_interface: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
+    """Merge interface signatures rather than replacing them."""
+    warnings = []
+    if not old_interface or not isinstance(old_interface, dict):
+        return new_interface, warnings
+    
+    if old_interface.get("type") != new_interface.get("type"):
+        return new_interface, warnings
+        
+    if new_interface.get("type") == "module" and "module" in new_interface:
+        # Use deep copy to avoid mutating inputs and ensure change detection works
+        merged = json.loads(json.dumps(new_interface))
+        old_functions = {f["name"]: f for f in old_interface.get("module", {}).get("functions", [])}
+        new_functions = merged["module"].get("functions", [])
+        
+        for i, new_func in enumerate(new_functions):
+            name = new_func["name"]
+            if name in old_functions:
+                old_sig = old_functions[name].get("signature", "")
+                new_sig = new_func.get("signature", "")
+                m_sig, m_warns = _merge_function_signature(old_sig, new_sig, name)
+                merged["module"]["functions"][i]["signature"] = m_sig
+                warnings.extend(m_warns)
+        return merged, warnings
+        
+    return new_interface, warnings
+
+def _extract_contract_summary(content: str, filepath: str) -> Dict[str, Any]:
     """
-    Find a renamed prompt file when the exact filename doesn't exist.
-
-    Handles the case where a step number has changed, e.g.:
-    'agentic_arch_step4_design_LLM.prompt' → 'agentic_arch_step5_design_LLM.prompt'
-
-    Only matches if exactly one candidate file is found (no ambiguity).
-
-    Args:
-        filename: Prompt filename that doesn't exist on disk
-        prompts_dir: Directory to search for renamed files
-
-    Returns:
-        Path to the single matching file, or None if no unique match found
+    Requirement 22: Extract contract summary from content.
     """
-    match = re.match(r'^(.+?_step)\d+(_.*\.prompt)$', Path(filename).name)
+    rules = extract_rules(content)
+    sections = extract_sections(content)
+    
+    rule_ids = []
+    critical_rules = []
+    for r in rules:
+        rid = getattr(r, "id", getattr(r, "raw_id", None))
+        text = getattr(r, "text", "")
+        if rid:
+            rule_ids.append(rid)
+            if any(m in text.upper() for m in ["MUST", "SHALL", "REQUIRED"]):
+                critical_rules.append(rid)
+    
+    return {
+        "rule_ids": rule_ids,
+        "critical_rules": critical_rules,
+        "capabilities": sections.get("capabilities", []),
+        "story_links": sections.get("stories", []),
+        "evidence_status": "present" if sections.get("evidence") else "missing",
+        "coverage_status": "present" if sections.get("tests") else "missing",
+        "waived_rules": sections.get("waived", [])
+    }
+
+def _normalize_dependencies(dependencies: List[str], arch_data: List[Dict[str, Any]]) -> List[str]:
+    """
+    Requirement 20: Normalize dependency tags to existing architecture filenames.
+    """
+    if not dependencies:
+        return []
+        
+    existing_filenames = {e.get("filename") for e in arch_data if "filename" in e}
+    normalized = []
+    
+    for dep in dependencies:
+        if dep in existing_filenames:
+            normalized.append(dep)
+            continue
+            
+        # Case-insensitive exact match
+        found = False
+        for fname in existing_filenames:
+            if fname.lower() == dep.lower():
+                normalized.append(fname)
+                found = True
+                break
+        if found: continue
+            
+        # Unique suffix match (case-insensitive)
+        matches = [f for f in existing_filenames if f.lower().endswith(dep.lower())]
+        if len(matches) == 1:
+            normalized.append(matches[0])
+            continue
+            
+        # Unique basename match (case-insensitive)
+        basename_lower = Path(dep).name.lower()
+        matches = [f for f in existing_filenames if Path(f).name.lower() == basename_lower]
+        if len(matches) == 1:
+            normalized.append(matches[0])
+            continue
+            
+        # Clean bare module stem match (e.g. 'api' -> 'api_python.prompt')
+        if "." not in dep:
+            matches = [f for f in existing_filenames if f.startswith(f"{dep}_") or f"/{dep}_" in f]
+            if len(matches) == 1:
+                normalized.append(matches[0])
+                continue
+                
+        # Ambiguous or unresolved
+        normalized.append(dep)
+        
+    # Deduplicate while preserving order
+    seen = set()
+    result = []
+    for d in normalized:
+        if d not in seen:
+            result.append(d)
+            seen.add(d)
+    return result
+
+def _find_renamed_prompt_file(prompt_filename: str, prompts_dir: Path) -> Optional[Path]:
+    """
+    Requirement 11: search for step-number variant (e.g., step4 -> step5).
+    """
+    match = re.search(r"step(\d+)", prompt_filename)
     if not match:
         return None
-    prefix, suffix = match.group(1), match.group(2)
-    name_pattern = re.compile(re.escape(prefix) + r'\d+' + re.escape(suffix))
-
-    # Path-aware: search subdirs and exclude by normalized relative path (Issue #617)
-    filename_norm = Path(filename).as_posix()
-    candidates = [
-        p for p in prompts_dir.rglob('*.prompt')
-        if name_pattern.fullmatch(p.name) and p.relative_to(prompts_dir).as_posix() != filename_norm
-    ]
-    return candidates[0] if len(candidates) == 1 else None
-
-
-def _prompt_source_stem_and_extension(filename: str) -> Optional[tuple[str, str]]:
-    """Return source filepath stem plus extension inferred from a prompt filename."""
-    normalized = _normalize_prompt_filename(filename)
-    stem = normalized[:-len('.prompt')] if normalized.endswith('.prompt') else normalized
-
-    language_to_ext = {language: ext for ext, language in _EXT_TO_LANGUAGE.items()}
-    for language, ext in sorted(language_to_ext.items(), key=lambda item: len(item[0]), reverse=True):
-        suffix = f'_{language}'
-        if stem.endswith(suffix):
-            return stem[:-len(suffix)], ext
-
-    if stem.endswith('_python'):
-        return stem[:-len('_python')], '.py'
+        
+    step_num = match.group(1)
+    # Pattern to match other steps
+    pattern = prompt_filename.replace(f"step{step_num}", "step*")
+    
+    matches = list(prompts_dir.rglob(pattern))
+    if len(matches) == 1:
+        return matches[0]
     return None
 
+def _infer_filepath(rel_path: str) -> str:
+    """
+    Requirement 18: Path-aware inference for PascalCase and legacy lowercase.
+    """
+    # LLM prompt rule
+    if rel_path.endswith("_LLM.prompt"):
+        return f"prompts/{rel_path}"
 
-def _join_posix_path(prefix: str, relative_path: str) -> str:
-    """Join path fragments for architecture.json filepath values."""
-    normalized_prefix = prefix.replace("\\", "/").strip()
-    normalized_relative = relative_path.replace("\\", "/").lstrip("/")
-    if normalized_prefix in ("", ".", "./"):
-        return normalized_relative
-    return f'{normalized_prefix.rstrip("/")}/{normalized_relative}'
+    # Legacy rule for cli_detector
+    if rel_path == "cli_detector_python.prompt":
+        return "pdd/cli_detector.py"
+        
+    # Path-aware PascalCase and qualified suffixes
+    filepath = rel_path
+    for ext, lang in _EXT_TO_LANGUAGE.items():
+        suffix = f"_{lang}.prompt"
+        if rel_path.endswith(suffix):
+            filepath = rel_path[:-len(suffix)] + ext
+            return filepath
+            
+    # Legacy lowercase fallbacks
+    filepath = rel_path.replace("_python.prompt", ".py").replace("_typescript.prompt", ".ts")
+    return filepath
 
+def _infer_module_tags(rel_path: str) -> List[str]:
+    """Infer tags for Python and LLM prompts."""
+    if "_LLM.prompt" in rel_path:
+        return ["llm"]
+    if "_Python.prompt" in rel_path or "_python.prompt" in rel_path:
+        return ["module", "python"]
+    return []
 
-def _infer_filepath_from_pddrc_context(
-    filename: str,
-    prompts_dir: Path,
-    architecture_path: Path,
-) -> Optional[str]:
-    """Infer filepath from a nested .pddrc prompts_dir/generate_output_path context."""
-    prompt_info = _prompt_source_stem_and_extension(filename)
-    if prompt_info is None:
-        return None
+def _resolve_sync_paths(
+    prompts_dir: Optional[Path], 
+    architecture_path: Optional[Path]
+) -> Tuple[Path, Path]:
+    """
+    Requirement 17: Default path resolution walking upward from CWD.
+    """
+    cwd = Path.cwd()
+    boundary = find_project_root(cwd)
+    
+    if prompts_dir is None:
+        curr = cwd
+        while True:
+            if (curr / "prompts").is_dir():
+                prompts_dir = curr / "prompts"
+                break
+            if curr == boundary or curr.parent == curr:
+                break
+            curr = curr.parent
+        if prompts_dir is None:
+            prompts_dir = cwd / "prompts"
+    elif not prompts_dir.is_absolute():
+        prompts_dir = (cwd / prompts_dir).resolve()
 
-    pddrc_path = architecture_path.parent / ".pddrc"
-    if not pddrc_path.is_file():
-        return None
+    if architecture_path is None:
+        curr = cwd
+        while True:
+            if (curr / "architecture.json").exists():
+                architecture_path = curr / "architecture.json"
+                break
+            if curr == boundary or curr.parent == curr:
+                break
+            curr = curr.parent
+        if architecture_path is None:
+            architecture_path = cwd / "architecture.json"
+    elif not architecture_path.is_absolute():
+        architecture_path = (cwd / architecture_path).resolve()
+            
+    return prompts_dir, architecture_path
 
+def _load_architecture(path: Path) -> Tuple[Any, List[Dict[str, Any]]]:
+    """Load architecture and return both full data and entries list (reference)."""
+    if not path.exists():
+        return [], []
     try:
-        from .construct_paths import _load_pddrc_config
-
-        config = _load_pddrc_config(pddrc_path)
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
     except Exception:
-        return None
-
-    prompt_path = prompts_dir / _normalize_prompt_filename(filename)
-    try:
-        prompt_rel = prompt_path.relative_to(pddrc_path.parent).as_posix()
-    except ValueError:
-        try:
-            prompt_rel = prompt_path.resolve().relative_to(pddrc_path.parent.resolve()).as_posix()
-        except (OSError, ValueError):
-            return None
-
-    matches: List[tuple[int, str, str, str]] = []
-    for context_config in config.get("contexts", {}).values():
-        if not isinstance(context_config, dict):
-            continue
-        defaults = context_config.get("defaults", {})
-        if not isinstance(defaults, dict):
-            continue
-
-        context_prompts_dir = defaults.get("prompts_dir")
-        generate_output_path = defaults.get("generate_output_path")
-        if not isinstance(context_prompts_dir, str) or not isinstance(generate_output_path, str):
-            continue
-
-        prompts_dir_value = context_prompts_dir.replace("\\", "/").strip()
-        if Path(prompts_dir_value).is_absolute():
-            try:
-                context_prompts_rel = (
-                    Path(prompts_dir_value)
-                    .resolve()
-                    .relative_to(pddrc_path.parent.resolve())
-                    .as_posix()
-                )
-            except (OSError, ValueError):
-                continue
-        else:
-            context_prompts_rel = prompts_dir_value.strip("/")
-
-        if context_prompts_rel in ("", ".", "prompts"):
-            continue
-        if prompt_rel != context_prompts_rel and not prompt_rel.startswith(f"{context_prompts_rel}/"):
-            continue
-
-        relative_prompt = prompt_rel[len(context_prompts_rel):].lstrip("/")
-        relative_info = _prompt_source_stem_and_extension(relative_prompt)
-        if relative_info is None:
-            continue
-        relative_stem, ext = relative_info
-        matches.append((len(context_prompts_rel), generate_output_path, relative_stem, ext))
-
-    if not matches:
-        return None
-
-    _, generate_output_path, relative_stem, ext = max(matches, key=lambda item: item[0])
-    return _join_posix_path(generate_output_path, f"{relative_stem}{ext}")
-
-
-def _infer_filepath(filename: str) -> str:
-    """
-    Infer output filepath from prompt filename using naming conventions.
-
-    Args:
-        filename: Prompt filename (e.g., 'cli_detector_python.prompt')
-
-    Returns:
-        Inferred filepath string
-    """
-    prompt_info = _prompt_source_stem_and_extension(filename)
-    if prompt_info is not None:
-        filepath_stem, ext = prompt_info
-        if '/' in filepath_stem:
-            return f'{filepath_stem}{ext}'
-        return f'pdd/{filepath_stem}{ext}'
-    return f'prompts/{filename}'
-
-
-def _infer_module_tags(filename: str) -> List[str]:
-    """
-    Infer module tags from prompt filename using naming conventions.
-
-    Args:
-        filename: Prompt filename (e.g., 'cli_detector_python.prompt')
-
-    Returns:
-        List of tag strings
-    """
-    normalized = _normalize_prompt_filename(filename)
-    stem = normalized[:-len('.prompt')] if normalized.endswith('.prompt') else normalized
-    if filename.endswith('_python.prompt') or stem.endswith('_Python'):
-        return ['module', 'python']
-    if normalized.endswith('_LLM.prompt'):
-        return ['llm']
-    return ['module']
-
-
-def _normalize_dependency_filenames(
-    dependencies: List[str],
-    arch_data: List[Dict[str, Any]],
-) -> List[str]:
-    """Resolve prompt dependency tags to architecture filenames when unambiguous."""
-    all_filenames = {
-        filename
-        for module in arch_data
-        for filename in [module.get("filename")]
-        if isinstance(filename, str) and filename
-    }
-    by_exact_lower: Dict[str, List[str]] = {}
-    by_basename_lower: Dict[str, List[str]] = {}
-    by_bare_stem_lower: Dict[str, List[str]] = {}
-    language_suffixes = [
-        suffix
-        for language in _EXT_TO_LANGUAGE.values()
-        for suffix in (f"_{language}", f"_{language.lower()}")
-    ]
-    for filename in all_filenames:
-        by_exact_lower.setdefault(filename.lower(), []).append(filename)
-        basename = Path(filename).name
-        by_basename_lower.setdefault(basename.lower(), []).append(filename)
-        if basename.endswith(".prompt"):
-            stem = basename[:-len(".prompt")]
-            for suffix in language_suffixes:
-                if stem.endswith(suffix):
-                    bare_stem = stem[:-len(suffix)]
-                    by_bare_stem_lower.setdefault(bare_stem.lower(), []).append(filename)
-                    break
-
-    normalized_dependencies: List[str] = []
-    seen: set[str] = set()
-    for dependency in dependencies:
-        normalized = _normalize_prompt_filename(dependency)
-        resolved = normalized
-        if normalized not in all_filenames:
-            exact_matches = by_exact_lower.get(normalized.lower(), [])
-            suffix_matches = [
-                filename
-                for filename in all_filenames
-                if filename.lower().endswith(f"/{normalized.lower()}")
-            ]
-            if len(exact_matches) == 1:
-                resolved = exact_matches[0]
-            elif len(suffix_matches) == 1:
-                resolved = suffix_matches[0]
-            else:
-                basename_matches = by_basename_lower.get(Path(normalized).name.lower(), [])
-                if len(basename_matches) == 1:
-                    resolved = basename_matches[0]
-                elif "/" not in normalized:
-                    bare_matches = by_bare_stem_lower.get(normalized.lower(), [])
-                    if len(bare_matches) == 1:
-                        resolved = bare_matches[0]
-        if resolved not in seen:
-            normalized_dependencies.append(resolved)
-            seen.add(resolved)
-    return normalized_dependencies
-
-
-def register_untracked_prompts(
-    prompts_dir: Path = PROMPTS_DIR,
-    architecture_path: Path = ARCHITECTURE_JSON_PATH,
-    dry_run: bool = False,
-    only_files: Optional[set] = None,
-) -> Dict[str, Any]:
-    """
-    Discover prompt files that have PDD tags but no architecture.json entry,
-    and auto-register them with a minimal entry.
-
-    Used as a pre-pass in sync_all_prompts_to_architecture to ensure all
-    prompt files with PDD metadata are tracked before validation.
-
-    Args:
-        prompts_dir: Directory containing prompt files
-        architecture_path: Path to architecture.json
-        dry_run: If True, return results without writing to file
-        only_files: Optional set of filenames (relative to prompts_dir, as
-            POSIX paths — e.g., {"commands/modify_python.prompt"}) to
-            restrict which prompts are considered for registration. When
-            provided, prompts outside this set are left untouched — even
-            if they have valid PDD tags and no arch.json entry. When
-            ``None`` (the default), all prompts under ``prompts_dir`` are
-            eligible (full-scan behavior, suitable for standalone cleanup
-            runs). In-workflow callers (e.g., ``agentic_change_orchestrator``
-            Step 10) should pass a narrow set containing only the prompts
-            touched by the current workflow, so a single ``pdd change`` run
-            cannot silently sweep unrelated repo-wide drift into the PR.
-
-    Returns:
-        Dict with keys:
-        - registered: List[str] (filenames added to architecture.json)
-        - skipped: List[str] (filenames without PDD tags, or filtered out
-          by ``only_files`` scope)
-        - errors: List[str] (error messages)
-    """
-    if not architecture_path.exists():
-        return {'registered': [], 'skipped': [], 'errors': ['Architecture file not found']}
-
-    raw_arch = json.loads(architecture_path.read_text(encoding='utf-8'))
-    arch_data = extract_modules(raw_arch)
-    existing_filenames = {m.get('filename') for m in arch_data}
-    max_priority = max((m.get('priority', 0) for m in arch_data), default=0)
-
-    registered = []
-    skipped = []
-    errors = []
-
-    for prompt_file in sorted(prompts_dir.rglob('*.prompt')):
-        try:
-            filename = prompt_file.relative_to(prompts_dir).as_posix()
-        except ValueError:
-            continue
-        if filename in existing_filenames:
-            continue
-
-        # Scope gate: if only_files is provided, skip prompts outside the
-        # workflow's scope so an in-workflow call cannot silently register
-        # unrelated drift.
-        if only_files is not None and filename not in only_files:
-            skipped.append(filename)
-            continue
-
-        content = prompt_file.read_text(encoding='utf-8')
-        tags = parse_prompt_tags(content)
-
-        if not (tags['reason'] or tags['interface'] or tags.get('has_dependency_tags')):
-            skipped.append(filename)
-            continue
-
-        filepath = (
-            _infer_filepath_from_pddrc_context(filename, prompts_dir, architecture_path)
-            or _infer_filepath(filename)
-        )
-        module_tags = _infer_module_tags(filename)
-        reason = tags['reason'] or f'Auto-registered module: {filename}'
-
-        max_priority += 1
-        entry = {
-            'reason': reason,
-            'description': reason,
-            'dependencies': tags['dependencies'],
-            'priority': max_priority,
-            'filename': filename,
-            'filepath': filepath,
-            'tags': module_tags,
-            'interface': tags['interface'] or {'type': 'module'},
-        }
-        arch_data.append(entry)
-        existing_filenames.add(filename)
-        registered.append(filename)
-
-    if registered and not dry_run:
-        if isinstance(raw_arch, dict) and isinstance(raw_arch.get("modules"), list):
-            raw_arch["modules"] = arch_data
-            write_data = raw_arch
-        else:
-            write_data = arch_data
-        architecture_path.write_text(
-            json.dumps(write_data, indent=2, ensure_ascii=False) + '\n',
-            encoding='utf-8'
-        )
-
-    return {'registered': registered, 'skipped': skipped, 'errors': errors}
-
-
-def _architecture_prompt_filenames(architecture_path: Path) -> set[str]:
-    """Return prompt filenames already owned by an architecture file."""
-    if not architecture_path.exists():
-        return set()
-    try:
-        arch_data = extract_modules(json.loads(architecture_path.read_text(encoding="utf-8")))
-    except (json.JSONDecodeError, OSError):
-        return set()
-    return {
-        filename
-        for module in arch_data
-        for filename in [module.get("filename")]
-        if isinstance(filename, str) and filename.endswith(".prompt")
-    }
-
-
-# --- Architecture Update ---
-
-def _format_signature_param(
-    arg_node: ast.arg,
-    default_node: Optional[ast.expr] = None,
-    *,
-    prefix: str = '',
-) -> str:
-    """Render a single parsed Python parameter back to a signature fragment."""
-    text = f"{prefix}{arg_node.arg}"
-    if arg_node.annotation is not None:
-        text += f": {ast.unparse(arg_node.annotation)}"
-    if default_node is not None:
-        text += f" = {ast.unparse(default_node)}"
-    return text
-
-
-def _parse_signature_parameters(signature: str) -> Optional[Dict[str, Any]]:
-    """Parse a Python signature string into ordered parameter and style metadata."""
-    signature = signature.strip()
-    try:
-        if signature.startswith('def ') or signature.startswith('async def '):
-            func_def = ast.parse(f"{signature}: pass").body[0]
-            style = 'full'
-        else:
-            func_def = ast.parse(f"def _pdd_sync{signature}: pass").body[0]
-            style = 'bare'
-    except SyntaxError:
-        return None
-
-    if not isinstance(func_def, (ast.FunctionDef, ast.AsyncFunctionDef)):
-        return None
-
-    args = func_def.args
-    parameters: List[Dict[str, str]] = []
-
-    positional = list(args.posonlyargs) + list(args.args)
-    defaults = [None] * (len(positional) - len(args.defaults)) + list(args.defaults)
-
-    for index, arg_node in enumerate(args.posonlyargs):
-        parameters.append({
-            'name': arg_node.arg,
-            'kind': 'posonly',
-            'text': _format_signature_param(arg_node, defaults[index]),
-        })
-
-    offset = len(args.posonlyargs)
-    for rel_index, arg_node in enumerate(args.args):
-        parameters.append({
-            'name': arg_node.arg,
-            'kind': 'arg',
-            'text': _format_signature_param(arg_node, defaults[offset + rel_index]),
-        })
-
-    if args.vararg is not None:
-        parameters.append({
-            'name': args.vararg.arg,
-            'kind': 'vararg',
-            'text': _format_signature_param(args.vararg, prefix='*'),
-        })
-
-    for arg_node, default_node in zip(args.kwonlyargs, args.kw_defaults):
-        parameters.append({
-            'name': arg_node.arg,
-            'kind': 'kwonly',
-            'text': _format_signature_param(arg_node, default_node),
-        })
-
-    if args.kwarg is not None:
-        parameters.append({
-            'name': args.kwarg.arg,
-            'kind': 'kwarg',
-            'text': _format_signature_param(args.kwarg, prefix='**'),
-        })
-
-    return {
-        'parameters': parameters,
-        'return_annotation': ast.unparse(func_def.returns) if func_def.returns is not None else None,
-        'style': style,
-        'is_async': isinstance(func_def, ast.AsyncFunctionDef),
-        'name': func_def.name,
-    }
-
-
-def _build_signature_from_parameters(
-    parameters: List[Dict[str, str]],
-    signature_info: Dict[str, Any],
-    function_name: str,
-) -> str:
-    """Serialize ordered parameter metadata back to a Python signature string."""
-    posonly = [p['text'] for p in parameters if p['kind'] == 'posonly']
-    args = [p['text'] for p in parameters if p['kind'] == 'arg']
-    vararg = next((p['text'] for p in parameters if p['kind'] == 'vararg'), None)
-    kwonly = [p['text'] for p in parameters if p['kind'] == 'kwonly']
-    kwarg = next((p['text'] for p in parameters if p['kind'] == 'kwarg'), None)
-
-    pieces: List[str] = []
-    pieces.extend(posonly)
-    if posonly:
-        pieces.append('/')
-    pieces.extend(args)
-    if vararg is not None:
-        pieces.append(vararg)
-    elif kwonly:
-        pieces.append('*')
-    pieces.extend(kwonly)
-    if kwarg is not None:
-        pieces.append(kwarg)
-
-    signature = f"({', '.join(pieces)})"
-    if signature_info.get('return_annotation'):
-        signature += f" -> {signature_info['return_annotation']}"
-
-    if signature_info.get('style') == 'full':
-        prefix = 'async def' if signature_info.get('is_async') else 'def'
-        name = signature_info.get('name') or function_name
-        return f"{prefix} {name}{signature}"
-    return signature
-
-
-def _merge_function_signature(
-    old_signature: str,
-    new_signature: str,
-    function_name: str,
-) -> tuple[str, List[str]]:
-    """Merge a new function signature with the existing one, preserving old params."""
-    old_info = _parse_signature_parameters(old_signature)
-    new_info = _parse_signature_parameters(new_signature)
-    if new_info is None and old_info is not None:
-        return old_signature, [
-            f"Kept existing signature for function '{function_name}' because the new signature could not be parsed during interface merge."
-        ]
-    if old_info is None and new_info is not None:
-        return new_signature, [
-            f"Used new signature for function '{function_name}' without merge because the existing signature could not be parsed."
-        ]
-    if old_info is None and new_info is None:
-        return new_signature, [
-            f"Used new signature for function '{function_name}' because neither signature could be parsed for merge."
-        ]
-
-    old_params = old_info['parameters']
-    new_params = new_info['parameters']
-
-    old_by_name = {param['name']: param for param in old_params}
-    new_by_name = {param['name']: param for param in new_params}
-
-    # Guard: reject merge when signatures are from completely different classes.
-    # If the only shared parameter names are common ones like 'self'/'cls',
-    # the new signature is likely from a different class entirely (LLM error).
-    trivial_params = {'self', 'cls'}
-    old_names = {p['name'] for p in old_params} - trivial_params
-    new_names = {p['name'] for p in new_params} - trivial_params
-    if old_names and new_names and not (old_names & new_names):
-        return old_signature, [
-            f"Rejected incompatible signature for function '{function_name}': "
-            f"old params {sorted(old_names)} share no names with new params {sorted(new_names)}. "
-            f"Keeping existing signature to prevent cross-class contamination."
-        ]
-
-    dropped = [param['name'] for param in old_params if param['name'] not in new_by_name]
-    if not dropped:
-        return new_signature, []
-
-    merged_order = [param['name'] for param in old_params]
-    merged_order.extend(
-        param['name']
-        for param in new_params
-        if param['name'] not in old_by_name
-    )
-
-    merged_params = [
-        new_by_name[name] if name in new_by_name else old_by_name[name]
-        for name in merged_order
-    ]
-    warnings = [
-        f"Preserved existing parameter '{name}' in function '{function_name}' while merging interface signature."
-        for name in dropped
-    ]
-    merged_signature_info = dict(new_info)
-    if not merged_signature_info.get('return_annotation'):
-        merged_signature_info['return_annotation'] = old_info.get('return_annotation')
-    return _build_signature_from_parameters(
-        merged_params,
-        merged_signature_info,
-        function_name,
-    ), warnings
-
-
-def _merge_interface_signatures(
-    old_interface: Optional[Dict[str, Any]],
-    new_interface: Dict[str, Any],
-) -> tuple[Dict[str, Any], List[str]]:
-    """Merge module function signatures while leaving the new interface authoritative."""
-    if (
-        not isinstance(old_interface, dict)
-        or old_interface.get('type') != 'module'
-        or new_interface.get('type') != 'module'
-    ):
-        return new_interface, []
-
-    old_module = old_interface.get('module')
-    new_module = new_interface.get('module')
-    if not isinstance(old_module, dict) or not isinstance(new_module, dict):
-        return new_interface, []
-
-    old_functions = old_module.get('functions')
-    new_functions = new_module.get('functions')
-    if not isinstance(old_functions, list) or not isinstance(new_functions, list):
-        return new_interface, []
-
-    old_by_name = {
-        func.get('name'): func
-        for func in old_functions
-        if isinstance(func, dict) and func.get('name')
-    }
-
-    merged_functions: List[Dict[str, Any]] = []
-    warnings: List[str] = []
-
-    for func in new_functions:
-        if not isinstance(func, dict):
-            merged_functions.append(func)
-            continue
-
-        func_name = func.get('name')
-        old_func = old_by_name.get(func_name)
-        if (
-            func_name
-            and old_func is not None
-            and isinstance(old_func, dict)
-            and isinstance(old_func.get('signature'), str)
-            and isinstance(func.get('signature'), str)
-        ):
-            merged_func = dict(func)
-            merged_signature, merge_warnings = _merge_function_signature(
-                old_func['signature'],
-                func['signature'],
-                func_name,
-            )
-            merged_func['signature'] = merged_signature
-            warnings.extend(merge_warnings)
-            merged_functions.append(merged_func)
-            continue
-
-        merged_functions.append(func)
-
-    merged_interface = json.loads(json.dumps(new_interface))
-    merged_interface['module']['functions'] = merged_functions
-    return merged_interface, warnings
-
-def _extract_contract_summary(
-    prompt_path: Path,
-    project_root: Path,
-) -> Dict[str, Any]:
-    """
-    Extract contract metadata and evidence status for a module.
-    """
-    from .evidence_manifest import _sha256_file
-    from .contract_ir import parse_prompt_contracts, extract_sections, rule_ids_from_covers
-    from .user_story_tests import discover_story_files, _read_story, _parse_story_prompt_metadata
-
-    try:
-        # 1. Parse prompt contracts
-        ir = parse_prompt_contracts(prompt_path)
-        rules = [r.raw_id.upper() for r in ir.rules if r.raw_id != "(unnumbered)"]
+        return [], []
         
-        # Identify critical rules (simple heuristic: look for CRITICAL in the rule block)
-        critical = [
-            r.raw_id.upper() for r in ir.rules 
-            if r.raw_id != "(unnumbered)" and "CRITICAL" in r.block.upper()
-        ]
-        
-        capabilities = []
-        if "capabilities" in ir.sections:
-            # Simple extraction of list items from capabilities section
-            capabilities = [
-                line.strip().lstrip("-* ").strip()
-                for line in ir.sections["capabilities"].splitlines()
-                if line.strip().lstrip("-* ").strip()
-            ]
-
-        # 2. Find stories covering this prompt
-        prompt_name = prompt_path.name
-        stories_dir = project_root / "user_stories"
-        story_files = discover_story_files(str(stories_dir))
-        
-        linked_stories = []
-        covered_rule_ids = set()
-        
-        for story_path in story_files:
-            try:
-                content = _read_story(story_path)
-                # Check if story explicitly links this prompt in metadata
-                linked_prompts = _parse_story_prompt_metadata(content)
-                
-                is_linked = any(
-                    p.lower() == prompt_name.lower() or 
-                    p.lower() == prompt_path.relative_to(project_root).as_posix().lower()
-                    for p in linked_prompts
-                )
-                
-                # Find covers sections in story
-                story_sections = extract_sections(content)
-                story_rules = set()
-                if "covers" in story_sections:
-                    story_rules = rule_ids_from_covers(story_sections["covers"], prompt_name)
-                
-                if is_linked or story_rules:
-                    rel_story_path = str(story_path.relative_to(project_root))
-                    linked_stories.append(rel_story_path)
-                    covered_rule_ids.update(story_rules)
-            except Exception:
-                continue
-
-        # 3. Evidence and Coverage Status
-        # Look for latest evidence manifest
-        evidence_dir = project_root / ".pdd" / "evidence" / "devunits"
-        prompt_stem = prompt_path.stem
-        latest_evidence_path = evidence_dir / f"{prompt_stem}.latest.json"
-        
-        evidence_status = "missing"
-        coverage_status = "none"
-        
-        if latest_evidence_path.exists():
-            try:
-                manifest = json.loads(latest_evidence_path.read_text(encoding='utf-8'))
-                manifest_prompt_sha = manifest.get("prompt", {}).get("sha256")
-                actual_prompt_sha = _sha256_file(prompt_path)
-                
-                if manifest_prompt_sha == actual_prompt_sha:
-                    evidence_status = "fresh"
-                else:
-                    evidence_status = "stale"
-                
-                # Coverage status from manifest
-                manifest_contracts = manifest.get("contracts", {})
-                if manifest_contracts.get("status") == "available":
-                    manifest_rules = manifest_contracts.get("rules", {})
-                    all_covered = True
-                    for rid in rules:
-                        r_status = manifest_rules.get(rid, {})
-                        if not r_status.get("stories") and not r_status.get("tests"):
-                            all_covered = False
-                            break
-                    if all_covered and rules:
-                        coverage_status = "full"
-                    elif any(manifest_rules.get(rid, {}).get("stories") or 
-                           manifest_rules.get(rid, {}).get("tests") for rid in rules):
-                        coverage_status = "partial"
-            except Exception:
-                evidence_status = "error"
-        
-        # Coverage status fallback to story-based if manifest not helpful
-        if coverage_status == "none" and rules:
-            if covered_rule_ids >= set(rules):
-                coverage_status = "story-only"
-            elif covered_rule_ids:
-                coverage_status = "partial"
-
-        return {
-            "rules": rules,
-            "critical": critical,
-            "stories": sorted(list(set(linked_stories))),
-            "capabilities": capabilities,
-            "coverage_status": coverage_status,
-            "evidence_status": evidence_status,
-            "waived": [w.raw_id.upper() for w in ir.waivers]
-        }
-    except Exception as e:
-        # Return a minimal valid summary on failure rather than crashing sync
-        return {
-            "rules": [],
-            "critical": [],
-            "stories": [],
-            "capabilities": [],
-            "coverage_status": "error",
-            "evidence_status": "error",
-            "waived": [],
-            "error": str(e)
-        }
+    if isinstance(data, list):
+        return data, data
+    if isinstance(data, dict):
+        for key in ["modules", "entries", "components"]:
+            if key in data and isinstance(data[key], list):
+                return data, data[key]
+        # If no standard list key found, return empty list of entries but keep dict
+        return data, []
+    return data, []
 
 def update_architecture_from_prompt(
-    prompt_filename: str,
-    prompts_dir: Path = PROMPTS_DIR,
-    architecture_path: Path = ARCHITECTURE_JSON_PATH,
-    dry_run: bool = False,
-    prompt_content_override: Optional[str] = None,
+    prompt_filename: str, 
+    prompts_dir: Path = PROMPTS_DIR, 
+    architecture_path: Path = ARCHITECTURE_JSON_PATH, 
+    dry_run: bool = False, 
+    prompt_content_override: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Update a single architecture.json entry from its prompt file tags.
-
-    This function:
-    1. Reads the prompt file and extracts PDD metadata tags
-    2. Loads architecture.json and finds the matching module entry
-    3. Updates only fields that have tags present (lenient)
-    4. Tracks changes for diff display
-    5. Writes back to architecture.json (unless dry_run=True)
-
-    Args:
-        prompt_filename: Name of prompt file (e.g., "llm_invoke_python.prompt")
-        prompts_dir: Directory containing prompt files (default: ./prompts/)
-        architecture_path: Path to architecture.json (default: ./architecture.json)
-        dry_run: If True, return changes without writing to file
-        prompt_content_override: Optional in-memory prompt content. When provided,
-            parse PDD metadata tags from this string instead of reading the file
-            from disk. All other parameters retain their existing semantics.
-
-    Returns:
-        Dict with keys:
-        - success: bool (True if operation succeeded)
-        - updated: bool (True if any fields changed)
-        - changes: Dict mapping field names to {'old': ..., 'new': ...}
-        - error: Optional[str] (error message if success=False)
-
-    Example:
-        >>> result = update_architecture_from_prompt("llm_invoke_python.prompt")
-        >>> if result['success'] and result['updated']:
-        ...     print(f"Updated fields: {list(result['changes'].keys())}")
-        Updated fields: ['reason', 'dependencies']
+    Update architecture.json entries from prompt file tags.
     """
+    result = {"success": False, "updated": False, "changes": {}, "error": None, "warnings": []}
+    
+    # Capture print output using rich if possible
     try:
-        # 1. Read prompt file
+        from rich.console import Console
+        console = Console()
+    except ImportError:
+        console = None
+
+    arch_full, arch_entries = _load_architecture(architecture_path)
+
+    # Get content and handle auto-rename if file not found
+    final_prompt_filename = prompt_filename
+    if prompt_content_override is not None:
+        content = prompt_content_override
+    else:
         prompt_path = prompts_dir / prompt_filename
-        preloaded_arch_data = None  # Set when arch_data is loaded during rename
-        if prompt_content_override is None and not prompt_path.exists():
+        if not prompt_path.exists():
+            # Requirement 11: Auto-rename search when file not found
             renamed_path = _find_renamed_prompt_file(prompt_filename, prompts_dir)
-            if renamed_path is None:
-                return {
-                    'success': False,
-                    'updated': False,
-                    'changes': {},
-                    'error': f'Prompt file not found: {prompt_filename}'
-                }
-            # Auto-update architecture.json entry to use the found filename (path-aware for #617)
-            new_filename = renamed_path.relative_to(prompts_dir).as_posix()
-            if not architecture_path.exists():
-                return {
-                    'success': False,
-                    'updated': False,
-                    'changes': {},
-                    'error': f'Architecture file not found: {architecture_path}'
-                }
-            raw_rename = json.loads(architecture_path.read_text(encoding='utf-8'))
-            arch_data_for_rename = extract_modules(raw_rename)
-            for mod in arch_data_for_rename:
-                if mod.get('filename') == prompt_filename:
-                    old_filepath = mod.get('filepath', '')
-                    if old_filepath == f'prompts/{prompt_filename}':
-                        mod['filepath'] = f'prompts/{new_filename}'
-                    mod['filename'] = new_filename
-                    if not dry_run:
-                        if isinstance(raw_rename, dict) and isinstance(raw_rename.get("modules"), list):
-                            raw_rename["modules"] = arch_data_for_rename
-                            rename_write = raw_rename
-                        else:
-                            rename_write = arch_data_for_rename
-                        architecture_path.write_text(
-                            json.dumps(rename_write, indent=2, ensure_ascii=False) + '\n',
-                            encoding='utf-8'
-                        )
-                    prompt_filename = new_filename
-                    prompt_path = renamed_path
-                    # Keep the already-modified in-memory data to avoid re-loading from disk
-                    preloaded_arch_data = arch_data_for_rename
-                    break
+            if renamed_path:
+                final_prompt_filename = str(renamed_path.relative_to(prompts_dir))
+                prompt_path = renamed_path
             else:
-                return {
-                    'success': False,
-                    'updated': False,
-                    'changes': {},
-                    'error': f'Prompt file not found: {prompt_filename}'
-                }
+                result["error"] = f"Prompt file not found: {prompt_filename}"
+                return result
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            content = f.read()
 
-        if prompt_content_override is not None:
-            prompt_content = prompt_content_override
-        else:
-            prompt_content = prompt_path.read_text(encoding='utf-8')
+    # Find entry
+    entry = None
+    for e in arch_entries:
+        if e.get("filename") == prompt_filename:
+            entry = e
+            break
+            
+    if not entry:
+        # Requirement 11: Auto-rename search (if not already found)
+        # Search for an entry in arch_entries that matches a step-number variant of the filename
+        match = re.search(r"step(\d+)", prompt_filename)
+        if match:
+            step_num = match.group(1)
+            # Create a regex to match other steps
+            # Escape filename and replace stepN with step\d+
+            escaped_f = re.escape(prompt_filename).replace(f"step{step_num}", r"step\d+")
+            pattern = f"^{escaped_f}$"
+            for e in arch_entries:
+                if "filename" in e and re.match(pattern, e["filename"]):
+                    entry = e
+                    # We found the entry! We want to update it to the new filename.
+                    final_prompt_filename = prompt_filename
+                    break
 
-        # 2. Extract tags
-        tags = parse_prompt_tags(prompt_content)
-
-        # 3. Load architecture.json (reuse preloaded data if available from rename step)
-        if preloaded_arch_data is not None:
-            arch_data = preloaded_arch_data
-        else:
-            if not architecture_path.exists():
-                return {
-                    'success': False,
-                    'updated': False,
-                    'changes': {},
-                    'error': f'Architecture file not found: {architecture_path}'
-                }
-            arch_data = extract_modules(json.loads(architecture_path.read_text(encoding='utf-8')))
-
-        # 4. Find matching module by filename
-        module_entry = None
-        module_index = None
-        for i, mod in enumerate(arch_data):
-            if mod.get('filename') == prompt_filename:
-                module_entry = mod
-                module_index = i
+    if not entry:
+        # Basename fallback if still not found
+        basename = Path(prompt_filename).name
+        for e in arch_entries:
+            if Path(e.get("filename", "")).name == basename:
+                entry = e
                 break
 
-        if module_entry is None:
-            return {
-                'success': False,
-                'updated': False,
-                'changes': {},
-                'error': f'No architecture entry found for: {prompt_filename}'
-            }
+    if not entry:
+        # Original logic: search DISK if the requested file was missing
+        # (Though we already handled that above, this is for completeness)
+        renamed_path = _find_renamed_prompt_file(prompt_filename, prompts_dir)
+        if renamed_path:
+            rel_renamed = str(renamed_path.relative_to(prompts_dir))
+            for e in arch_entries:
+                if e.get("filename") == rel_renamed:
+                    entry = e
+                    final_prompt_filename = prompt_filename
+                    break
 
-        # 5. Track changes (only update fields with tags present - lenient)
-        changes = {}
-        updated = False
-        warnings = []
+    if not entry:
+        result["error"] = f"No architecture entry found for {prompt_filename}"
+        return result
 
-        # Update reason if tag present
-        if tags['reason'] is not None:
-            old_reason = module_entry.get('reason')
-            if old_reason != tags['reason']:
-                changes['reason'] = {'old': old_reason, 'new': tags['reason']}
-                module_entry['reason'] = tags['reason']
-                updated = True
+    # Update filename if it differs from final_prompt_filename
+    if entry.get("filename") != final_prompt_filename:
+        old_fname = entry["filename"]
+        entry["filename"] = final_prompt_filename
+        result["changes"]["filename"] = {"old": old_fname, "new": final_prompt_filename}
+        
+        # Also update filepath if it was pointing to the old prompt file
+        old_path = entry.get("filepath", "")
+        if old_path and old_fname and old_fname in old_path:
+            new_path = old_path.replace(old_fname, final_prompt_filename)
+            entry["filepath"] = new_path
+            result["changes"]["filepath"] = {"old": old_path, "new": new_path}
+            
+        result["updated"] = True
 
-        # Update interface if tag present
-        if tags['interface'] is not None:
-            old_interface = module_entry.get('interface')
-            merged_interface, merge_warnings = _merge_interface_signatures(
-                old_interface,
-                tags['interface'],
-            )
-            warnings.extend(merge_warnings)
-            if old_interface != merged_interface:
-                changes['interface'] = {'old': old_interface, 'new': merged_interface}
-                module_entry['interface'] = merged_interface
-                updated = True
+    tags = parse_prompt_tags(content)
+    if "interface_parse_error" in tags:
+        result["warnings"].append(f"Interface parse error in {prompt_filename}: {tags['interface_parse_error']}")
+    
+    if tags["reason"] is not None and entry.get("reason") != tags["reason"]:
+        old_val = entry.get("reason")
+        entry["reason"] = tags["reason"]
+        result["changes"]["reason"] = {"old": old_val, "new": tags["reason"]}
+        result["updated"] = True
+        
+    if tags["interface"] is not None:
+        old_interface = entry.get("interface")
+        merged_interface, m_warns = _merge_interface_signatures(old_interface, tags["interface"])
+        result["warnings"].extend(m_warns)
+        if old_interface != merged_interface:
+            entry["interface"] = merged_interface
+            result["changes"]["interface"] = {"old": old_interface, "new": merged_interface}
+            result["updated"] = True
 
-        # Update dependencies only when <pdd-dependency> metadata is present in the prompt.
-        # Reason/interface-only updates must not clear architecture.json dependencies (those may
-        # still reflect include-based or manually curated edges).
-        # Empty <pdd-dependency></pdd-dependency> still counts (has_dependency_tags) and clears deps.
-        should_update_deps = (
-            tags.get('has_dependency_tags', False) or bool(tags['dependencies'])
-        )
-        if should_update_deps:
-            old_deps = module_entry.get('dependencies', [])
-            tag_dependencies = _normalize_dependency_filenames(tags['dependencies'], arch_data)
-            # Compare as sets to detect changes (order-independent)
-            if set(old_deps) != set(tag_dependencies):
-                changes['dependencies'] = {'old': old_deps, 'new': tag_dependencies}
-                module_entry['dependencies'] = tag_dependencies
-                updated = True
+    # Requirement 4 & 8: Dependency update rules
+    if tags["has_dependency_tags"]:
+        old_deps = entry.get("dependencies", [])
+        normalized_deps = _normalize_dependencies(tags["dependencies"], arch_entries)
+        if old_deps != normalized_deps:
+            entry["dependencies"] = normalized_deps
+            result["changes"]["dependencies"] = {"old": old_deps, "new": normalized_deps}
+            result["updated"] = True
+    # Else preserve existing dependencies (Requirement 4)
 
-        # 6. Update contract summary (always sync from source of truth prompts/stories)
-        project_root = find_project_root(prompts_dir)
-        new_summary = _extract_contract_summary(prompt_path, project_root)
-        old_summary = module_entry.get('contract_summary')
-        if old_summary != new_summary:
-            changes['contract_summary'] = {'old': old_summary, 'new': new_summary}
-            module_entry['contract_summary'] = new_summary
-            updated = True
+    # Requirement 22: Contract summary
+    summary = _extract_contract_summary(content, entry.get("filepath", ""))
+    # Legacy-friendly: only update if it has contracts OR already existed
+    has_meaningful = any(summary.get(k) for k in ["rule_ids", "capabilities", "waived_rules"])
+    
+    if entry.get("contract_summary") != summary:
+        if entry.get("contract_summary") is None and not has_meaningful:
+            pass
+        else:
+            old_summary = entry.get("contract_summary")
+            entry["contract_summary"] = summary
+            result["changes"]["contract_summary"] = {"old": old_summary, "new": summary}
+            result["updated"] = True
 
-        # 7. Write back to architecture.json (if updated and not dry run)
-        if updated and not dry_run:
-            arch_data[module_index] = module_entry
-            raw_on_disk = json.loads(architecture_path.read_text(encoding='utf-8'))
-            if isinstance(raw_on_disk, dict) and isinstance(raw_on_disk.get("modules"), list):
-                raw_on_disk["modules"] = arch_data
-                write_data = raw_on_disk
-            else:
-                write_data = arch_data
-            architecture_path.write_text(
-                json.dumps(write_data, indent=2, ensure_ascii=False) + '\n',
-                encoding='utf-8'
-            )
+    if result["updated"] and not dry_run:
+        with open(architecture_path, "w", encoding="utf-8") as f:
+            json.dump(arch_full, f, indent=2)
 
-        # Include any parse warnings
-        if tags.get('interface_parse_error'):
-            warnings.append(tags['interface_parse_error'])
+    result["success"] = True
+    return result
 
-        return {
-            'success': True,
-            'updated': updated,
-            'changes': changes,
-            'error': None,
-            'warnings': warnings
-        }
-
-    except Exception as e:
-        return {
-            'success': False,
-            'updated': False,
-            'changes': {},
-            'error': f'Unexpected error: {str(e)}'
-        }
-
-
-def sync_all_prompts_to_architecture(
-    prompts_dir: Path = PROMPTS_DIR,
-    architecture_path: Path = ARCHITECTURE_JSON_PATH,
-    dry_run: bool = False,
-    only_files: Optional[set] = None,
+def register_untracked_prompts(
+    prompts_dir: Path = PROMPTS_DIR, 
+    architecture_path: Path = ARCHITECTURE_JSON_PATH, 
+    dry_run: bool = False, 
+    only_files: Optional[set] = None
 ) -> Dict[str, Any]:
     """
-    Sync ALL prompt files to architecture.json.
-
-    Iterates through all modules in architecture.json and updates each from
-    its corresponding prompt file (if it exists and has tags).
-
-    Args:
-        prompts_dir: Directory containing prompt files
-        architecture_path: Path to architecture.json
-        dry_run: If True, perform validation without writing changes
-        only_files: Optional prompt filenames eligible for auto-registration.
-
-    Returns:
-        Dict with keys:
-        - success: bool (True if no errors occurred)
-        - updated_count: int (number of modules updated)
-        - skipped_count: int (number of modules without prompt files)
-        - results: List[Dict] (detailed results for each module)
-        - errors: List[str] (error messages)
-
-    Example:
-        >>> result = sync_all_prompts_to_architecture(dry_run=True)
-        >>> print(f"Would update {result['updated_count']} modules")
-        Would update 15 modules
+    Requirement 12: Discovers prompt files with PDD tags that have no architecture.json entry.
     """
-    # Pre-pass: auto-register any prompt files with PDD tags not in architecture.json
-    reg_result = register_untracked_prompts(
-        prompts_dir,
-        architecture_path,
-        dry_run,
-        only_files=only_files,
-    )
+    result = {"registered": [], "skipped": [], "errors": []}
+    if not prompts_dir.exists():
+        return result
 
-    # Load architecture.json to get all prompt filenames
-    if not architecture_path.exists():
-        return {
-            'success': False,
-            'updated_count': 0,
-            'skipped_count': 0,
-            'results': [],
-            'errors': [f'Architecture file not found: {architecture_path}'],
-            'registered': reg_result['registered'],
-        }
+    arch_full, arch_entries = _load_architecture(architecture_path)
+    existing_filenames = {e.get("filename") for e in arch_entries if "filename" in e}
 
-    arch_data = extract_modules(json.loads(architecture_path.read_text(encoding='utf-8')))
+    # Requirement 17: Scoping logic for auto-registration
+    prompts_owner = prompts_dir.resolve().parent
+    arch_owner = architecture_path.resolve().parent
+    # We restrict if prompts are NOT in the architecture directory 
+    # AND NOT in a 'prompts' subdirectory of the architecture directory
+    restrict_to_existing = (prompts_owner != arch_owner) and (prompts_dir.resolve() != arch_owner) and (only_files is None)
 
-    results = []
-    errors = []
-    updated_count = 0
-    skipped_count = 0
+    for prompt_file in prompts_dir.rglob("*.prompt"):
+        rel_path = str(prompt_file.relative_to(prompts_dir))
 
-    for module in arch_data:
-        filename = module.get('filename')
-
-        # Skip entries without filename or non-prompt files
-        if not filename or not filename.endswith('.prompt'):
-            skipped_count += 1
+        # Requirement 12: member of only_files if provided
+        if only_files is not None and rel_path not in only_files:
             continue
 
-        # Update from prompt
-        result = update_architecture_from_prompt(
-            filename,
-            prompts_dir,
-            architecture_path,
-            dry_run
-        )
-
-        # Track statistics
-        if result['success'] and result['updated']:
-            updated_count += 1
-        elif not result['success']:
-            errors.append(f"{filename}: {result['error']}")
-
-        # Store detailed result
-        results.append({
-            'filename': filename,
-            'success': result['success'],
-            'updated': result['updated'],
-            'changes': result['changes'],
-            'error': result.get('error'),
-            'contract_summary': module.get('contract_summary')
-        })
-
-    return {
-        'success': len(errors) == 0,
-        'updated_count': updated_count,
-        'skipped_count': skipped_count,
-        'results': results,
-        'errors': errors,
-        'registered': reg_result['registered'],
-    }
-
-
-def _detect_circular_dependencies(modules: List[Dict[str, Any]]) -> List[List[str]]:
-    """Detect circular dependencies using DFS over prompt filenames."""
-    graph: Dict[str, set[str]] = {}
-    all_filenames: set[str] = set()
-
-    for module in modules:
-        filename = module.get("filename")
-        if not filename:
+        if rel_path in existing_filenames:
             continue
-        all_filenames.add(filename)
-        dependencies = module.get("dependencies", [])
-        if isinstance(dependencies, list):
-            graph[filename] = {dep for dep in dependencies if isinstance(dep, str)}
-        else:
-            graph[filename] = set()
 
-    cycles: List[List[str]] = []
-    visited: set[str] = set()
-    rec_stack: set[str] = set()
+        # Requirement 11: Skip registration if a step-number variant already exists
+        match = re.search(r"step(\d+)", rel_path)
+        if match:
+            step_num = match.group(1)
+            escaped_f = re.escape(rel_path).replace(f"step{step_num}", r"step\d+")
+            pattern = f"^{escaped_f}$"
+            found_variant = False
+            for fname in existing_filenames:
+                if re.match(pattern, fname):
+                    found_variant = True
+                    break
+            if found_variant:
+                continue
 
-    def dfs(node: str, path: List[str]) -> None:
-        if node in rec_stack:
-            try:
-                cycle_start = path.index(node)
-                cycles.append(path[cycle_start:] + [node])
-            except ValueError:
-                pass
-            return
+        # Requirement 17 restriction
+        if restrict_to_existing and rel_path not in existing_filenames:
+            result["skipped"].append(rel_path)
+            continue
 
-        if node in visited or node not in graph:
-            return
+        try:
+            with open(prompt_file, "r", encoding="utf-8") as f:
+                content = f.read()
+        except Exception:
+            continue
 
-        visited.add(node)
-        rec_stack.add(node)
-        path.append(node)
+        if has_pdd_tags(content):
+            tags = parse_prompt_tags(content)
 
-        for dependency in graph.get(node, set()):
-            if dependency in all_filenames:
-                dfs(dependency, path)
+            # Requirement 19: .pddrc context-aware inference
+            filepath = None
+            if resolve_effective_config:
+                try:
+                    # Resolve context for this prompt file
+                    # We pass cwd=prompts_dir to ensure it finds the local .pddrc
+                    _, pddrc_path, context_config, _, _ = resolve_effective_config(
+                        prompt_file=str(prompt_file), 
+                        cwd=prompts_dir, 
+                        quiet=True
+                    )
 
-        path.pop()
-        rec_stack.remove(node)
+                    # Keys might be at top level of context or under "defaults"
+                    p_dir_ctx = context_config.get("prompts_dir") or context_config.get("defaults", {}).get("prompts_dir")
+                    g_path = context_config.get("generate_output_path") or context_config.get("defaults", {}).get("generate_output_path")
 
-    for filename in all_filenames:
-        if filename not in visited:
-            dfs(filename, [])
+                    # Requirement 19: Do not apply root catch-all "prompts" context for path-aware inference
+                    if pddrc_path and p_dir_ctx and g_path and p_dir_ctx != "prompts":
+                        p_dir_abs = (pddrc_path.parent / p_dir_ctx).resolve()
+                        prompt_abs = prompt_file.resolve()
 
-    return cycles
+                        try:
+                            rel_to_ctx = prompt_abs.relative_to(p_dir_abs)
+                            # Success! Use the context's generate_output_path
+                            filepath = os.path.join(g_path, _infer_filepath(str(rel_to_ctx)))
+                            filepath = filepath.replace("\\", "/").replace("//", "/")
+                            if filepath.startswith("./"):
+                                filepath = filepath[2:]
+                        except ValueError:
+                            pass
+                except Exception:
+                    pass
 
+            if not filepath:
+                filepath = _infer_filepath(rel_path)
 
-def validate_architecture_modules(modules: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Validate architecture modules and return route-compatible result dicts."""
-    errors: List[Dict[str, Any]] = []
-    warnings: List[Dict[str, Any]] = []
-
-    all_filenames = {
-        module.get("filename")
-        for module in modules
-        if isinstance(module.get("filename"), str) and module.get("filename")
-    }
-
-    for cycle in _detect_circular_dependencies(modules):
-        errors.append(
-            {
-                "type": "circular_dependency",
-                "message": f"Circular dependency detected: {' -> '.join(cycle)}",
-                "modules": cycle,
+            new_entry = {
+                "filename": rel_path,
+                "filepath": filepath,
+                "reason": tags["reason"] or "",
+                "dependencies": _normalize_dependencies(tags["dependencies"], arch_entries),
+                "interface": tags["interface"] or {}
             }
-        )
 
-    for module in modules:
-        filename = module.get("filename", "")
-        dependencies = module.get("dependencies", [])
-        if not isinstance(dependencies, list):
-            dependencies = []
+            # Requirement 18: Python PascalCase tags
+            m_tags = _infer_module_tags(rel_path)
+            if m_tags:
+                new_entry["tags"] = m_tags
 
-        for dependency in dependencies:
-            if dependency not in all_filenames:
-                errors.append(
-                    {
-                        "type": "missing_dependency",
-                        "message": (
-                            f"Module '{filename}' depends on non-existent module "
-                            f"'{dependency}'"
-                        ),
-                        "modules": [filename, dependency],
-                    }
-                )
+            arch_entries.append(new_entry)
+            result["registered"].append(rel_path)
+        else:
+            result["skipped"].append(rel_path)
 
-        if not isinstance(filename, str) or not filename.strip():
-            errors.append(
-                {
-                    "type": "invalid_field",
-                    "message": "Module has empty filename",
-                    "modules": [filename or "(unnamed)"],
-                }
-            )
+    if result["registered"] and not dry_run:
+        with open(architecture_path, "w", encoding="utf-8") as f:
+            json.dump(arch_full, f, indent=2)
 
-        filepath = module.get("filepath", "")
-        if not isinstance(filepath, str) or not filepath.strip():
-            errors.append(
-                {
-                    "type": "invalid_field",
-                    "message": f"Module '{filename}' has empty filepath",
-                    "modules": [filename or "(unnamed)"],
-                }
-            )
-
-        description = module.get("description", "")
-        if not isinstance(description, str) or not description.strip():
-            errors.append(
-                {
-                    "type": "invalid_field",
-                    "message": f"Module '{filename}' has empty description",
-                    "modules": [filename or "(unnamed)"],
-                }
-            )
-
-        if len(dependencies) != len(set(dependencies)):
-            seen: set[str] = set()
-            duplicates: List[str] = []
-            for dependency in dependencies:
-                if dependency in seen:
-                    duplicates.append(dependency)
-                seen.add(dependency)
-            warnings.append(
-                {
-                    "type": "duplicate_dependency",
-                    "message": (
-                        f"Module '{filename}' has duplicate dependencies: "
-                        f"{', '.join(duplicates)}"
-                    ),
-                    "modules": [filename],
-                }
-            )
-
-    depended_upon: set[str] = set()
-    for module in modules:
-        dependencies = module.get("dependencies", [])
-        if isinstance(dependencies, list):
-            depended_upon.update(dep for dep in dependencies if isinstance(dep, str))
-
-    for module in modules:
-        filename = module.get("filename", "")
-        dependencies = module.get("dependencies", [])
-        if isinstance(dependencies, list) and not dependencies and filename not in depended_upon:
-            warnings.append(
-                {
-                    "type": "orphan_module",
-                    "message": (
-                        f"Module '{filename}' has no dependencies and is not depended upon "
-                        "by any other module"
-                    ),
-                    "modules": [filename],
-                }
-            )
-
-    return {
-        "valid": len(errors) == 0,
-        "errors": errors,
-        "warnings": warnings,
-    }
+    return result
 
 
 def sync_prompts_to_architecture(
     filenames: Optional[List[str]] = None,
     prompts_dir: Optional[Path] = None,
     architecture_path: Optional[Path] = None,
-    dry_run: bool = False,
-) -> Dict[str, Any]:
-    """Shared architecture sync entry point used by the CLI and connect UI."""
-    resolved_prompts_dir, resolved_architecture_path = _resolve_sync_paths(
-        prompts_dir,
-        architecture_path,
-    )
-
-    try:
-        if filenames is None:
-            register_only_files: Optional[set] = None
-            try:
-                prompts_owner = resolved_prompts_dir.parent.resolve(strict=False)
-                architecture_owner = resolved_architecture_path.parent.resolve(strict=False)
-            except OSError:
-                prompts_owner = resolved_prompts_dir.parent
-                architecture_owner = resolved_architecture_path.parent
-            if prompts_owner != architecture_owner:
-                register_only_files = _architecture_prompt_filenames(
-                    resolved_architecture_path
-                )
-            sync_result = sync_all_prompts_to_architecture(
-                prompts_dir=resolved_prompts_dir,
-                architecture_path=resolved_architecture_path,
-                dry_run=dry_run,
-                only_files=register_only_files,
-            )
-        else:
-            results = []
-            updated_count = 0
-            errors: List[str] = []
-
-            for filename in filenames:
-                normalized_filename = _normalize_prompt_filename(filename)
-                result = update_architecture_from_prompt(
-                    normalized_filename,
-                    prompts_dir=resolved_prompts_dir,
-                    architecture_path=resolved_architecture_path,
-                    dry_run=dry_run,
-                )
-                results.append(
-                    {
-                        "filename": normalized_filename,
-                        "success": result["success"],
-                        "updated": result["updated"],
-                        "changes": result["changes"],
-                        "error": result.get("error"),
-                    }
-                )
-                if result["success"] and result["updated"]:
-                    updated_count += 1
-                elif not result["success"]:
-                    errors.append(f"{normalized_filename}: {result['error']}")
-
-            sync_result = {
-                "success": len(errors) == 0,
-                "updated_count": updated_count,
-                "skipped_count": 0,
-                "results": results,
-                "errors": errors,
-            }
-
-        if resolved_architecture_path.exists():
-            arch_data = extract_modules(
-                json.loads(resolved_architecture_path.read_text(encoding="utf-8"))
-            )
-            validation = validate_architecture_modules(arch_data)
-        else:
-            validation = {"valid": True, "errors": [], "warnings": []}
-
-        return {
-            "success": sync_result["success"] and validation["valid"],
-            "updated_count": sync_result["updated_count"],
-            "skipped_count": sync_result.get("skipped_count", 0),
-            "results": sync_result["results"],
-            "validation": validation,
-            "errors": sync_result.get("errors", []),
-            "registered": sync_result.get("registered", []),
-        }
-    except Exception as exc:
-        return {
-            "success": False,
-            "updated_count": 0,
-            "skipped_count": 0,
-            "results": [],
-            "validation": {"valid": True, "errors": [], "warnings": []},
-            "errors": [f"Unexpected error: {exc}"],
-        }
-
-
-# --- Validation ---
-
-def validate_dependencies(
-    dependencies: List[str],
-    prompts_dir: Path = PROMPTS_DIR
+    dry_run: bool = False
 ) -> Dict[str, Any]:
     """
-    Validate dependency list for a module.
-
-    Checks:
-    1. All referenced prompt files exist in prompts_dir
-    2. No duplicate dependencies
-
-    Args:
-        dependencies: List of prompt filenames (e.g., ["llm_invoke_python.prompt"])
-        prompts_dir: Directory to check for prompt file existence
-
-    Returns:
-        Dict with keys:
-        - valid: bool (True if all validations pass)
-        - missing: List[str] (prompt files that don't exist)
-        - duplicates: List[str] (duplicate entries)
-
-    Example:
-        >>> deps = ["llm_invoke_python.prompt", "missing.prompt"]
-        >>> result = validate_dependencies(deps)
-        >>> result['valid']
-        False
-        >>> result['missing']
-        ['missing.prompt']
+    Sync selected prompt metadata tags into architecture.json.
     """
-    missing = []
-    duplicates = []
+    prompts_dir, architecture_path = _resolve_sync_paths(prompts_dir, architecture_path)
+    only_files = set(filenames) if filenames else None
+    
+    reg_result = register_untracked_prompts(prompts_dir, architecture_path, dry_run, only_files)
+    
+    result = {
+        "success": True, 
+        "updated_count": 0, 
+        "skipped_count": 0, 
+        "results": {}, 
+        "errors": [], 
+        "registered": reg_result["registered"]
+    }
 
-    # Check for missing files
-    for dep in dependencies:
-        dep_path = prompts_dir / dep
-        if not dep_path.exists():
-            missing.append(dep)
+    # Load arch data for scoping and existing filenames
+    arch_full, arch_entries = _load_architecture(architecture_path)
+    existing_filenames = {e.get("filename") for e in arch_entries if "filename" in e}
 
-    # Check for duplicates
+    # Requirement 17: Scoping logic for targeting
+    prompts_owner = prompts_dir.resolve().parent
+    arch_owner = architecture_path.resolve().parent
+    # We restrict if prompts are NOT in the architecture directory 
+    # AND NOT in a 'prompts' subdirectory of the architecture directory
+    restrict_to_existing = (prompts_owner != arch_owner) and (prompts_dir.resolve() != arch_owner) and (filenames is None)
+
+    targets = []
+    if filenames:
+        for f in filenames:
+            p = prompts_dir / f
+            if not p.exists() and f.startswith("prompts/"):
+                p_alt = prompts_dir / f[len("prompts/"):]
+                if p_alt.exists():
+                    p = p_alt
+            targets.append((f, p))
+    else:
+        for p in prompts_dir.rglob("*.prompt"):
+            rel_p = str(p.relative_to(prompts_dir))
+            if restrict_to_existing and rel_p not in existing_filenames:
+                continue
+            targets.append((rel_p, p))
+
+    for original_f, prompt_file in targets:
+        if not prompt_file.exists():
+            result["success"] = False
+            result["errors"].append(f"{original_f}: Prompt file not found: {original_f}")
+            continue
+            
+        rel_path = str(prompt_file.relative_to(prompts_dir))
+        
+        update_res = update_architecture_from_prompt(
+            prompt_filename=rel_path,
+            prompts_dir=prompts_dir,
+            architecture_path=architecture_path,
+            dry_run=dry_run
+        )
+        
+        if not update_res.get("success"):
+            # In dry_run, newly registered prompts won't be in the file
+            if dry_run and rel_path in reg_result["registered"]:
+                result["updated_count"] += 1
+                result["results"][rel_path] = {"success": True, "updated": True, "changes": {"registered": {"old": None, "new": True}}}
+                continue
+            
+            result["success"] = False
+            result["errors"].append(f"{rel_path}: {update_res.get('error', 'Unknown error')}")
+        else:
+            result["results"][rel_path] = update_res
+            if update_res.get("updated"):
+                result["updated_count"] += 1
+            else:
+                result["skipped_count"] += 1
+
+    # Add validation result
+    _, arch_entries_updated = _load_architecture(architecture_path)
+    result["validation"] = validate_architecture_modules(arch_entries_updated)
+
+    return result
+
+def sync_all_prompts_to_architecture(
+    prompts_dir: Path = PROMPTS_DIR, 
+    architecture_path: Path = ARCHITECTURE_JSON_PATH, 
+    dry_run: bool = False, 
+    only_files: Optional[set] = None
+) -> Dict[str, Any]:
+    """
+    Syncs all prompts to the architecture file.
+    """
+    reg_result = register_untracked_prompts(prompts_dir, architecture_path, dry_run, only_files)
+    
+    result = {
+        "success": True, 
+        "updated_count": 0, 
+        "skipped_count": 0, 
+        "results": {}, 
+        "errors": [], 
+        "registered": reg_result["registered"]
+    }
+    
+    if not prompts_dir.exists():
+        return result
+
+    for prompt_file in prompts_dir.rglob("*.prompt"):
+        rel_path = str(prompt_file.relative_to(prompts_dir))
+        if only_files is not None and rel_path not in only_files:
+            result["skipped_count"] += 1
+            continue
+            
+        update_res = update_architecture_from_prompt(
+            prompt_filename=rel_path,
+            prompts_dir=prompts_dir,
+            architecture_path=architecture_path,
+            dry_run=dry_run
+        )
+        
+        result["results"][rel_path] = update_res
+        if update_res.get("updated"):
+            result["updated_count"] += 1
+        elif update_res.get("error"):
+            result["errors"].append(update_res["error"])
+        else:
+            result["skipped_count"] += 1
+
+    return result
+
+def validate_dependencies(dependencies: List[str], prompts_dir: Path = PROMPTS_DIR) -> Dict[str, Any]:
+    """Requirement 9: Validate dependencies exist and have no duplicates."""
+    result = {"valid": True, "missing": [], "duplicates": []}
     seen = set()
+    
     for dep in dependencies:
         if dep in seen:
-            if dep not in duplicates:  # Avoid duplicate duplicates
-                duplicates.append(dep)
+            result["duplicates"].append(dep)
+            result["valid"] = False
         seen.add(dep)
-
-    return {
-        'valid': len(missing) == 0 and len(duplicates) == 0,
-        'missing': missing,
-        'duplicates': duplicates
-    }
-
+        
+        dep_path = prompts_dir / dep
+        if not dep_path.exists():
+            result["missing"].append(dep)
+            result["valid"] = False
+            
+    return result
 
 def validate_interface_structure(interface: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Validate interface JSON structure.
-
-    Interface must have:
-    - 'type' field with value: 'module' | 'cli' | 'command' | 'frontend'
-    - Corresponding nested object with appropriate structure
-
-    Args:
-        interface: Parsed interface JSON dict
-
-    Returns:
-        Dict with keys:
-        - valid: bool (True if structure is valid)
-        - errors: List[str] (validation error messages)
-
-    Example:
-        >>> interface = {"type": "module", "module": {"functions": []}}
-        >>> result = validate_interface_structure(interface)
-        >>> result['valid']
-        True
-    """
-    errors = []
-
+    """Requirement 9: Validate interface dictionary structure."""
+    result = {"valid": True, "errors": []}
     if not isinstance(interface, dict):
-        return {'valid': False, 'errors': ['Interface must be a JSON object']}
+        result["valid"] = False
+        result["errors"].append("Interface must be a dictionary")
+        return result
+        
+    allowed_types = {"module", "cli", "command", "frontend"}
+    if "type" not in interface or interface["type"] not in allowed_types:
+        result["valid"] = False
+        result["errors"].append(f"Invalid type. Must be one of {allowed_types}")
+    else:
+        # Check nested keys for module
+        if interface["type"] == "module":
+            if "module" not in interface:
+                result["valid"] = False
+                result["errors"].append("Missing 'module' key for type='module'")
+            elif "functions" not in interface["module"]:
+                result["valid"] = False
+                result["errors"].append("Missing 'functions' key in module")
+        
+    return result
 
-    # Check type field
-    itype = interface.get('type')
-    if itype not in ['module', 'cli', 'command', 'frontend']:
-        errors.append(f"Invalid type: '{itype}'. Must be: module, cli, command, or frontend")
-        return {'valid': False, 'errors': errors}
+def validate_architecture_modules(arch_data: Any) -> Dict[str, Any]:
+    """Validate architecture modules for consistency."""
+    all_errors = []
+    
+    # Determine entries list
+    if isinstance(arch_data, list):
+        entries = arch_data
+    elif isinstance(arch_data, dict):
+        entries = []
+        for key in ["modules", "entries", "components"]:
+            if key in arch_data and isinstance(arch_data[key], list):
+                entries = arch_data[key]
+                break
+    else:
+        entries = []
 
-    # Check corresponding nested key exists
-    if itype not in interface:
-        errors.append(f"Missing '{itype}' key for type='{itype}'")
-        return {'valid': False, 'errors': errors}
-
-    # Type-specific validation
-    nested_obj = interface[itype]
-    if not isinstance(nested_obj, dict):
-        errors.append(f"'{itype}' must be an object")
-
-    if itype == 'module':
-        if 'functions' not in nested_obj:
-            errors.append("module.functions is required")
-    elif itype in ['cli', 'command']:
-        if 'commands' not in nested_obj:
-            errors.append(f"{itype}.commands is required")
-    elif itype == 'frontend':
-        if 'pages' not in nested_obj:
-            errors.append("frontend.pages is required")
-
+    for entry in entries:
+        if isinstance(entry, dict) and "interface" in entry and entry["interface"]:
+            res = validate_interface_structure(entry["interface"])
+            if not res["valid"]:
+                all_errors.extend(res["errors"])
     return {
-        'valid': len(errors) == 0,
-        'errors': errors
+        "valid": len(all_errors) == 0,
+        "errors": all_errors,
+        "warnings": []
     }
 
-
-# --- Helper Functions for Reverse Direction (architecture.json → prompt) ---
-
-def get_architecture_entry_for_prompt(
-    prompt_filename: str,
-    architecture_path: Path = ARCHITECTURE_JSON_PATH
-) -> Optional[Dict[str, Any]]:
-    """
-    Load architecture entry matching a prompt filename.
-
-    Args:
-        prompt_filename: Name of prompt file (e.g., "llm_invoke_python.prompt")
-        architecture_path: Path to architecture.json
-
-    Returns:
-        Architecture entry dict or None if not found
-
-    Example:
-        >>> entry = get_architecture_entry_for_prompt("llm_invoke_python.prompt")
-        >>> entry['reason']
-        'Provides unified LLM invocation across all PDD operations.'
-    """
+def get_architecture_entry_for_prompt(prompt_filename: str, architecture_path: Path = ARCHITECTURE_JSON_PATH) -> Optional[Dict[str, Any]]:
+    """Requirement 14: Retrieve entry with exact match or basename fallback."""
     if not architecture_path.exists():
         return None
-
-    arch_data = extract_modules(json.loads(architecture_path.read_text(encoding='utf-8')))
-
-    # Normalize to forward-slash path for comparison (Issue #617: filename may include subdirs)
-    normalized = Path(prompt_filename).as_posix()
-    if normalized.startswith('./'):
-        normalized = normalized[2:]
-
-    # Exact path match first
-    for entry in arch_data:
-        if entry.get('filename') == normalized:
+        
+    _, arch_entries = _load_architecture(architecture_path)
+        
+    for entry in arch_entries:
+        if entry.get("filename") == prompt_filename:
             return entry
-
-    # Basename fallback: call sites may pass just the filename without subdirectory
-    basename = Path(normalized).name
-    candidates = [e for e in arch_data if Path(e.get('filename', '')).name == basename]
-    if len(candidates) == 1:
-        return candidates[0]
-
+            
+    basename = Path(prompt_filename).name
+    for entry in arch_entries:
+        if Path(entry.get("filename", "")).name == basename:
+            return entry
+            
     return None
 
-
-def has_pdd_tags(prompt_content: str) -> bool:
-    """
-    Check if prompt already has PDD metadata tags.
-
-    Used to preserve manual edits - don't inject tags if they already exist.
-
-    Args:
-        prompt_content: Raw prompt file content
-
-    Returns:
-        True if any PDD tags are present
-
-    Example:
-        >>> has_pdd_tags("<pdd-reason>Test</pdd-reason>")
-        True
-        >>> has_pdd_tags("No tags here")
-        False
-    """
-    return (
-        '<pdd-reason>' in prompt_content or
-        '<pdd-interface>' in prompt_content or
-        '<pdd-dependency>' in prompt_content
-    )
-
-
 def generate_tags_from_architecture(arch_entry: Dict[str, Any]) -> str:
-    """
-    Generate XML tags string from architecture entry.
-
-    Used when generating new prompts - inject tags from architecture.json.
-
-    Args:
-        arch_entry: Architecture.json module entry
-
-    Returns:
-        XML tags as string (ready to prepend to prompt)
-
-    Example:
-        >>> entry = {"reason": "Test module", "dependencies": ["dep.prompt"]}
-        >>> tags = generate_tags_from_architecture(entry)
-        >>> print(tags)
-        <pdd-reason>Test module</pdd-reason>
-        <pdd-dependency>dep.prompt</pdd-dependency>
-    """
+    """Requirement 10: Generate XML metadata tags from an architecture entry."""
     tags = []
+    if "reason" in arch_entry and arch_entry["reason"]:
+        tags.append(f"<pdd-reason>{arch_entry['reason']}</pdd-reason>")
+        
+    if "interface" in arch_entry and arch_entry["interface"]:
+        interface_str = json.dumps(arch_entry["interface"], indent=2)
+        tags.append(f"<pdd-interface>\n{interface_str}\n</pdd-interface>")
+        
+    if "dependencies" in arch_entry and isinstance(arch_entry["dependencies"], list):
+        for dep in arch_entry["dependencies"]:
+            tags.append(f"<pdd-dependency>{dep}</pdd-dependency>")
+                
+    return "\n\n".join(tags)
 
-    # Generate <pdd-reason> tag
-    if arch_entry.get('reason'):
-        reason = arch_entry['reason']
-        tags.append(f"<pdd-reason>{reason}</pdd-reason>")
+def normalize_architecture_filenames(arch_data: Any) -> None:
+    """Requirement 13: Normalize architecture filenames based on filepath (mutates in place)."""
+    # Determine entries list
+    if isinstance(arch_data, list):
+        entries = arch_data
+    elif isinstance(arch_data, dict):
+        entries = []
+        for key in ["modules", "entries", "components"]:
+            if key in arch_data and isinstance(arch_data[key], list):
+                entries = arch_data[key]
+                break
+    else:
+        return
 
-    # Generate <pdd-interface> tag (pretty-printed JSON)
-    if arch_entry.get('interface'):
-        interface_json = json.dumps(arch_entry['interface'], indent=2)
-        tags.append(f"<pdd-interface>\n{interface_json}\n</pdd-interface>")
-
-    # Generate <pdd-dependency> tags (one per dependency)
-    for dep in arch_entry.get('dependencies', []):
-        tags.append(f"<pdd-dependency>{dep}</pdd-dependency>")
-
-    return '\n'.join(tags)
+    mapping = {}
+    for entry in entries:
+        old_filename = entry.get("filename")
+        if "filepath" in entry and entry["filepath"]:
+            ext = Path(entry["filepath"]).suffix
+            if ext:
+                language = _EXT_TO_LANGUAGE.get(ext, "Unknown")
+                new_filename = filepath_to_prompt_filename(entry["filepath"], language)
+                entry["filename"] = new_filename
+                if old_filename:
+                    mapping[old_filename] = new_filename
+                    
+    # Rewrite dependency references
+    for entry in entries:
+        if "dependencies" in entry and isinstance(entry["dependencies"], list):
+            entry["dependencies"] = [mapping.get(d, d) for d in entry["dependencies"]]

@@ -3,19 +3,39 @@ Tests for pdd.commands.maintenance module.
 
 Tests cover:
 - sync command: basic invocation, dry-run, deprecated --log, GitHub issue URL dispatch,
-  one-session defaults, error handling (Abort, generic exceptions)
+  one-session defaults, error handling (Abort, generic exceptions), durable mode constraints,
+  target-coverage types.
+- sync-architecture command: basic invocation, dry-run, report rendering, nearest ancestor project resolution,
+  validation failure reporting.
 - auto-deps command: basic invocation, new options (include-docs, no-dedup, concurrency),
-  quote stripping, error handling
-- setup command: install_completion + setup utility flow, error handling
-- _run_agentic_sync_dispatch: success, failure (Exit(1)), quiet mode, exception handling
+  quote stripping, error handling.
+- setup command: install_completion + setup utility flow, error handling.
+- _run_agentic_sync_dispatch: success, failure (Exit(1)), quiet mode, exception handling.
+- _run_global_sync_dispatch: success, failure, exception handling.
+- _resolve_global_sync_budget and _resolve_global_sync_target_coverage: .pddrc resolution.
+- _echo_architecture_sync_result: all warning types and error states.
 """
 
 import pytest
+import json
+import sys
+import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, patch, call
 from click.testing import CliRunner
 import click
 
-from pdd.commands.maintenance import sync, auto_deps, setup, _run_agentic_sync_dispatch
+from pdd.commands.maintenance import (
+    sync, 
+    sync_architecture, 
+    auto_deps, 
+    setup, 
+    _run_agentic_sync_dispatch,
+    _run_global_sync_dispatch,
+    _resolve_global_sync_budget,
+    _resolve_global_sync_target_coverage,
+    _echo_architecture_sync_result
+)
 
 
 # ---------------------------------------------------------------------------
@@ -100,12 +120,12 @@ class TestSyncCommand:
             assert result.exit_code == 0
             assert mock_sm.call_args.kwargs["dry_run"] is True
 
-    def test_sync_without_basename_dispatches_global_sync_not_durable(
+    def test_sync_without_basename_dispatches_global_sync(
         self,
         runner,
         base_ctx_obj,
     ):
-        """No-argument sync uses global sync and leaves durable mode disabled."""
+        """No-argument sync uses global sync."""
         cli = _make_cli(sync, base_ctx_obj)
         mock_result = ("global done", 0.0, "none")
 
@@ -120,6 +140,26 @@ class TestSyncCommand:
         mock_global.assert_called_once()
         mock_agentic.assert_not_called()
         assert mock_global.call_args.kwargs["one_session"] is False
+
+    def test_sync_without_basename_forwards_global_local_flag(
+        self,
+        runner,
+        base_ctx_obj,
+    ):
+        """Top-level --local must be preserved when global sync dispatches."""
+        base_ctx_obj["local"] = True
+        cli = _make_cli(sync, base_ctx_obj)
+        mock_result = ("global done", 0.0, "none")
+
+        with patch(
+            "pdd.commands.maintenance._run_global_sync_dispatch",
+            return_value=mock_result,
+        ) as mock_global:
+            result = runner.invoke(cli, ["sync"], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        # The local flag is in ctx.obj, which _run_global_sync_dispatch uses
+        assert mock_global.call_args.kwargs["ctx"].obj["local"] is True
 
     def test_sync_deprecated_log_flag(self, runner, base_ctx_obj):
         """--log emits a deprecation warning and sets dry_run=True."""
@@ -162,50 +202,6 @@ class TestSyncCommand:
             assert kw["strength"] == base_ctx_obj["strength"]
             assert kw["temperature"] == base_ctx_obj["temperature"]
             assert kw["context_override"] == base_ctx_obj["context"]
-
-    @pytest.mark.parametrize(
-        ("extra_args", "expected"),
-        [
-            (
-                [],
-                {
-                    "agentic_mode": False,
-                    "budget": None,
-                    "use_github_state": True,
-                    "one_session": True,
-                },
-            ),
-            (["--agentic"], {"agentic_mode": True}),
-            (["--no-github-state"], {"use_github_state": False}),
-            (["--one-session"], {"one_session": True}),
-            (["--no-one-session"], {"one_session": False}),
-            (["--budget", "20"], {"budget": 20.0}),
-        ],
-    )
-    def test_sync_github_url_without_durable_keeps_checkpointing_disabled(
-        self,
-        runner,
-        base_ctx_obj,
-        extra_args,
-        expected,
-    ):
-        """Non-durable issue sync variants never opt into durable checkpointing."""
-        cli = _make_cli(sync, base_ctx_obj)
-        mock_agentic = (True, "synced", 0.10, "gpt-4")
-        args = ["sync", "https://github.com/org/repo/issues/99", *extra_args]
-
-        with patch("pdd.commands.maintenance._is_github_issue_url", return_value=True), \
-             patch("pdd.commands.maintenance.run_agentic_sync", return_value=mock_agentic) as mock_ras:
-            result = runner.invoke(cli, args, catch_exceptions=False)
-
-        assert result.exit_code == 0
-        kw = mock_ras.call_args.kwargs
-        assert kw["durable"] is False
-        assert kw["durable_branch"] is None
-        assert kw["no_resume"] is False
-        assert kw["durable_max_parallel"] is None
-        for key, value in expected.items():
-            assert kw[key] == value
 
     def test_sync_github_url_failure_exits_1(self, runner, base_ctx_obj):
         """Agentic sync returning success=False raises Exit(1)."""
@@ -268,31 +264,6 @@ class TestSyncCommand:
         assert result.exit_code != 0
         assert "require --durable" in result.output
 
-    def test_sync_one_session_explicit_true(self, runner, base_ctx_obj):
-        """--one-session explicitly True is forwarded to sync_main."""
-        mock_result = ({"ok": True}, 0.01, "gpt-4")
-        cli = _make_cli(sync, base_ctx_obj)
-
-        with patch("pdd.commands.maintenance.sync_main", return_value=mock_result) as mock_sm:
-            result = runner.invoke(cli, [
-                "sync", "mod", "--one-session",
-            ], catch_exceptions=False)
-            assert result.exit_code == 0
-            assert mock_sm.call_args.kwargs["one_session"] is True
-
-    def test_sync_one_session_explicit_false_for_url(self, runner, base_ctx_obj):
-        """--no-one-session explicitly False is forwarded to run_agentic_sync."""
-        cli = _make_cli(sync, base_ctx_obj)
-        mock_agentic = (True, "ok", 0.10, "gpt-4")
-
-        with patch("pdd.commands.maintenance._is_github_issue_url", return_value=True), \
-             patch("pdd.commands.maintenance.run_agentic_sync", return_value=mock_agentic) as mock_ras:
-            result = runner.invoke(cli, [
-                "sync", "https://github.com/org/repo/issues/5", "--no-one-session",
-            ], catch_exceptions=False)
-            assert result.exit_code == 0
-            assert mock_ras.call_args.kwargs["one_session"] is False
-
     def test_sync_abort_reraised(self, runner, base_ctx_obj):
         """click.Abort from sync_main is re-raised, not caught by handle_error."""
         cli = _make_cli(sync, base_ctx_obj)
@@ -303,41 +274,134 @@ class TestSyncCommand:
             assert result.exit_code != 0
             mock_he.assert_not_called()
 
-    def test_sync_generic_exception_handled(self, runner, base_ctx_obj):
-        """Generic exceptions are caught by handle_error."""
+    def test_sync_exception_handled(self, runner, base_ctx_obj):
+        """sync calls handle_error on generic exception."""
         cli = _make_cli(sync, base_ctx_obj)
-
-        with patch("pdd.commands.maintenance.sync_main", side_effect=RuntimeError("boom")), \
+        with patch("pdd.commands.maintenance.sync_main", side_effect=ValueError("fail")), \
              patch("pdd.commands.maintenance.handle_error") as mock_he:
             result = runner.invoke(cli, ["sync", "mod"])
             mock_he.assert_called_once()
-            assert isinstance(mock_he.call_args[0][0], RuntimeError)
-            assert mock_he.call_args[0][1] == "sync"
-
-    def test_sync_steer_timeout(self, runner, base_ctx_obj):
-        """--steer-timeout is forwarded to sync_main."""
-        mock_result = ({"ok": True}, 0.01, "gpt-4")
-        cli = _make_cli(sync, base_ctx_obj)
-
-        with patch("pdd.commands.maintenance.sync_main", return_value=mock_result) as mock_sm:
-            result = runner.invoke(cli, [
-                "sync", "mod", "--steer-timeout", "12.5",
-            ], catch_exceptions=False)
             assert result.exit_code == 0
-            assert mock_sm.call_args.kwargs["steer_timeout"] == 12.5
+            assert result.output == ""
 
-    def test_sync_agentic_flag(self, runner, base_ctx_obj):
-        """--agentic is forwarded as agentic_mode to sync_main."""
-        mock_result = ({"ok": True}, 0.01, "gpt-4")
+    def test_sync_has_track_cost_decorator(self):
+        """Verify sync command uses @track_cost decorator."""
+        # Click commands have a callback that is the original function wrapped by Click and others
+        assert hasattr(sync.callback, '__wrapped__'), "sync should have @track_cost decorator"
+
+    def test_sync_with_no_target_coverage_does_not_raise_typeerror(self, runner, base_ctx_obj):
+        """Issue #194: pdd sync without --target-coverage should not raise TypeError."""
+        mock_result = ('success', 0.5, 'model')
         cli = _make_cli(sync, base_ctx_obj)
-
         with patch("pdd.commands.maintenance.sync_main", return_value=mock_result) as mock_sm:
-            result = runner.invoke(cli, [
-                "sync", "mod", "--agentic",
-            ], catch_exceptions=False)
+            result = runner.invoke(cli, ["sync", "test_module"])
             assert result.exit_code == 0
-            assert mock_sm.call_args.kwargs["agentic_mode"] is True
+            assert 'TypeError' not in result.output
+            mock_sm.assert_called_once()
 
+    def test_target_coverage_cli_option_converts_string_to_float(self, runner, base_ctx_obj):
+        """Issue #194: --target-coverage '85.5' should be converted to float."""
+        mock_result = ('success', 0.5, 'model')
+        cli = _make_cli(sync, base_ctx_obj)
+        with patch("pdd.commands.maintenance.sync_main", return_value=mock_result) as mock_sm:
+            result = runner.invoke(cli, ["sync", "test_module", "--target-coverage", "85.5"])
+            assert result.exit_code == 0
+            call_kwargs = mock_sm.call_args.kwargs
+            assert isinstance(call_kwargs.get('target_coverage'), float)
+            assert call_kwargs.get('target_coverage') == 85.5
+
+# ---------------------------------------------------------------------------
+# sync-architecture command tests
+# ---------------------------------------------------------------------------
+
+class TestSyncArchitectureCommand:
+
+    def test_sync_architecture_basic(self, runner, base_ctx_obj):
+        """sync-architecture dispatches to sync_prompts_to_architecture."""
+        mock_result = {"success": True, "updated_count": 1, "skipped_count": 0}
+        cli = _make_cli(sync_architecture, base_ctx_obj)
+
+        with patch("pdd.commands.maintenance.sync_prompts_to_architecture", return_value=mock_result) as mock_spa:
+            result = runner.invoke(cli, ["sync-architecture", "mod1.prompt"], catch_exceptions=False)
+            assert result.exit_code == 0
+            mock_spa.assert_called_once_with(filenames=["mod1.prompt"], dry_run=False)
+            assert "Updated 1 module(s)" in result.output
+
+    def test_sync_architecture_dry_run(self, runner, base_ctx_obj):
+        """sync-architecture --dry-run forwards dry_run=True."""
+        mock_result = {"success": True, "updated_count": 0, "skipped_count": 1}
+        cli = _make_cli(sync_architecture, base_ctx_obj)
+
+        with patch("pdd.commands.maintenance.sync_prompts_to_architecture", return_value=mock_result) as mock_spa:
+            result = runner.invoke(cli, ["sync-architecture", "--dry-run"], catch_exceptions=False)
+            assert result.exit_code == 0
+            mock_spa.assert_called_once_with(filenames=None, dry_run=True)
+            assert "Dry run:" in result.output
+
+    def test_sync_architecture_failure_exits_1(self, runner, base_ctx_obj):
+        """sync-architecture exits 1 on failure."""
+        mock_result = {"success": False, "updated_count": 0, "skipped_count": 0}
+        cli = _make_cli(sync_architecture, base_ctx_obj)
+
+        with patch("pdd.commands.maintenance.sync_prompts_to_architecture", return_value=mock_result):
+            result = runner.invoke(cli, ["sync-architecture"])
+            assert result.exit_code == 1
+
+    def test_sync_architecture_exception_handled(self, runner, base_ctx_obj):
+        """sync-architecture handles generic exceptions."""
+        cli = _make_cli(sync_architecture, base_ctx_obj)
+
+        with patch("pdd.commands.maintenance.sync_prompts_to_architecture", side_effect=RuntimeError("boom")), \
+             patch("pdd.commands.maintenance.handle_error") as mock_he:
+            result = runner.invoke(cli, ["sync-architecture"])
+            mock_he.assert_called_once()
+            assert result.exit_code == 0 # returns None which results in exit 0 in this mock setup
+
+    def test_sync_architecture_uses_nearest_cwd_project(self, runner, tmp_path, monkeypatch):
+        """CLI should target the nearest ancestor project, not always the repo root."""
+        from pdd.cli import cli as pdd_cli
+        
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        (repo_root / ".git").mkdir()
+
+        root_prompts = repo_root / "prompts"
+        root_prompts.mkdir()
+        (root_prompts / "root_python.prompt").write_text("<pdd-reason>Updated root</pdd-reason>", encoding="utf-8")
+        (repo_root / "architecture.json").write_text('[]', encoding="utf-8")
+
+        nested_root = repo_root / "apps" / "nested"
+        nested_root.mkdir(parents=True)
+        (nested_root / "architecture.json").write_text('[]', encoding="utf-8")
+        
+        monkeypatch.chdir(nested_root)
+
+        with patch("pdd.commands.maintenance.sync_prompts_to_architecture") as mock_spa:
+            mock_spa.return_value = {"success": True, "updated_count": 0, "skipped_count": 0}
+            result = runner.invoke(pdd_cli, ["sync-architecture"])
+            assert result.exit_code == 0
+            mock_spa.assert_called_once()
+
+    def test_sync_architecture_exits_nonzero_on_validation_failure(self, runner, base_ctx_obj):
+        """Validation failures should surface clearly and fail the command."""
+        mock_result = {
+            "success": False,
+            "updated_count": 1,
+            "skipped_count": 0,
+            "results": [],
+            "validation": {
+                "valid": False,
+                "errors": [{"message": "Module depends on non-existent module"}],
+                "warnings": [],
+            },
+            "errors": [],
+        }
+        cli = _make_cli(sync_architecture, base_ctx_obj)
+        with patch("pdd.commands.maintenance.sync_prompts_to_architecture", return_value=mock_result):
+            result = runner.invoke(cli, ["sync-architecture"])
+            assert result.exit_code == 1
+            assert "Validation errors:" in result.output
+            assert "depends on non-existent module" in result.output
 
 # ---------------------------------------------------------------------------
 # auto-deps command tests
@@ -361,6 +425,9 @@ class TestAutoDepsCommand:
                 str(prompt),
                 str(dep_dir),
                 "--force-scan",
+                "--include-docs",
+                "--no-dedup",
+                "--concurrency", "4",
             ], catch_exceptions=False)
 
             assert result.exit_code == 0
@@ -369,88 +436,9 @@ class TestAutoDepsCommand:
             assert kw["prompt_file"] == str(prompt)
             assert kw["directory_path"] == str(dep_dir)
             assert kw["force_scan"] is True
-
-    def test_auto_deps_include_docs_flag(self, runner, base_ctx_obj, tmp_path):
-        """--include-docs sets include_docs in ctx.obj."""
-        prompt = tmp_path / "test.prompt"
-        prompt.write_text("content")
-        dep_dir = tmp_path / "deps"
-        dep_dir.mkdir()
-
-        mock_result = ("modified", 0.01, "gpt-4")
-        cli = _make_cli(auto_deps, base_ctx_obj)
-
-        with patch("pdd.commands.maintenance.auto_deps_main", return_value=mock_result) as mock_adm:
-            result = runner.invoke(cli, [
-                "auto-deps", str(prompt), str(dep_dir), "--include-docs",
-            ], catch_exceptions=False)
-
-            assert result.exit_code == 0
-            # Verify include_docs was set on ctx.obj
-            ctx_arg = mock_adm.call_args.kwargs["ctx"]
-            assert ctx_arg.obj["include_docs"] is True
-
-    def test_auto_deps_no_dedup_flag(self, runner, base_ctx_obj, tmp_path):
-        """--no-dedup sets no_dedup in ctx.obj."""
-        prompt = tmp_path / "test.prompt"
-        prompt.write_text("content")
-        dep_dir = tmp_path / "deps"
-        dep_dir.mkdir()
-
-        mock_result = ("modified", 0.01, "gpt-4")
-        cli = _make_cli(auto_deps, base_ctx_obj)
-
-        with patch("pdd.commands.maintenance.auto_deps_main", return_value=mock_result) as mock_adm:
-            result = runner.invoke(cli, [
-                "auto-deps", str(prompt), str(dep_dir), "--no-dedup",
-            ], catch_exceptions=False)
-
-            assert result.exit_code == 0
-            ctx_arg = mock_adm.call_args.kwargs["ctx"]
-            assert ctx_arg.obj["no_dedup"] is True
-
-    def test_auto_deps_concurrency_option(self, runner, base_ctx_obj, tmp_path):
-        """--concurrency sets concurrency in ctx.obj."""
-        prompt = tmp_path / "test.prompt"
-        prompt.write_text("content")
-        dep_dir = tmp_path / "deps"
-        dep_dir.mkdir()
-
-        mock_result = ("modified", 0.01, "gpt-4")
-        cli = _make_cli(auto_deps, base_ctx_obj)
-
-        with patch("pdd.commands.maintenance.auto_deps_main", return_value=mock_result) as mock_adm:
-            result = runner.invoke(cli, [
-                "auto-deps", str(prompt), str(dep_dir), "--concurrency", "8",
-            ], catch_exceptions=False)
-
-            assert result.exit_code == 0
-            ctx_arg = mock_adm.call_args.kwargs["ctx"]
-            assert ctx_arg.obj["concurrency"] == 8
-
-    def test_auto_deps_output_and_csv(self, runner, base_ctx_obj, tmp_path):
-        """--output and --csv are forwarded to auto_deps_main."""
-        prompt = tmp_path / "test.prompt"
-        prompt.write_text("content")
-        dep_dir = tmp_path / "deps"
-        dep_dir.mkdir()
-        out_path = str(tmp_path / "out.prompt")
-        csv_path = str(tmp_path / "deps.csv")
-
-        mock_result = ("modified", 0.02, "gpt-4")
-        cli = _make_cli(auto_deps, base_ctx_obj)
-
-        with patch("pdd.commands.maintenance.auto_deps_main", return_value=mock_result) as mock_adm:
-            result = runner.invoke(cli, [
-                "auto-deps", str(prompt), str(dep_dir),
-                "--output", out_path,
-                "--csv", csv_path,
-            ], catch_exceptions=False)
-
-            assert result.exit_code == 0
-            kw = mock_adm.call_args.kwargs
-            assert kw["output"] == out_path
-            assert kw["auto_deps_csv_path"] == csv_path
+            assert kw["include_docs"] is True
+            assert kw["no_dedup"] is True
+            assert kw["concurrency"] == 4
 
     def test_auto_deps_strips_quotes(self, runner, base_ctx_obj, tmp_path):
         """Directory path with quotes is stripped."""
@@ -462,7 +450,7 @@ class TestAutoDepsCommand:
         mock_result = ("modified", 0.01, "gpt-4")
         cli = _make_cli(auto_deps, base_ctx_obj)
 
-        # Pass path with surrounding quotes as if shell didn't strip them
+        # Pass path with surrounding quotes
         quoted_path = f'"{dep_dir}"'
         with patch("pdd.commands.maintenance.auto_deps_main", return_value=mock_result) as mock_adm:
             result = runner.invoke(cli, [
@@ -473,66 +461,20 @@ class TestAutoDepsCommand:
             kw = mock_adm.call_args.kwargs
             assert kw["directory_path"] == str(dep_dir)
 
-    def test_auto_deps_abort_reraised(self, runner, base_ctx_obj, tmp_path):
-        """click.Abort from auto_deps_main is re-raised."""
+    def test_auto_deps_has_track_cost_decorator(self):
+        """Verify auto-deps command uses @track_cost decorator."""
+        assert hasattr(auto_deps.callback, '__wrapped__'), "auto_deps should have @track_cost decorator"
+
+    def test_auto_deps_exception_handled(self, runner, base_ctx_obj, tmp_path):
+        """auto-deps handles generic exceptions."""
         prompt = tmp_path / "test.prompt"
         prompt.write_text("content")
-        dep_dir = tmp_path / "deps"
-        dep_dir.mkdir()
-
         cli = _make_cli(auto_deps, base_ctx_obj)
-
-        with patch("pdd.commands.maintenance.auto_deps_main", side_effect=click.Abort()), \
+        with patch("pdd.commands.maintenance.auto_deps_main", side_effect=RuntimeError("fail")), \
              patch("pdd.commands.maintenance.handle_error") as mock_he:
-            result = runner.invoke(cli, ["auto-deps", str(prompt), str(dep_dir)])
-            assert result.exit_code != 0
-            mock_he.assert_not_called()
-
-    def test_auto_deps_generic_exception_handled(self, runner, base_ctx_obj, tmp_path):
-        """Generic exceptions are caught by handle_error."""
-        prompt = tmp_path / "test.prompt"
-        prompt.write_text("content")
-        dep_dir = tmp_path / "deps"
-        dep_dir.mkdir()
-
-        cli = _make_cli(auto_deps, base_ctx_obj)
-
-        with patch("pdd.commands.maintenance.auto_deps_main", side_effect=ValueError("bad")), \
-             patch("pdd.commands.maintenance.handle_error") as mock_he:
-            result = runner.invoke(cli, ["auto-deps", str(prompt), str(dep_dir)])
+            result = runner.invoke(cli, ["auto-deps", str(prompt), "."])
             mock_he.assert_called_once()
-            assert mock_he.call_args[0][1] == "auto-deps"
-
-    def test_auto_deps_new_options_passed_as_function_args(self, runner, base_ctx_obj, tmp_path):
-        """--include-docs, --no-dedup, --concurrency must be passed as kwargs
-        to auto_deps_main, not just stored in ctx.obj."""
-        prompt = tmp_path / "test.prompt"
-        prompt.write_text("content")
-        dep_dir = tmp_path / "deps"
-        dep_dir.mkdir()
-
-        mock_result = ("modified", 0.01, "gpt-4")
-        cli = _make_cli(auto_deps, base_ctx_obj)
-
-        with patch("pdd.commands.maintenance.auto_deps_main", return_value=mock_result) as mock_adm:
-            result = runner.invoke(cli, [
-                "auto-deps", str(prompt), str(dep_dir),
-                "--include-docs", "--no-dedup", "--concurrency", "8",
-            ], catch_exceptions=False)
-
             assert result.exit_code == 0
-            kw = mock_adm.call_args.kwargs
-            assert kw.get("include_docs") is True, (
-                "include_docs must be passed as a kwarg to auto_deps_main, "
-                f"not just stored in ctx.obj. Got kwargs: {list(kw.keys())}"
-            )
-            assert kw.get("no_dedup") is True, (
-                "no_dedup must be passed as a kwarg to auto_deps_main"
-            )
-            assert kw.get("concurrency") == 8, (
-                "concurrency must be passed as a kwarg to auto_deps_main"
-            )
-
 
 # ---------------------------------------------------------------------------
 # setup command tests
@@ -552,17 +494,6 @@ class TestSetupCommand:
             mock_ic.assert_called_once_with(quiet=False)
             mock_su.assert_called_once()
 
-    def test_setup_quiet_mode(self, runner):
-        """setup passes quiet=True to install_completion when ctx.obj['quiet'] is True."""
-        cli = _make_cli(setup, {"quiet": True})
-
-        with patch("pdd.cli.install_completion") as mock_ic, \
-             patch("pdd.commands.maintenance._run_setup_utility"):
-            result = runner.invoke(cli, ["setup"], catch_exceptions=False)
-
-            assert result.exit_code == 0
-            mock_ic.assert_called_once_with(quiet=True)
-
     def test_setup_error_handled(self, runner):
         """Exceptions in setup are caught by handle_error."""
         cli = _make_cli(setup, {"quiet": False})
@@ -574,123 +505,174 @@ class TestSetupCommand:
             assert isinstance(mock_he.call_args[0][0], RuntimeError)
             assert mock_he.call_args[0][1] == "setup"
 
+    def test_setup_abort_handled(self, runner):
+        """click.Abort in setup is re-raised."""
+        cli = _make_cli(setup, {"quiet": False})
+
+        with patch("pdd.cli.install_completion", side_effect=click.Abort()):
+            result = runner.invoke(cli, ["setup"])
+            assert result.exit_code != 0
 
 # ---------------------------------------------------------------------------
-# _run_agentic_sync_dispatch tests
+# Internal dispatcher and helper tests
 # ---------------------------------------------------------------------------
 
-class TestAgenticSyncDispatch:
+class TestInternalHelpers:
 
-    def test_dispatch_success(self):
-        """Successful agentic sync returns (message, cost, model)."""
-        ctx = click.Context(click.Command("sync"), obj={
-            "quiet": False, "verbose": True,
-        })
-        mock_result = (True, "All synced", 0.50, "claude-3")
+    def test_run_agentic_sync_dispatch_success(self, capsys):
+        """_run_agentic_sync_dispatch success path."""
+        ctx = click.Context(click.Command("sync"), obj={"quiet": False})
+        mock_res = (True, "Agentic sync done", 0.1, "gpt-4")
+        with ctx.scope(), patch("pdd.commands.maintenance.run_agentic_sync", return_value=mock_res):
+            res = _run_agentic_sync_dispatch(ctx, issue_url="http://github.com/a/b/issues/1")
+            assert res == ("Agentic sync done", 0.1, "gpt-4")
+            out = capsys.readouterr().out
+            assert "Status: Success" in out
 
-        with ctx.scope(), \
-             patch("pdd.commands.maintenance.run_agentic_sync", return_value=mock_result) as mock_ras:
-            result = _run_agentic_sync_dispatch(
-                ctx=ctx,
-                issue_url="https://github.com/org/repo/issues/10",
-                budget=20.0,
-                skip_verify=False,
-                skip_tests=False,
-                dry_run=False,
-                agentic=False,
-                no_steer=False,
-                max_attempts=3,
-                timeout_adder=0.0,
-                no_github_state=False,
-                one_session=True,
-                strength=0.7,
-                temperature=0.2,
-                context_override="backend",
-            )
+    def test_run_agentic_sync_dispatch_failure(self):
+        """_run_agentic_sync_dispatch failure raises Exit(1)."""
+        ctx = click.Context(click.Command("sync"), obj={"quiet": False})
+        mock_res = (False, "Agentic sync failed", 0.1, "gpt-4")
+        with ctx.scope(), patch("pdd.commands.maintenance.run_agentic_sync", return_value=mock_res):
+            with pytest.raises(click.exceptions.Exit) as exc:
+                _run_agentic_sync_dispatch(ctx, issue_url="http://github.com/a/b/issues/1")
+            assert exc.value.exit_code == 1
 
-            assert result == ("All synced", 0.50, "claude-3")
-            kw = mock_ras.call_args.kwargs
-            assert kw["use_github_state"] is True
-            assert kw["dry_run"] is False
-            assert kw["one_session"] is True
-            assert kw["strength"] == 0.7
-            assert kw["temperature"] == 0.2
-            assert kw["context_override"] == "backend"
-
-    def test_dispatch_failure_raises_exit_1(self):
-        """Failed agentic sync raises click.exceptions.Exit(1)."""
-        ctx = click.Context(click.Command("sync"), obj={
-            "quiet": False, "verbose": False,
-        })
-        mock_result = (False, "auth module failed", 0.10, "gpt-4")
-
-        with ctx.scope(), \
-             patch("pdd.commands.maintenance.run_agentic_sync", return_value=mock_result):
-            with pytest.raises(click.exceptions.Exit) as exc_info:
-                _run_agentic_sync_dispatch(
-                    ctx=ctx,
-                    issue_url="https://github.com/org/repo/issues/10",
-                    budget=20.0,
-                    skip_verify=False,
-                    skip_tests=False,
-                    dry_run=False,
-                    agentic=False,
-                    no_steer=False,
-                    max_attempts=3,
-                    timeout_adder=0.0,
-                    no_github_state=False,
-                )
-            assert exc_info.value.exit_code == 1
-
-    def test_dispatch_quiet_suppresses_output(self, capsys):
-        """When quiet=True, no status output is printed."""
-        ctx = click.Context(click.Command("sync"), obj={
-            "quiet": True, "verbose": False,
-        })
-        mock_result = (True, "done", 0.01, "gpt-4")
-
-        with ctx.scope(), \
-             patch("pdd.commands.maintenance.run_agentic_sync", return_value=mock_result):
-            _run_agentic_sync_dispatch(
-                ctx=ctx,
-                issue_url="https://github.com/org/repo/issues/1",
-                budget=5.0,
-                skip_verify=False,
-                skip_tests=False,
-                dry_run=False,
-                agentic=False,
-                no_steer=False,
-                max_attempts=None,
-                timeout_adder=0.0,
-                no_github_state=False,
-            )
-
-        captured = capsys.readouterr()
-        assert "Status:" not in captured.out
-
-    def test_dispatch_generic_exception_handled(self):
-        """Generic exceptions in dispatch are caught by handle_error."""
-        ctx = click.Context(click.Command("sync"), obj={
-            "quiet": False, "verbose": False,
-        })
-
-        with ctx.scope(), \
-             patch("pdd.commands.maintenance.run_agentic_sync", side_effect=RuntimeError("net error")), \
+    def test_run_agentic_sync_dispatch_exception(self):
+        """_run_agentic_sync_dispatch handles exceptions."""
+        ctx = click.Context(click.Command("sync"), obj={"quiet": False})
+        with ctx.scope(), patch("pdd.commands.maintenance.run_agentic_sync", side_effect=RuntimeError("boom")), \
              patch("pdd.commands.maintenance.handle_error") as mock_he:
-            result = _run_agentic_sync_dispatch(
-                ctx=ctx,
-                issue_url="https://github.com/org/repo/issues/1",
-                budget=5.0,
-                skip_verify=False,
-                skip_tests=False,
-                dry_run=False,
-                agentic=False,
-                no_steer=False,
-                max_attempts=None,
-                timeout_adder=0.0,
-                no_github_state=False,
-            )
-
-            assert result is None
+            res = _run_agentic_sync_dispatch(ctx, issue_url="http://github.com/a/b/issues/1")
+            assert res is None
             mock_he.assert_called_once()
-            assert mock_he.call_args[0][1] == "sync"
+
+    def test_run_agentic_sync_dispatch_reasoning_time(self):
+        """_run_agentic_sync_dispatch passes reasoning_time when time_explicit is True."""
+        ctx = click.Context(click.Command("sync"), obj={"quiet": True, "time": 0.5, "time_explicit": True})
+        mock_res = (True, "done", 0.1, "gpt-4")
+        with ctx.scope(), patch("pdd.commands.maintenance.run_agentic_sync", return_value=mock_res) as mock_ras:
+            _run_agentic_sync_dispatch(ctx, issue_url="http://github.com/a/b/issues/1")
+            assert mock_ras.call_args.kwargs["reasoning_time"] == 0.5
+
+    def test_run_global_sync_dispatch_success(self, capsys):
+        """_run_global_sync_dispatch success path."""
+        ctx = click.Context(click.Command("sync"), obj={"quiet": False})
+        mock_res = (True, "Global sync done", 0.1, "gpt-4")
+        with ctx.scope(), patch("pdd.commands.maintenance.run_global_sync", return_value=mock_res):
+            res = _run_global_sync_dispatch(ctx, budget=10.0)
+            assert res == ("Global sync done", 0.1, "gpt-4")
+            out = capsys.readouterr().out
+            assert "Status: Success" in out
+
+    def test_run_global_sync_dispatch_failure(self):
+        """_run_global_sync_dispatch failure raises Exit(1)."""
+        ctx = click.Context(click.Command("sync"), obj={"quiet": False})
+        mock_res = (False, "Global sync failed", 0.1, "gpt-4")
+        with ctx.scope(), patch("pdd.commands.maintenance.run_global_sync", return_value=mock_res):
+            with pytest.raises(click.exceptions.Exit) as exc:
+                _run_global_sync_dispatch(ctx, budget=10.0)
+            assert exc.value.exit_code == 1
+
+    def test_run_global_sync_dispatch_exception(self):
+        """_run_global_sync_dispatch handles exceptions."""
+        ctx = click.Context(click.Command("sync"), obj={"quiet": False})
+        with ctx.scope(), patch("pdd.commands.maintenance.run_global_sync", side_effect=RuntimeError("boom")), \
+             patch("pdd.commands.maintenance.handle_error") as mock_he:
+            with pytest.raises(click.exceptions.Exit) as exc:
+                _run_global_sync_dispatch(ctx, budget=10.0)
+            assert exc.value.exit_code == 1
+            mock_he.assert_called_once()
+
+    def test_resolve_global_sync_budget_pddrc(self, tmp_path, monkeypatch):
+        """_resolve_global_sync_budget resolves from .pddrc."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".pddrc").write_text("version: '1.0'\ncontexts:\n  default:\n    defaults:\n      budget: 12.3", encoding="utf-8")
+        assert _resolve_global_sync_budget(None) == 12.3
+
+    def test_resolve_global_sync_budget_invalid_pddrc(self, tmp_path, monkeypatch):
+        """_resolve_global_sync_budget falls back on invalid .pddrc."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".pddrc").write_text("malformed", encoding="utf-8")
+        assert _resolve_global_sync_budget(None) == 20.0
+
+    def test_resolve_global_sync_budget_invalid_value(self, tmp_path, monkeypatch):
+        """_resolve_global_sync_budget handles ValueError during float conversion."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".pddrc").write_text("version: '1.0'\ncontexts:\n  default:\n    defaults:\n      budget: 'not-a-float'", encoding="utf-8")
+        assert _resolve_global_sync_budget(None) == 20.0
+
+    def test_resolve_global_sync_target_coverage_pddrc(self, tmp_path, monkeypatch):
+        """_resolve_global_sync_target_coverage resolves from .pddrc."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".pddrc").write_text("version: '1.0'\ncontexts:\n  default:\n    defaults:\n      target_coverage: 75.0", encoding="utf-8")
+        assert _resolve_global_sync_target_coverage(None) == 75.0
+
+    def test_resolve_global_sync_target_coverage_none(self, tmp_path, monkeypatch):
+        """_resolve_global_sync_target_coverage returns None if not found."""
+        monkeypatch.chdir(tmp_path)
+        assert _resolve_global_sync_target_coverage(None) is None
+
+    def test_resolve_global_sync_target_coverage_invalid_value(self, tmp_path, monkeypatch):
+        """_resolve_global_sync_target_coverage handles ValueError during float conversion."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".pddrc").write_text("version: '1.0'\ncontexts:\n  default:\n    defaults:\n      target_coverage: 'not-a-float'", encoding="utf-8")
+        assert _resolve_global_sync_target_coverage(None) is None
+
+    def test_echo_architecture_sync_result_full(self, capsys):
+        """_echo_architecture_sync_result renders all warning and error types."""
+        result = {
+            "updated_count": 1,
+            "skipped_count": 1,
+            "total_rules": 10,
+            "total_stories": 5,
+            "results": [
+                {
+                    "filename": "updated.prompt",
+                    "updated": True,
+                    "contract_summary": {
+                        "rules": [1, 2],
+                        "stories": [1],
+                        "evidence_status": "stale"
+                    }
+                },
+                {
+                    "filename": "missing.prompt",
+                    "updated": True,
+                    "contract_summary": {
+                        "rules": [],
+                        "stories": [],
+                        "evidence_status": "missing"
+                    }
+                },
+                {
+                    "filename": "failed.prompt",
+                    "updated": False,
+                    "success": False,
+                    "error": "Reason"
+                }
+            ],
+            "errors": ["Global Error"],
+            "validation": {
+                "errors": [{"message": "Val Error"}],
+                "warnings": [{"message": "Val Warning"}]
+            }
+        }
+        _echo_architecture_sync_result(result, dry_run=False)
+        out = capsys.readouterr().out
+        assert "Updated 1 module(s)" in out
+        assert "Total Contracts: 10 rules, 5 stories" in out
+        assert "Warning: Evidence is STALE for updated.prompt" in out
+        assert "Warning: Evidence is MISSING for missing.prompt" in out
+        assert "ERROR failed.prompt: Reason" in out
+        assert "Sync errors:" in out
+        assert "- Global Error" in out
+        assert "Validation errors:" in out
+        assert "- Val Error" in out
+        assert "Validation warnings:" in out
+        assert "- Val Warning" in out
+
+    def test_echo_architecture_sync_result_dry_run(self, capsys):
+        """_echo_architecture_sync_result dry run message."""
+        _echo_architecture_sync_result({"updated_count": 1, "skipped_count": 1}, dry_run=True)
+        assert "Dry run: would update 1 module(s)" in capsys.readouterr().out

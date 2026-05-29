@@ -1,22 +1,12 @@
-/**
- * PDD Server API Client
- *
- * Communicates with the PDD REST API backend for command execution,
- * file operations, and real-time streaming.
- */
-
 import YAML from 'yaml';
 import type { PddrcConfig } from './types';
 
-// API Configuration
-// In development with Vite proxy, use relative URLs
-// In production or when connecting directly, use the full URL
-const API_BASE_URL = import.meta.env.VITE_API_URL || '';
-const WS_BASE_URL = API_BASE_URL
-  ? API_BASE_URL.replace('http', 'ws')
-  : `ws://${window.location.host}`;
+export const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+export const WS_BASE_URL = API_BASE_URL ? API_BASE_URL.replace('http', 'ws') : `ws://${window.location.host}`;
 
-// Types
+// ----------------------------------------------------------------------------
+// Core server/command/file types
+// ----------------------------------------------------------------------------
 export interface ServerStatus {
   version: string;
   project_root: string;
@@ -38,7 +28,7 @@ export interface JobHandle {
 
 export interface JobResult {
   job_id: string;
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  status: string;
   result: any;
   error: string | null;
   cost: number;
@@ -65,11 +55,11 @@ export interface FileContent {
 }
 
 export interface PromptInfo {
-  prompt: string;           // Full path: "prompts/calculator_python.prompt"
-  sync_basename: string;    // For sync command: "calculator" (without language suffix)
-  language?: string;        // Detected language: "python"
-  context?: string;         // Matched .pddrc context name
-  expected_outputs?: string[];  // e.g., ["code"] for JSON/YAML, ["code","example","test"] for Python
+  prompt: string;
+  sync_basename: string;
+  language?: string;
+  context?: string;
+  expected_outputs?: string[];
   code?: string;
   test?: string;
   example?: string;
@@ -117,7 +107,9 @@ export interface SpawnedJobStatus {
   exit_code?: number;
 }
 
-// Token metrics types
+// ----------------------------------------------------------------------------
+// Prompt metrics/sync/model types
+// ----------------------------------------------------------------------------
 export interface CostEstimate {
   input_cost: number;
   model: string;
@@ -137,7 +129,7 @@ export interface PromptAnalyzeRequest {
   path: string;
   model?: string;
   preprocess?: boolean;
-  content?: string;  // Optional content to analyze instead of reading from file
+  content?: string;
 }
 
 export interface PromptAnalyzeResponse {
@@ -149,7 +141,6 @@ export interface PromptAnalyzeResponse {
   preprocessing_error: string | null;
 }
 
-// Sync status types
 export type SyncStatusType = 'in_sync' | 'prompt_changed' | 'code_changed' | 'conflict' | 'never_synced';
 
 export interface SyncStatus {
@@ -163,17 +154,16 @@ export interface SyncStatus {
   code_exists: boolean;
 }
 
-// Model information types
 export interface ModelInfo {
-  model: string;           // Full model identifier (e.g., "gpt-5.1-codex-mini")
-  provider: string;        // Model provider (e.g., "OpenAI", "Anthropic")
-  input_cost: number;      // Input cost per million tokens (USD)
-  output_cost: number;     // Output cost per million tokens (USD)
-  elo: number;             // Coding arena ELO rating
-  context_limit: number;   // Maximum context window size in tokens
-  max_thinking_tokens: number;  // Maximum thinking/reasoning tokens (0 if not supported)
-  reasoning_type: string;  // "none", "effort", or "budget"
-  structured_output: boolean;  // Whether the model supports structured output
+  model: string;
+  provider: string;
+  input_cost: number;
+  output_cost: number;
+  elo: number;
+  context_limit: number;
+  max_thinking_tokens: number;
+  reasoning_type: string;
+  structured_output: boolean;
 }
 
 export interface ModelsResponse {
@@ -181,7 +171,9 @@ export interface ModelsResponse {
   default_model: string;
 }
 
-// Diff analysis types (detailed prompt-code comparison)
+// ----------------------------------------------------------------------------
+// Prompt-code diff analysis types
+// ----------------------------------------------------------------------------
 export interface PromptRange {
   startLine: number;
   endLine: number;
@@ -201,7 +193,7 @@ export interface DiffSection {
   status: 'matched' | 'partial' | 'missing' | 'extra';
   matchConfidence: number;
   semanticLabel: string;
-  notes: string;  // Required explanation of WHY this status exists
+  notes: string;
 }
 
 export interface LineMapping {
@@ -213,9 +205,9 @@ export interface LineMapping {
 export interface HiddenKnowledge {
   type: 'magic_value' | 'algorithm_choice' | 'edge_case' | 'error_handling' | 'api_contract' | 'optimization' | 'business_logic' | 'assumption';
   location: { startLine: number; endLine: number };
-  description: string;           // What the code knows that the prompt doesn't say
+  description: string;
   regenerationImpact: 'would_differ' | 'would_fail' | 'might_work';
-  suggestedPromptAddition: string;  // What to add to the prompt to capture this
+  suggestedPromptAddition: string;
 }
 
 export interface DiffStats {
@@ -225,27 +217,27 @@ export interface DiffStats {
   totalCodeFeatures: number;
   documentedFeatures: number;
   undocumentedFeatures: number;
-  promptToCodeCoverage: number;  // % of prompt implemented in code
-  codeToPromptCoverage: number;  // % of code documented in prompt
-  hiddenKnowledgeCount: number;  // Number of hidden knowledge items found
-  criticalGaps: number;          // Number of critical gaps that would cause regeneration failure
+  promptToCodeCoverage: number;
+  codeToPromptCoverage: number;
+  hiddenKnowledgeCount: number;
+  criticalGaps: number;
 }
 
 export interface DiffAnalysisResult {
-  overallScore: number;           // Overall regeneration capability score 0-100
-  canRegenerate: boolean;         // Conservative: could this prompt produce working code?
+  overallScore: number;
+  canRegenerate: boolean;
   regenerationRisk: 'low' | 'medium' | 'high' | 'critical';
-  promptToCodeScore: number;      // How well code implements prompt
-  codeToPromptScore: number;      // How well prompt describes code
-  summary: string;                // Summary of regeneration viability
-  sections: DiffSection[];        // Prompt requirements → code mappings
-  codeSections: DiffSection[];    // Code features → prompt mappings
-  hiddenKnowledge: HiddenKnowledge[];  // Undocumented code knowledge
+  promptToCodeScore: number;
+  codeToPromptScore: number;
+  summary: string;
+  sections: DiffSection[];
+  codeSections: DiffSection[];
+  hiddenKnowledge: HiddenKnowledge[];
   lineMappings: LineMapping[];
   stats: DiffStats;
-  missing: string[];              // Requirements in prompt but not in code
-  extra: string[];                // Code features that would be LOST on regeneration
-  suggestions: string[];          // Specific additions to enable regeneration
+  missing: string[];
+  extra: string[];
+  suggestions: string[];
 }
 
 export interface DiffAnalysisRequest {
@@ -253,9 +245,9 @@ export interface DiffAnalysisRequest {
   code_content: string;
   strength?: number;
   mode?: 'quick' | 'detailed';
-  include_tests?: boolean;        // Include test content in analysis
-  prompt_path?: string;           // Prompt path for auto-detecting tests
-  code_path?: string;             // Code path for finding associated tests
+  include_tests?: boolean;
+  prompt_path?: string;
+  code_path?: string;
 }
 
 export interface DiffAnalysisResponse {
@@ -264,11 +256,13 @@ export interface DiffAnalysisResponse {
   model: string;
   analysisMode: string;
   cached: boolean;
-  tests_included: boolean;        // Whether tests were included in analysis
-  test_files: string[];           // Test files included in analysis
+  tests_included: boolean;
+  test_files: string[];
 }
 
-// Prompt Version History types
+// ----------------------------------------------------------------------------
+// Prompt history/diff types
+// ----------------------------------------------------------------------------
 export interface PromptVersionInfo {
   commit_hash: string;
   commit_date: string;
@@ -299,10 +293,10 @@ export interface LinguisticChange {
 
 export interface PromptDiffRequest {
   prompt_path: string;
-  version_a: string;  // commit hash, 'HEAD', or 'working'
+  version_a: string;
   version_b: string;
   code_path?: string;
-  strength?: number;  // Model strength 0-1 for analysis quality
+  strength?: number;
 }
 
 export interface PromptDiffResponse {
@@ -314,12 +308,46 @@ export interface PromptDiffResponse {
   summary: string;
   cost: number;
   model: string;
-  version_a_label: string;  // Label for the older version
-  version_b_label: string;  // Label for the newer version
-  versions_swapped: boolean;  // Whether versions were auto-swapped to ensure old→new
+  version_a_label: string;
+  version_b_label: string;
+  versions_swapped: boolean;
 }
 
-// Architecture types (re-exported for convenience)
+// ----------------------------------------------------------------------------
+// Extracts cache types
+// ----------------------------------------------------------------------------
+export interface ExtractMetadata {
+  cache_key: string;
+  source_path: string;
+  query: string;
+  timestamp: string;
+  source_hash: string;
+  is_fresh: boolean | null;
+}
+
+export interface ExtractContent extends ExtractMetadata {
+  content: string;
+}
+
+export interface ExtractListResponse {
+  extracts: ExtractMetadata[];
+  total: number;
+  stale_count: number;
+}
+
+export interface PromptExtractInfo {
+  include_path: string;
+  query: string;
+  cache_key: string;
+  has_cached_entry: boolean;
+  source_path?: string;
+  timestamp?: string;
+  is_fresh?: boolean | null;
+}
+
+// ----------------------------------------------------------------------------
+// Architecture/auth/remote-generation types
+// ----------------------------------------------------------------------------
 export interface ArchitectureModule {
   reason: string;
   description: string;
@@ -328,17 +356,9 @@ export interface ArchitectureModule {
   filename: string;
   filepath: string;
   tags?: string[];
-  interface?: {
-    type: string;
-    [key: string]: any;
-  };
-  // Graph position (optional, saved when user drags nodes)
-  position?: {
-    x: number;
-    y: number;
-  };
-  // Optional group name for graph layout hierarchy
-  group?: string;
+  interface?: { type: string; [key: string]: any };
+  position?: { x: number; y: number };
+  contract_summary?: any;
 }
 
 export interface ArchitectureCheckResult {
@@ -346,7 +366,6 @@ export interface ArchitectureCheckResult {
   path?: string;
 }
 
-// Architecture validation types
 export interface ArchitectureValidationError {
   type: 'circular_dependency' | 'missing_dependency' | 'invalid_field';
   message: string;
@@ -365,9 +384,8 @@ export interface ArchitectureValidationResult {
   warnings: ArchitectureValidationWarning[];
 }
 
-// Architecture sync types
 export interface ArchitectureSyncRequest {
-  filenames?: string[] | null;  // null = sync all prompts
+  filenames?: string[] | null;
   dry_run?: boolean;
 }
 
@@ -379,6 +397,7 @@ export interface ArchitectureSyncModuleResult {
     reason?: { old: string; new: string };
     interface?: { old: any; new: any };
     dependencies?: { old: string[]; new: string[] };
+    contract_summary?: { old: any; new: any };
   };
   error?: string;
 }
@@ -394,13 +413,12 @@ export interface ArchitectureSyncResult {
 
 export interface GenerateTagsResult {
   success: boolean;
-  tags: string | null;  // Generated XML tags or null if not found
-  has_existing_tags: boolean;  // True if prompt already has PDD tags
-  architecture_entry: Record<string, any> | null;  // The full architecture entry
+  tags: string | null;
+  has_existing_tags: boolean;
+  architecture_entry: Record<string, any> | null;
   error: string | null;
 }
 
-// Auth types
 export interface AuthStatus {
   authenticated: boolean;
   cached: boolean;
@@ -426,7 +444,6 @@ export interface LoginPollResponse {
   message?: string;
 }
 
-// Remote session types
 export interface RemoteSessionInfo {
   sessionId: string;
   cloudUrl: string;
@@ -444,7 +461,7 @@ export interface RemoteSessionInfo {
 
 export interface RemoteCommandRequest {
   sessionId: string;
-  type: string; // "generate", "fix", "test", etc.
+  type: string;
   payload: {
     args?: Record<string, any>;
     options?: Record<string, any>;
@@ -465,25 +482,24 @@ export interface RemoteCommandStatus {
     stderr?: string;
     files_created?: string[];
     cost?: number;
-    streaming?: boolean;  // True when this is a streaming update (intermediate output)
+    streaming?: boolean;
     error?: string;
   };
 }
 
-// Global options that can be passed to any generation command
 export interface GenerationGlobalOptions {
-  strength?: number;      // 0-1, model strength
-  temperature?: number;   // 0-2, LLM creativity
-  time?: number;          // 0-1, reasoning allocation
+  strength?: number;
+  temperature?: number;
+  time?: number;
   verbose?: boolean;
   quiet?: boolean;
   force?: boolean;
-  local?: boolean;        // Run locally instead of cloud
+  local?: boolean;
 }
 
 export interface GenerateArchitectureRequest {
-  prdPath?: string;        // Path to existing PRD file
-  prdContent?: string;     // Or provide content directly
+  prdPath?: string;
+  prdContent?: string;
   techStackPath?: string;
   techStackContent?: string;
   appName?: string;
@@ -491,14 +507,13 @@ export interface GenerateArchitectureRequest {
   globalOptions?: GenerationGlobalOptions;
 }
 
-// Generate prompt from architecture types
 export interface GeneratePromptFromArchRequest {
-  module: string;           // e.g., "orders"
-  langOrFramework: string;  // e.g., "Python"
-  architectureFile?: string; // default: "architecture.json"
-  prdFile?: string;         // optional PRD for context
-  techStackFile?: string;   // optional tech stack
-  outputPath?: string;      // default: prompts/${module}_${lang}.prompt
+  module: string;
+  langOrFramework: string;
+  architectureFile?: string;
+  prdFile?: string;
+  techStackFile?: string;
+  outputPath?: string;
   globalOptions?: GenerationGlobalOptions;
 }
 
@@ -516,88 +531,56 @@ export interface PromptGenerationResult {
   error?: string;
 }
 
-// Extract cache types
-export interface ExtractMetadata {
-  cache_key: string;
-  source_path: string;
-  query: string;
-  timestamp: string | null;
-  source_hash: string | null;
-  is_fresh: boolean | null;
-}
-
-export interface ExtractContent extends ExtractMetadata {
-  content: string;
-}
-
-export interface ExtractListResponse {
-  extracts: ExtractMetadata[];
-  total: number;
-  stale_count: number;
-}
-
-export interface PruneResponse {
-  deleted_count: number;
-  orphaned_keys: string[];
-  message: string;
-}
-
-export interface PromptExtractInfo {
-  include_path: string;
-  query: string;
-  cache_key: string;
-  has_cached_entry: boolean;
-  source_path?: string;
-  timestamp?: string;
-  is_fresh?: boolean | null;
-}
-
-// API Client
+// ----------------------------------------------------------------------------
+// PDDApiClient implementation
+// ----------------------------------------------------------------------------
 class PDDApiClient {
   private baseUrl: string;
   private wsBaseUrl: string;
   private cachedCloudUrl: string | null = null;
 
-  constructor(baseUrl: string = API_BASE_URL) {
-    this.baseUrl = baseUrl;
-    this.wsBaseUrl = baseUrl.replace('http', 'ws');
+  constructor() {
+    this.baseUrl = API_BASE_URL;
+    this.wsBaseUrl = WS_BASE_URL;
   }
 
-  // Helper for fetch requests
   private async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
-    const response = await fetch(`${this.baseUrl}${endpoint}`, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options?.headers,
-      },
-    });
+    const url = `${this.baseUrl}${endpoint}`;
+    const headers = {
+      'Content-Type': 'application/json',
+      ...options?.headers,
+    };
+
+    const response = await fetch(url, { ...options, headers });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: response.statusText }));
-      throw new Error(error.detail || `API Error: ${response.status}`);
+      let detail = response.statusText;
+      try {
+        const errJson = await response.json();
+        if (errJson.detail) detail = errJson.detail;
+      } catch (e) {
+        // Ignore JSON parse error
+      }
+      throw new Error(detail || `API Error: ${response.status}`);
     }
 
     return response.json();
   }
 
-  // Status
+  // Local server endpoints
   async getStatus(): Promise<ServerStatus> {
     return this.request<ServerStatus>('/api/v1/status');
   }
 
-  // Auth
   async getAuthStatus(): Promise<AuthStatus> {
     return this.request<AuthStatus>('/api/v1/auth/status');
   }
 
   async logout(): Promise<LogoutResult> {
-    return this.request<LogoutResult>('/api/v1/auth/logout', {
-      method: 'POST',
-    });
+    return this.request<LogoutResult>('/api/v1/auth/logout', { method: 'POST' });
   }
 
-  async startLogin(options?: { no_browser?: boolean }): Promise<LoginResponse> {
+  async startLogin(options?: Record<string, any>): Promise<LoginResponse> {
     return this.request<LoginResponse>('/api/v1/auth/login', {
       method: 'POST',
       body: JSON.stringify(options || {}),
@@ -608,7 +591,6 @@ class PDDApiClient {
     return this.request<LoginPollResponse>(`/api/v1/auth/login/poll/${encodeURIComponent(pollId)}`);
   }
 
-  // Commands
   async getAvailableCommands(): Promise<CommandInfo[]> {
     return this.request<CommandInfo[]>('/api/v1/commands/available');
   }
@@ -620,11 +602,6 @@ class PDDApiClient {
     });
   }
 
-  /**
-   * Run a command in terminal mode.
-   * Output goes directly to the terminal where the server is running.
-   * This method blocks until the command completes.
-   */
   async runCommand(request: CommandRequest): Promise<RunResult> {
     return this.request<RunResult>('/api/v1/commands/run', {
       method: 'POST',
@@ -632,40 +609,26 @@ class PDDApiClient {
     });
   }
 
-  /**
-   * Cancel the currently running command.
-   */
   async cancelCommand(): Promise<CancelResult> {
-    return this.request<CancelResult>('/api/v1/commands/cancel', {
-      method: 'POST',
-    });
+    return this.request<CancelResult>('/api/v1/commands/cancel', { method: 'POST' });
   }
 
-  /**
-   * Get the status of the current running command.
-   */
   async getCommandStatus(): Promise<CommandStatus> {
     return this.request<CommandStatus>('/api/v1/commands/status');
   }
 
   async getJobStatus(jobId: string): Promise<JobResult> {
-    return this.request<JobResult>(`/api/v1/commands/jobs/${jobId}`);
+    return this.request<JobResult>(`/api/v1/commands/jobs/${encodeURIComponent(jobId)}`);
   }
 
-  async cancelJob(jobId: string): Promise<{ cancelled: boolean; message: string }> {
-    return this.request(`/api/v1/commands/jobs/${jobId}/cancel`, {
-      method: 'POST',
-    });
+  async cancelJob(jobId: string): Promise<CancelResult> {
+    return this.request<CancelResult>(`/api/v1/commands/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' });
   }
 
-  async getJobHistory(limit: number = 50, offset: number = 0): Promise<JobResult[]> {
+  async getJobHistory(limit = 50, offset = 0): Promise<JobResult[]> {
     return this.request<JobResult[]>(`/api/v1/commands/history?limit=${limit}&offset=${offset}`);
   }
 
-  /**
-   * Spawn a command in a new terminal window.
-   * The command runs in complete isolation from the server.
-   */
   async spawnTerminal(request: CommandRequest): Promise<SpawnTerminalResponse> {
     return this.request<SpawnTerminalResponse>('/api/v1/commands/spawn-terminal', {
       method: 'POST',
@@ -673,37 +636,139 @@ class PDDApiClient {
     });
   }
 
-  /**
-   * Get the status of a spawned job.
-   * Used for polling to check if spawned terminal commands have completed.
-   */
   async getSpawnedJobStatus(jobId: string): Promise<SpawnedJobStatus> {
-    return this.request<SpawnedJobStatus>(`/api/v1/commands/spawned-jobs/${jobId}/status`);
+    return this.request<SpawnedJobStatus>(`/api/v1/commands/spawned-jobs/${encodeURIComponent(jobId)}/status`);
   }
 
-  // Files
-  async getFileTree(path: string = '', depth: number = 3): Promise<FileTreeNode> {
+  async getFileTree(path = '', depth = 3): Promise<FileTreeNode> {
     const params = new URLSearchParams();
-    if (path) params.set('path', path);
-    params.set('depth', depth.toString());
-    return this.request<FileTreeNode>(`/api/v1/files/tree?${params}`);
+    if (path) params.append('path', path);
+    params.append('depth', depth.toString());
+    return this.request<FileTreeNode>(`/api/v1/files/tree?${params.toString()}`);
   }
 
   async getFileContent(path: string): Promise<FileContent> {
     return this.request<FileContent>(`/api/v1/files/content?path=${encodeURIComponent(path)}`);
   }
 
-  async writeFile(path: string, content: string, encoding: 'utf-8' | 'base64' = 'utf-8'): Promise<{ success: boolean; path: string; mtime?: string; error?: string }> {
-    return this.request('/api/v1/files/write', {
+  async writeFile(path: string, content: string, encoding: 'utf-8' | 'base64' = 'utf-8'): Promise<{ success: boolean }> {
+    return this.request<{ success: boolean }>('/api/v1/files/write', {
       method: 'POST',
       body: JSON.stringify({ path, content, encoding }),
     });
   }
 
-  /**
-   * Read .pddrc configuration file.
-   * Returns null if file doesn't exist.
-   */
+  async listPrompts(): Promise<PromptInfo[]> {
+    return this.request<PromptInfo[]>('/api/v1/files/prompts');
+  }
+
+  async getChangedPrompts(baseBranch = 'main'): Promise<PromptInfo[]> {
+    return this.request<PromptInfo[]>(`/api/v1/files/prompts/changed?base_branch=${encodeURIComponent(baseBranch)}`);
+  }
+
+  async analyzePrompt(request: PromptAnalyzeRequest): Promise<PromptAnalyzeResponse> {
+    return this.request<PromptAnalyzeResponse>('/api/v1/prompts/analyze', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  async getSyncStatus(basename: string, language: string): Promise<SyncStatus> {
+    const params = new URLSearchParams({ basename, language });
+    return this.request<SyncStatus>(`/api/v1/prompts/sync-status?${params.toString()}`);
+  }
+
+  async getModels(): Promise<ModelsResponse> {
+    return this.request<ModelsResponse>('/api/v1/prompts/models');
+  }
+
+  async analyzeDiff(request: DiffAnalysisRequest): Promise<DiffAnalysisResponse> {
+    return this.request<DiffAnalysisResponse>('/api/v1/prompts/diff-analysis', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  async getPromptHistory(request: PromptHistoryRequest): Promise<PromptHistoryResponse> {
+    return this.request<PromptHistoryResponse>('/api/v1/prompts/git-history', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  async getPromptDiff(request: PromptDiffRequest): Promise<PromptDiffResponse> {
+    return this.request<PromptDiffResponse>('/api/v1/prompts/prompt-diff', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  async validateArchitecture(modules: ArchitectureModule[]): Promise<ArchitectureValidationResult> {
+    return this.request<ArchitectureValidationResult>('/api/v1/architecture/validate', {
+      method: 'POST',
+      body: JSON.stringify({ modules }),
+    });
+  }
+
+  async syncArchitectureFromPrompts(request: ArchitectureSyncRequest = {}): Promise<ArchitectureSyncResult> {
+    return this.request<ArchitectureSyncResult>('/api/v1/architecture/sync-from-prompts', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  async generateTagsForPrompt(promptFilename: string): Promise<GenerateTagsResult> {
+    return this.request<GenerateTagsResult>('/api/v1/architecture/generate-tags-for-prompt', {
+      method: 'POST',
+      body: JSON.stringify({ prompt_filename: promptFilename }),
+    });
+  }
+
+  async rearrangeGraphLayout(architecturePath = 'architecture.json'): Promise<{ success: boolean; updated: boolean }> {
+    return this.request<{ success: boolean; updated: boolean }>('/api/v1/architecture/rearrange', {
+      method: 'POST',
+      body: JSON.stringify({ architecture_path: architecturePath }),
+    });
+  }
+
+  async generateArchitectureFromIssue(issueUrl: string, options: { verbose?: boolean; quiet?: boolean } = {}): Promise<JobHandle> {
+    return this.request<JobHandle>('/api/v1/architecture/generate-from-issue', {
+      method: 'POST',
+      body: JSON.stringify({ issue_url: issueUrl, verbose: options.verbose ?? false, quiet: options.quiet ?? false }),
+    });
+  }
+
+  async getJWTToken(): Promise<string | null> {
+    try {
+      const res = await this.request<{ jwt: string }>('/api/v1/auth/jwt-token');
+      return res.jwt;
+    } catch {
+      return null;
+    }
+  }
+
+  async fetchCloudUrl(): Promise<{ cloud_url: string }> {
+    try {
+      return await this.request<{ cloud_url: string }>('/api/v1/config/cloud-url');
+    } catch (e) {
+      console.warn('Failed to fetch cloud URL, falling back', e);
+      return { cloud_url: import.meta.env.VITE_CLOUD_URL || 'https://us-central1-prompt-driven-development.cloudfunctions.net' };
+    }
+  }
+
+  async listExtracts(checkFreshness = true): Promise<ExtractListResponse> {
+    return this.request<ExtractListResponse>(`/api/v1/extracts?check_freshness=${checkFreshness}`);
+  }
+
+  async getExtract(cacheKey: string): Promise<ExtractContent> {
+    return this.request<ExtractContent>(`/api/v1/extracts/${encodeURIComponent(cacheKey)}`);
+  }
+
+  async getExtractsForPrompt(promptPath: string): Promise<PromptExtractInfo[]> {
+    return this.request<PromptExtractInfo[]>(`/api/v1/extracts/for-prompt?prompt_path=${encodeURIComponent(promptPath)}`);
+  }
+
+  // Config/analysis helpers
   async getPddrc(): Promise<PddrcConfig | null> {
     try {
       const content = await this.getFileContent('.pddrc');
@@ -713,129 +778,19 @@ class PDDApiClient {
     }
   }
 
-  /**
-   * Save .pddrc configuration file.
-   */
-  async savePddrc(config: PddrcConfig): Promise<{ success: boolean; error?: string }> {
+  async savePddrc(config: PddrcConfig): Promise<void> {
     const yamlContent = YAML.stringify(config);
-    return this.writeFile('.pddrc', yamlContent);
+    await this.writeFile('.pddrc', yamlContent);
   }
 
-  // List all prompt files in the project with related dev-unit files
-  async listPrompts(): Promise<PromptInfo[]> {
-    return this.request<PromptInfo[]>('/api/v1/files/prompts');
-  }
-
-  /**
-   * Get list of prompt files changed on the current branch compared to base.
-   * Uses git diff to find .prompt files that are new or modified.
-   *
-   * @param baseBranch - Base branch to compare against (default: "main")
-   * @returns List of changed prompt file paths
-   */
-  async getChangedPrompts(baseBranch: string = 'main'): Promise<{ changed_prompts: string[]; base_branch: string }> {
-    return this.request<{ changed_prompts: string[]; base_branch: string }>(
-      `/api/v1/files/prompts/changed?base_branch=${encodeURIComponent(baseBranch)}`
-    );
-  }
-
-  /**
-   * Analyze a prompt file: get preprocessed content and token metrics.
-   * Does not execute any commands - purely for preview and cost estimation.
-   */
-  async analyzePrompt(request: PromptAnalyzeRequest): Promise<PromptAnalyzeResponse> {
-    return this.request<PromptAnalyzeResponse>('/api/v1/prompts/analyze', {
-      method: 'POST',
-      body: JSON.stringify(request),
-    });
-  }
-
-  /**
-   * Analyze a single file for token metrics.
-   * Convenience method for analyzing include files without preprocessing.
-   */
   async analyzeFile(path: string, model?: string): Promise<TokenMetrics> {
-    const response = await this.analyzePrompt({
-      path,
-      model: model || 'claude-sonnet-4-20250514',
-      preprocess: false,  // Don't preprocess - just count tokens in the raw file
-    });
-    return response.raw_metrics;
+    const res = await this.analyzePrompt({ path, model: model || 'claude-sonnet-4-20250514', preprocess: false });
+    return res.raw_metrics;
   }
 
-  /**
-   * Get the sync status for a prompt/code pair.
-   * Returns whether the prompt and code are in sync, or if either has been modified.
-   */
-  async getSyncStatus(basename: string, language: string): Promise<SyncStatus> {
-    return this.request<SyncStatus>(
-      `/api/v1/prompts/sync-status?basename=${encodeURIComponent(basename)}&language=${encodeURIComponent(language)}`
-    );
-  }
-
-  /**
-   * Get list of available LLM models with their capabilities.
-   * Returns model information including context limits, pricing, and thinking capacity.
-   */
-  async getModels(): Promise<ModelsResponse> {
-    return this.request<ModelsResponse>('/api/v1/prompts/models');
-  }
-
-  /**
-   * Perform detailed diff analysis between prompt and code.
-   * Returns semantic sections with line-level mappings showing how each
-   * requirement in the prompt corresponds to code implementation.
-   *
-   * @param request.prompt_content - The prompt/requirements content
-   * @param request.code_content - The code content to analyze
-   * @param request.strength - Model strength (0-1), default 0.5
-   * @param request.mode - Analysis mode: 'quick' (faster) or 'detailed' (more accurate)
-   */
-  async analyzeDiff(request: DiffAnalysisRequest): Promise<DiffAnalysisResponse> {
-    return this.request<DiffAnalysisResponse>('/api/v1/prompts/diff-analysis', {
-      method: 'POST',
-      body: JSON.stringify(request),
-    });
-  }
-
-  /**
-   * Get git history for a prompt file.
-   * Returns a list of versions with their content and commit info.
-   *
-   * @param request.prompt_path - Path to the prompt file
-   * @param request.limit - Maximum number of versions to retrieve (default 10)
-   */
-  async getPromptHistory(request: PromptHistoryRequest): Promise<PromptHistoryResponse> {
-    return this.request<PromptHistoryResponse>('/api/v1/prompts/git-history', {
-      method: 'POST',
-      body: JSON.stringify(request),
-    });
-  }
-
-  /**
-   * Compare two prompt versions with LLM-powered linguistic analysis.
-   * Analyzes semantic differences and categorizes changes by type and impact.
-   *
-   * @param request.prompt_path - Path to the prompt file
-   * @param request.version_a - First version: commit hash, 'HEAD', or 'working'
-   * @param request.version_b - Second version: commit hash, 'HEAD', or 'working'
-   * @param request.code_path - Optional code path for related code diff
-   */
-  async getPromptDiff(request: PromptDiffRequest): Promise<PromptDiffResponse> {
-    return this.request<PromptDiffResponse>('/api/v1/prompts/prompt-diff', {
-      method: 'POST',
-      body: JSON.stringify(request),
-    });
-  }
-
-  // Architecture operations
-
-  /**
-   * Check if architecture.json exists in the project.
-   */
+  // Architecture-file helpers
   async checkArchitectureExists(): Promise<ArchitectureCheckResult> {
     try {
-      // Try to get the file content - if it exists, return true
       await this.getFileContent('architecture.json');
       return { exists: true, path: 'architecture.json' };
     } catch {
@@ -843,589 +798,254 @@ class PDDApiClient {
     }
   }
 
-  /**
-   * Load architecture.json from the project.
-   * Returns the array of architecture modules.
-   */
   async getArchitecture(): Promise<ArchitectureModule[]> {
     const content = await this.getFileContent('architecture.json');
     return JSON.parse(content.content) as ArchitectureModule[];
   }
 
-  /**
-   * Save architecture.json to the project.
-   * Writes the array of architecture modules as formatted JSON.
-   */
-  async saveArchitecture(modules: ArchitectureModule[]): Promise<{ success: boolean; path: string; error?: string }> {
-    const content = JSON.stringify(modules, null, 2);
-    return this.writeFile('architecture.json', content);
+  async saveArchitecture(modules: ArchitectureModule[]): Promise<void> {
+    await this.writeFile('architecture.json', JSON.stringify(modules, null, 2));
   }
 
-  /**
-   * Validate architecture for structural issues.
-   * Returns validation result with errors and warnings.
-   * Errors block saving, warnings are informational.
-   */
-  async validateArchitecture(modules: ArchitectureModule[]): Promise<ArchitectureValidationResult> {
-    return this.request<ArchitectureValidationResult>('/api/v1/architecture/validate', {
-      method: 'POST',
-      body: JSON.stringify({ modules }),
-    });
-  }
-
-  /**
-   * Sync architecture.json from prompt file metadata tags.
-   * Reads <pdd-reason>, <pdd-interface>, <pdd-dependency> tags from prompts
-   * and updates the corresponding architecture.json entries.
-   *
-   * @param request - Sync request with optional filenames and dry_run flag
-   * @returns Sync result with updated modules and validation status
-   */
-  async syncArchitectureFromPrompts(request: ArchitectureSyncRequest = {}): Promise<ArchitectureSyncResult> {
-    return this.request<ArchitectureSyncResult>('/api/v1/architecture/sync-from-prompts', {
-      method: 'POST',
-      body: JSON.stringify(request),
-    });
-  }
-
-  /**
-   * Generate PDD metadata tags for a prompt from architecture.json.
-   * This is the reverse direction: architecture.json -> prompt tags.
-   *
-   * @param promptFilename - The prompt filename (e.g., "llm_invoke_python.prompt")
-   * @returns Generated tags and architecture entry info
-   */
-  async generateTagsForPrompt(promptFilename: string): Promise<GenerateTagsResult> {
-    return this.request<GenerateTagsResult>('/api/v1/architecture/generate-tags-for-prompt', {
-      method: 'POST',
-      body: JSON.stringify({ prompt_filename: promptFilename }),
-    });
-  }
-
-  /**
-   * Re-arrange graph positions using the agentic swimlane layout algorithm.
-   * The agent reads the specified architecture file and any PRD from the project root,
-   * reasons about the architecture's logical structure, and writes updated positions in-place.
-   *
-   * @param architecturePath - Relative path to the architecture file (e.g. 'architecture.json')
-   * Note: This call may take 30–120 seconds while the agent runs.
-   */
-  async rearrangeGraphLayout(
-    architecturePath: string = 'architecture.json'
-  ): Promise<{
-    success: boolean;
-    modules?: ArchitectureModule[];
-    message?: string;
-    error?: string;
-  }> {
-    return this.request<{
-      success: boolean;
-      modules?: ArchitectureModule[];
-      message?: string;
-      error?: string;
-    }>('/api/v1/architecture/rearrange', {
-      method: 'POST',
-      body: JSON.stringify({ architecture_path: architecturePath }),
-    });
-  }
-
-  /**
-   * Generate architecture from a GitHub issue URL.
-   * Spawns the agentic architecture workflow in a terminal.
-   *
-   * @param issueUrl - GitHub issue URL (e.g., https://github.com/owner/repo/issues/42)
-   * @param options - Optional verbose/quiet flags
-   * @returns Result with job_id for tracking the spawned process
-   */
-  async generateArchitectureFromIssue(
-    issueUrl: string,
-    options: { verbose?: boolean; quiet?: boolean } = {}
-  ): Promise<{ success: boolean; message: string; job_id?: string }> {
-    return this.request<{ success: boolean; message: string; job_id?: string }>(
-      '/api/v1/architecture/generate-from-issue',
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          issue_url: issueUrl,
-          verbose: options.verbose ?? false,
-          quiet: options.quiet ?? false,
-        }),
-      }
-    );
-  }
-
-  /**
-   * List markdown files in the project for PRD/tech stack browser.
-   * Searches common documentation directories.
-   */
   async listMarkdownFiles(): Promise<string[]> {
-    const files: string[] = [];
-
-    // Get file tree and find .md files
+    const results: string[] = [];
     try {
       const tree = await this.getFileTree('', 4);
-      const collectMdFiles = (node: FileTreeNode, currentPath: string = '') => {
-        const path = currentPath ? `${currentPath}/${node.name}` : node.name;
+      const walk = (node: FileTreeNode) => {
         if (node.type === 'file' && node.name.endsWith('.md')) {
-          files.push(path);
+          results.push(node.path);
         }
         if (node.children) {
-          for (const child of node.children) {
-            collectMdFiles(child, path);
-          }
+          node.children.forEach(walk);
         }
       };
-      collectMdFiles(tree);
+      walk(tree);
     } catch (e) {
       console.error('Failed to list markdown files:', e);
     }
-
-    return files;
-  }
-
-  /**
-   * Generate architecture.json from a PRD using the built-in template.
-   * This runs the pdd generate command with the architecture template.
-   */
-  async generateArchitecture(request: GenerateArchitectureRequest): Promise<RunResult> {
-    const env: Record<string, string> = {};
-
-    // Set PRD file/content
-    if (request.prdPath) {
-      env['PRD_FILE'] = request.prdPath;
-    } else if (request.prdContent) {
-      // Write content to a temp file first
-      const tempPath = '.pdd/temp_prd.md';
-      await this.writeFile(tempPath, request.prdContent);
-      env['PRD_FILE'] = tempPath;
-    }
-
-    // Set tech stack if provided
-    if (request.techStackPath) {
-      env['TECH_STACK_FILE'] = request.techStackPath;
-    } else if (request.techStackContent) {
-      const tempPath = '.pdd/temp_tech_stack.md';
-      await this.writeFile(tempPath, request.techStackContent);
-      env['TECH_STACK_FILE'] = tempPath;
-    }
-
-    // Set app name if provided
-    if (request.appName) {
-      env['APP_NAME'] = request.appName;
-    }
-
-    // Set output path
-    const outputPath = request.outputPath || 'architecture.json';
-
-    // Build env as array of "KEY=VALUE" strings for --env flag
-    // The CLI expects: --env PRD_FILE=path --env APP_NAME=name (or -e shorthand)
-    const envArgs: string[] = [];
-    for (const [key, value] of Object.entries(env)) {
-      envArgs.push(`${key}=${value}`);
-    }
-
-    // Build options object with global options
-    const options: Record<string, any> = {
-      output: outputPath,
-      template: 'architecture/architecture_json',
-      env: envArgs,  // Array of "KEY=VALUE" strings for --env flag
-    };
-
-    // Add global options if provided
-    if (request.globalOptions) {
-      const { strength, temperature, time, verbose, quiet, force } = request.globalOptions;
-      if (strength !== undefined) options.strength = strength;
-      if (temperature !== undefined) options.temperature = temperature;
-      if (time !== undefined) options.time = time;
-      if (verbose) options.verbose = true;
-      if (quiet) options.quiet = true;
-      if (force) options.force = true;
-    }
-
-    // Run the generate command with the architecture template
-    // Note: When using --template, do NOT provide prompt_file (they are mutually exclusive)
-    return this.runCommand({
-      command: 'generate',
-      args: {},  // No prompt_file when using template
-      options,
-    });
-  }
-
-  /**
-   * Generate .pddrc configuration file from architecture.json using the generic/generate_pddrc template.
-   * This should be called before generating prompts to ensure correct context detection.
-   */
-  async generatePddrcFromArchitecture(request: {
-    architectureFile?: string;
-    outputPath?: string;
-    globalOptions?: GenerationGlobalOptions;
-  }): Promise<RunResult> {
-    const { architectureFile, outputPath, globalOptions } = request;
-
-    const envArgs: string[] = [
-      `ARCHITECTURE_FILE=${architectureFile || 'architecture.json'}`,
-    ];
-
-    const options: Record<string, any> = {
-      template: 'generic/generate_pddrc',
-      env: envArgs,
-      output: outputPath || '.pddrc',
-    };
-
-    if (globalOptions) {
-      const { strength, temperature, time, verbose, quiet, force } = globalOptions;
-      if (strength !== undefined) options.strength = strength;
-      if (temperature !== undefined) options.temperature = temperature;
-      if (time !== undefined) options.time = time;
-      if (verbose) options.verbose = true;
-      if (quiet) options.quiet = true;
-      if (force) options.force = true;
-    }
-
-    return this.runCommand({
-      command: 'generate',
-      args: {},
-      options,
-    });
-  }
-
-  /**
-   * Generate a single prompt file from architecture.json using the generic/generate_prompt template.
-   */
-  async generatePromptFromArchitecture(request: GeneratePromptFromArchRequest): Promise<RunResult> {
-    const { module, langOrFramework, architectureFile, prdFile, techStackFile, outputPath, globalOptions } = request;
-
-    const envArgs: string[] = [
-      `MODULE=${module}`,
-      `LANG_OR_FRAMEWORK=${langOrFramework}`,
-      `ARCHITECTURE_FILE=${architectureFile || 'architecture.json'}`,
-    ];
-
-    if (prdFile) envArgs.push(`PRD_FILE=${prdFile}`);
-    if (techStackFile) envArgs.push(`TECH_STACK_FILE=${techStackFile}`);
-
-    // Build options object with global options
-    const options: Record<string, any> = {
-      template: 'generic/generate_prompt',
-      env: envArgs,
-      output: outputPath || `prompts/${module}_${langOrFramework}.prompt`,
-    };
-
-    // Add global options if provided
-    if (globalOptions) {
-      const { strength, temperature, time, verbose, quiet, force } = globalOptions;
-      if (strength !== undefined) options.strength = strength;
-      if (temperature !== undefined) options.temperature = temperature;
-      if (time !== undefined) options.time = time;
-      if (verbose) options.verbose = true;
-      if (quiet) options.quiet = true;
-      if (force) options.force = true;
-    }
-
-    return this.runCommand({
-      command: 'generate',
-      args: {},
-      options,
-    });
-  }
-
-  /**
-   * Generate multiple prompts sequentially from architecture.json.
-   * Calls generatePromptFromArchitecture for each module and reports progress.
-   * Can be cancelled via shouldCancel callback.
-   */
-  async batchGeneratePrompts(
-    request: BatchGeneratePromptsRequest,
-    onProgress?: (current: number, total: number, module: string) => void,
-    shouldCancel?: () => boolean
-  ): Promise<PromptGenerationResult[]> {
-    const results: PromptGenerationResult[] = [];
-    const { modules, architectureFile, prdFile, techStackFile, globalOptions } = request;
-
-    for (let i = 0; i < modules.length; i++) {
-      // Check for cancellation before each module
-      if (shouldCancel?.()) {
-        break;
-      }
-
-      const { module, langOrFramework } = modules[i];
-      onProgress?.(i + 1, modules.length, module);
-
-      try {
-        const result = await this.generatePromptFromArchitecture({
-          module,
-          langOrFramework,
-          architectureFile,
-          prdFile,
-          techStackFile,
-          globalOptions,
-        });
-        results.push({
-          module: `${module}_${langOrFramework}`,
-          success: result.success,
-          error: result.success ? undefined : result.message,
-        });
-      } catch (e) {
-        results.push({
-          module: `${module}_${langOrFramework}`,
-          success: false,
-          error: e instanceof Error ? e.message : String(e),
-        });
-      }
-    }
-
     return results;
   }
 
-  // Remote session operations
-
-  /**
-   * Get JWT token from local cache.
-   * Returns null if not authenticated.
-   */
-  private async getJWTToken(): Promise<string | null> {
-    try {
-      // Call local server to get JWT token from cache
-      const response = await this.request<{ jwt: string | null }>('/api/v1/auth/jwt-token');
-      return response.jwt;
-    } catch {
-      return null;
+  // Generation workflow helpers
+  async generateArchitecture(request: GenerateArchitectureRequest): Promise<RunResult> {
+    const env: Record<string, string> = {};
+    if (request.appName) env['APP_NAME'] = request.appName;
+    
+    if (request.prdContent) {
+      await this.writeFile('.pdd/temp_prd.md', request.prdContent);
+      env['PRD_FILE'] = '.pdd/temp_prd.md';
+    } else if (request.prdPath) {
+      env['PRD_FILE'] = request.prdPath;
     }
+    
+    if (request.techStackContent) {
+      await this.writeFile('.pdd/temp_tech_stack.md', request.techStackContent);
+      env['TECH_STACK_FILE'] = '.pdd/temp_tech_stack.md';
+    } else if (request.techStackPath) {
+      env['TECH_STACK_FILE'] = request.techStackPath;
+    }
+
+    const envArgs = Object.entries(env).map(([k, v]) => `${k}=${v}`);
+    const options: Record<string, any> = {
+      output: request.outputPath || 'architecture.json',
+      template: 'architecture/architecture_json',
+      env: envArgs
+    };
+
+    if (request.globalOptions) {
+      if (request.globalOptions.strength !== undefined) options['strength'] = request.globalOptions.strength;
+      if (request.globalOptions.temperature !== undefined) options['temperature'] = request.globalOptions.temperature;
+      if (request.globalOptions.time !== undefined) options['time'] = request.globalOptions.time;
+      if (request.globalOptions.verbose !== undefined) options['verbose'] = request.globalOptions.verbose;
+      if (request.globalOptions.quiet !== undefined) options['quiet'] = request.globalOptions.quiet;
+      if (request.globalOptions.force !== undefined) options['force'] = request.globalOptions.force;
+    }
+
+    return this.runCommand({ command: 'generate', args: {}, options });
   }
 
-  /**
-   * Fetch cloud functions URL from server config.
-   * This ensures frontend uses the same cloud URL as CLI.
-   */
-  private async fetchCloudUrl(): Promise<string> {
-    try {
-      const response = await this.request<{ cloud_url: string; environment: string }>('/api/v1/config/cloud-url');
-      return response.cloud_url;
-    } catch (error) {
-      console.warn('Failed to fetch cloud URL from server, using default:', error);
-      // Fallback to environment variable or staging default
-      return import.meta.env.VITE_CLOUD_URL || 'https://us-central1-prompt-driven-development.cloudfunctions.net';
+  async generatePddrcFromArchitecture(request: { architectureFile?: string; outputPath?: string; globalOptions?: GenerationGlobalOptions }): Promise<RunResult> {
+    const envArgs = [`ARCHITECTURE_FILE=${request.architectureFile || 'architecture.json'}`];
+    const options: Record<string, any> = {
+      output: request.outputPath || '.pddrc',
+      template: 'generic/generate_pddrc',
+      env: envArgs
+    };
+
+    if (request.globalOptions) {
+      if (request.globalOptions.strength !== undefined) options['strength'] = request.globalOptions.strength;
+      if (request.globalOptions.temperature !== undefined) options['temperature'] = request.globalOptions.temperature;
+      if (request.globalOptions.time !== undefined) options['time'] = request.globalOptions.time;
+      if (request.globalOptions.verbose !== undefined) options['verbose'] = request.globalOptions.verbose;
+      if (request.globalOptions.quiet !== undefined) options['quiet'] = request.globalOptions.quiet;
+      if (request.globalOptions.force !== undefined) options['force'] = request.globalOptions.force;
     }
+
+    return this.runCommand({ command: 'generate', args: {}, options });
   }
 
-  /**
-   * Get cloud functions URL (cached or fetch from server).
-   */
-  private async getCloudUrl(): Promise<string> {
+  async generatePromptFromArchitecture(request: GeneratePromptFromArchRequest): Promise<RunResult> {
+    const envArgs = [
+      `MODULE=${request.module}`,
+      `LANG_OR_FRAMEWORK=${request.langOrFramework}`,
+      `ARCHITECTURE_FILE=${request.architectureFile || 'architecture.json'}`
+    ];
+    if (request.prdFile) envArgs.push(`PRD_FILE=${request.prdFile}`);
+    if (request.techStackFile) envArgs.push(`TECH_STACK_FILE=${request.techStackFile}`);
+
+    const options: Record<string, any> = {
+      output: request.outputPath || `prompts/${request.module}_${request.langOrFramework}.prompt`,
+      template: 'generic/generate_prompt',
+      env: envArgs
+    };
+
+    if (request.globalOptions) {
+      if (request.globalOptions.strength !== undefined) options['strength'] = request.globalOptions.strength;
+      if (request.globalOptions.temperature !== undefined) options['temperature'] = request.globalOptions.temperature;
+      if (request.globalOptions.time !== undefined) options['time'] = request.globalOptions.time;
+      if (request.globalOptions.verbose !== undefined) options['verbose'] = request.globalOptions.verbose;
+      if (request.globalOptions.quiet !== undefined) options['quiet'] = request.globalOptions.quiet;
+      if (request.globalOptions.force !== undefined) options['force'] = request.globalOptions.force;
+    }
+
+    return this.runCommand({ command: 'generate', args: {}, options });
+  }
+
+  async batchGeneratePrompts(
+    request: BatchGeneratePromptsRequest,
+    onProgress?: (current: number, total: number, moduleName: string) => void,
+    shouldCancel?: () => boolean
+  ): Promise<PromptGenerationResult[]> {
+    const results: PromptGenerationResult[] = [];
+    const total = request.modules.length;
+    
+    for (let i = 0; i < total; i++) {
+      if (shouldCancel?.()) break;
+      const mod = request.modules[i];
+      onProgress?.(i + 1, total, mod.module);
+      try {
+        const res = await this.generatePromptFromArchitecture({
+          module: mod.module,
+          langOrFramework: mod.langOrFramework,
+          architectureFile: request.architectureFile,
+          prdFile: request.prdFile,
+          techStackFile: request.techStackFile,
+          globalOptions: request.globalOptions
+        });
+        results.push({ module: `${mod.module}_${mod.langOrFramework}`, success: res.success, error: res.success ? undefined : res.message });
+      } catch (e: any) {
+        results.push({ module: `${mod.module}_${mod.langOrFramework}`, success: false, error: e.message || String(e) });
+      }
+    }
+    return results;
+  }
+
+  // Remote cloud session behavior
+  async getCloudUrl(): Promise<string> {
     if (!this.cachedCloudUrl) {
-      this.cachedCloudUrl = await this.fetchCloudUrl();
+      const { cloud_url } = await this.fetchCloudUrl();
+      this.cachedCloudUrl = cloud_url;
     }
     return this.cachedCloudUrl;
   }
 
-  /**
-   * List remote sessions for authenticated user.
-   * Fetches from cloud, requires JWT token.
-   */
   async listRemoteSessions(): Promise<RemoteSessionInfo[]> {
     const token = await this.getJWTToken();
-    if (!token) {
-      throw new Error('Not authenticated. Please run: pdd auth login');
-    }
-
+    if (!token) throw new Error('Not authenticated. Please run: pdd auth login');
     const cloudUrl = await this.getCloudUrl();
-    const response = await fetch(`${cloudUrl}/listSessions`, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: response.statusText }));
-      throw new Error(error.error || `Failed to list sessions: ${response.status}`);
+    const res = await fetch(`${cloudUrl}/listSessions`, { headers: { 'Authorization': `Bearer ${token}` } });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Failed to list sessions: ${res.statusText}`);
     }
-
-    const data = await response.json();
+    const data = await res.json();
     return data.sessions || [];
   }
 
-  /**
-   * Submit command to remote session.
-   * Returns command ID for polling status.
-   */
   async submitRemoteCommand(request: RemoteCommandRequest): Promise<{ commandId: string; status: string }> {
     const token = await this.getJWTToken();
-    if (!token) {
-      throw new Error('Not authenticated. Please run: pdd auth login');
-    }
-
+    if (!token) throw new Error('Not authenticated. Please run: pdd auth login');
     const cloudUrl = await this.getCloudUrl();
-    const response = await fetch(`${cloudUrl}/submitCommand`, {
+    const res = await fetch(`${cloudUrl}/submitCommand`, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(request),
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(request)
     });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: response.statusText }));
-      throw new Error(error.error || `Failed to submit command: ${response.status}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Failed to submit command: ${res.statusText}`);
     }
-
-    return await response.json();
+    return res.json();
   }
 
-  /**
-   * Poll command status for remote session.
-   * Fetches status of a single command by ID (any status, not just pending).
-   */
-  async getRemoteCommandStatus(
-    sessionId: string,
-    commandId: string
-  ): Promise<RemoteCommandStatus | null> {
+  async getRemoteCommandStatus(sessionId: string, commandId: string): Promise<RemoteCommandStatus | null> {
     const token = await this.getJWTToken();
-    if (!token) {
-      throw new Error('Not authenticated. Please run: pdd auth login');
-    }
-
+    if (!token) throw new Error('Not authenticated. Please run: pdd auth login');
     const cloudUrl = await this.getCloudUrl();
-    const response = await fetch(
-      `${cloudUrl}/getCommandStatus?sessionId=${encodeURIComponent(sessionId)}&commandId=${encodeURIComponent(commandId)}`,
-      {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-
-    if (!response.ok) {
-      if (response.status === 404) {
-        return null; // Command not found
-      }
-      const error = await response.json().catch(() => ({ error: response.statusText }));
-      throw new Error(error.error || `Failed to get command status: ${response.status}`);
+    const res = await fetch(`${cloudUrl}/getCommandStatus?sessionId=${encodeURIComponent(sessionId)}&commandId=${encodeURIComponent(commandId)}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Failed to get command status: ${res.statusText}`);
     }
-
-    const data = await response.json();
-    const command = data.command;
-
-    if (!command) {
-      return null;
-    }
-
-    // Map cloud response to RemoteCommandStatus
-    return {
-      commandId: command.commandId,
-      type: command.type,
-      status: command.status,
-      createdAt: command.createdAt,
-      updatedAt: command.updatedAt,
-      response: command.response,
-    };
+    const data = await res.json();
+    return data.command || null;
   }
 
-  /**
-   * Cancel a pending or processing remote command.
-   *
-   * @param sessionId - The remote session ID
-   * @param commandId - The command ID to cancel
-   * @returns Success response with cancellation confirmation
-   */
-  async cancelRemoteCommand(params: {
-    sessionId: string;
-    commandId: string;
-  }): Promise<{ success: boolean; message: string }> {
+  async cancelRemoteCommand(sessionId: string, commandId: string): Promise<{ success: boolean; message: string }> {
     const token = await this.getJWTToken();
-    if (!token) {
-      throw new Error('Not authenticated. Please run: pdd auth login');
-    }
-
+    if (!token) throw new Error('Not authenticated. Please run: pdd auth login');
     const cloudUrl = await this.getCloudUrl();
-    const response = await fetch(`${cloudUrl}/cancelCommand`, {
+    const res = await fetch(`${cloudUrl}/cancelCommand`, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(params),
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId, commandId })
     });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: response.statusText }));
-      throw new Error(error.error || `Failed to cancel command: ${response.status}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Failed to cancel command: ${res.statusText}`);
     }
-
-    return response.json();
+    return res.json();
   }
 
-  // Extracts cache
-  async listExtracts(checkFreshness: boolean = true): Promise<ExtractListResponse> {
-    return this.request(`/api/v1/extracts?check_freshness=${checkFreshness}`);
-  }
-
-  async getExtract(cacheKey: string): Promise<ExtractContent> {
-    return this.request(`/api/v1/extracts/${cacheKey}`);
-  }
-
-  async getExtractsForPrompt(promptPath: string): Promise<PromptExtractInfo[]> {
-    return this.request(`/api/v1/extracts/for-prompt?prompt_path=${encodeURIComponent(promptPath)}`);
-  }
-
-  async pruneExtracts(dryRun: boolean = false): Promise<PruneResponse> {
-    return this.request(`/api/v1/extracts/prune?dry_run=${dryRun}`, {
-      method: 'POST',
-    });
-  }
-
-  // WebSocket for job streaming
-  connectToJobStream(jobId: string, callbacks: {
-    onMessage?: (type: string, data: any) => void;
-    onStdout?: (text: string) => void;
-    onStderr?: (text: string) => void;
-    onProgress?: (current: number, total: number, message: string) => void;
-    onComplete?: (success: boolean, result: any, cost: number) => void;
-    onError?: (error: Error) => void;
-    onClose?: () => void;
-  }): WebSocket {
-    const ws = new WebSocket(`${this.wsBaseUrl}/ws/jobs/${jobId}/stream`);
-
+  // Job stream WebSocket helpers
+  connectToJobStream(
+    jobId: string,
+    callbacks: {
+      onMessage?: (type: string, data: any) => void;
+      onStdout?: (text: string) => void;
+      onStderr?: (text: string) => void;
+      onProgress?: (current: number, total: number, message: string) => void;
+      onComplete?: (success: boolean, result: any, cost: number) => void;
+      onError?: (error: Error) => void;
+      onClose?: () => void;
+    }
+  ): WebSocket {
+    const ws = new WebSocket(`${this.wsBaseUrl}/ws/jobs/${encodeURIComponent(jobId)}/stream`);
+    
     ws.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data);
         callbacks.onMessage?.(message.type, message.data);
-
         switch (message.type) {
-          case 'stdout':
-            callbacks.onStdout?.(message.data);
-            break;
-          case 'stderr':
-            callbacks.onStderr?.(message.data);
-            break;
-          case 'progress':
-            callbacks.onProgress?.(message.current, message.total, message.message);
-            break;
-          case 'complete':
-            callbacks.onComplete?.(message.data?.success, message.data?.result, message.data?.cost || 0);
-            break;
+          case 'stdout': callbacks.onStdout?.(message.data); break;
+          case 'stderr': callbacks.onStderr?.(message.data); break;
+          case 'progress': callbacks.onProgress?.(message.current, message.total, message.message); break;
+          case 'complete': callbacks.onComplete?.(message.data?.success, message.data?.result, message.data?.cost || 0); break;
         }
       } catch (e) {
         console.error('Failed to parse WebSocket message:', e);
       }
     };
-
-    ws.onerror = (event) => {
-      callbacks.onError?.(new Error('WebSocket error'));
-    };
-
-    ws.onclose = () => {
-      callbacks.onClose?.();
-    };
-
+    
+    ws.onerror = () => callbacks.onError?.(new Error('WebSocket error'));
+    ws.onclose = () => callbacks.onClose?.();
+    
     return ws;
   }
 
-  // Cancel via WebSocket
   sendCancelRequest(ws: WebSocket): void {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'cancel' }));
@@ -1433,8 +1053,5 @@ class PDDApiClient {
   }
 }
 
-// Export singleton instance
 export const api = new PDDApiClient();
-
-// Export class for custom instances
 export { PDDApiClient };

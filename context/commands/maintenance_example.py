@@ -12,12 +12,16 @@ The commands are designed to be invoked via the Click CLI framework.
 """
 
 import os
+import sys
 import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import click
 from click.testing import CliRunner
+
+# Ensure the pdd package is discoverable regardless of where the script is run from.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 # Import the maintenance commands from the pdd package
 from pdd.commands.maintenance import sync, sync_architecture, auto_deps, setup
@@ -101,7 +105,8 @@ def example_sync_command():
             - total_cost (float): Total cost in USD
             - model_name (str): AI model name
     """
-    print("\n" + "=" * 60)
+    print()
+    print("=" * 60)
     print("SYNC COMMAND EXAMPLE")
     print("=" * 60)
 
@@ -149,14 +154,16 @@ def example_sync_command():
         )
 
         print(f"Command exit code: {result.exit_code}")
-        print(f"Command output:\n{result.output}")
+        print("Command output:")
+        print(result.output)
 
 
 def example_sync_dry_run():
     """
     Demonstrate sync --dry-run mode which analyzes state without executing.
     """
-    print("\n" + "=" * 60)
+    print()
+    print("=" * 60)
     print("SYNC DRY-RUN EXAMPLE")
     print("=" * 60)
 
@@ -196,7 +203,8 @@ def example_sync_dry_run():
         )
 
         print(f"Command exit code: {result.exit_code}")
-        print(f"Command output:\n{result.output}")
+        print("Command output:")
+        print(result.output)
 
 
 def example_sync_github_issue():
@@ -206,7 +214,8 @@ def example_sync_github_issue():
     When a GitHub issue URL is passed, sync dispatches to run_agentic_sync()
     instead of sync_main(). Returns (message, cost, model) on success.
     """
-    print("\n" + "=" * 60)
+    print()
+    print("=" * 60)
     print("SYNC GITHUB ISSUE EXAMPLE (agentic mode)")
     print("=" * 60)
 
@@ -258,7 +267,8 @@ def example_sync_github_issue():
         )
 
         print(f"Command exit code: {result.exit_code}")
-        print(f"Command output:\n{result.output}")
+        print("Command output:")
+        print(result.output)
 
 
 def example_sync_architecture_command():
@@ -272,7 +282,8 @@ def example_sync_architecture_command():
             - total_cost (float): Zero for local metadata sync
             - model_name (str): "local"
     """
-    print("\n" + "=" * 60)
+    print()
+    print("=" * 60)
     print("SYNC-ARCHITECTURE COMMAND EXAMPLE")
     print("=" * 60)
 
@@ -315,7 +326,8 @@ def example_sync_architecture_command():
         )
 
         print(f"Command exit code: {result.exit_code}")
-        print(f"Command output:\n{result.output}")
+        print("Command output:")
+        print(result.output)
 
 
 def example_auto_deps_command():
@@ -338,7 +350,8 @@ def example_auto_deps_command():
             - total_cost (float): Cost in USD
             - model_name (str): AI model name
     """
-    print("\n" + "=" * 60)
+    print()
+    print("=" * 60)
     print("AUTO-DEPS COMMAND EXAMPLE")
     print("=" * 60)
 
@@ -381,7 +394,8 @@ def example_auto_deps_command():
         )
 
         print(f"Command exit code: {result.exit_code}")
-        print(f"Command output:\n{result.output}")
+        print("Command output:")
+        print(result.output)
 
 
 def example_setup_command():
@@ -397,7 +411,8 @@ def example_setup_command():
     Returns:
         None
     """
-    print("\n" + "=" * 60)
+    print()
+    print("=" * 60)
     print("SETUP COMMAND EXAMPLE")
     print("=" * 60)
 
@@ -417,7 +432,8 @@ def example_setup_command():
         result = runner.invoke(cli, ["setup"], catch_exceptions=False)
 
         print(f"Command exit code: {result.exit_code}")
-        print(f"Command output:\n{result.output}")
+        print("Command output:")
+        print(result.output)
         print(f"install_completion called: {mock_install.called}")
         print(f"_run_setup_utility called: {mock_setup.called}")
 
@@ -427,7 +443,8 @@ def example_deprecated_log_flag():
     Demonstrate that --log is deprecated in favor of --dry-run.
     The command emits a warning and treats --log as --dry-run.
     """
-    print("\n" + "=" * 60)
+    print()
+    print("=" * 60)
     print("DEPRECATED --log FLAG EXAMPLE")
     print("=" * 60)
 
@@ -461,7 +478,8 @@ def example_deprecated_log_flag():
         )
 
         print(f"Command exit code: {result.exit_code}")
-        print(f"Command output:\n{result.output}")
+        print("Command output:")
+        print(result.output)
         # The --log flag should have been converted to dry_run=True
         if mock_sync.called:
             call_kwargs = mock_sync.call_args
@@ -478,7 +496,8 @@ def main():
     example_setup_command()
     example_deprecated_log_flag()
 
-    print("\n" + "=" * 60)
+    print()
+    print("=" * 60)
     print("All examples completed successfully!")
 
 

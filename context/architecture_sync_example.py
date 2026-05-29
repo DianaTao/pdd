@@ -3,7 +3,15 @@ Example usage of the architecture_sync module for bidirectional sync
 between architecture.json and prompt files using PDD metadata tags.
 """
 
+import sys
+import os
+import json
 from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+# Ensure we can import from the parent directory
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
 from pdd.architecture_sync import (
     parse_prompt_tags,
     update_architecture_from_prompt,
@@ -16,6 +24,43 @@ from pdd.architecture_sync import (
     generate_tags_from_architecture,
 )
 
+# --- Setup Mock Environment ---
+def setup_mock_files(tmp_path: Path):
+    prompts_dir = tmp_path / "prompts"
+    prompts_dir.mkdir(parents=True, exist_ok=True)
+    
+    arch_file = tmp_path / "architecture.json"
+    
+    # Create a dummy prompt
+    prompt_content = """<pdd-reason>Handles user authentication</pdd-reason>
+<pdd-interface>
+{
+  "type": "module",
+  "module": {
+    "functions": [{"name": "login", "signature": "(user, pwd)", "returns": "bool"}]
+  }
+}
+</pdd-interface>
+<pdd-dependency>db_python.prompt</pdd-dependency>
+
+% Role & Scope
+...
+"""
+    (prompts_dir / "auth_python.prompt").write_text(prompt_content)
+    (prompts_dir / "db_python.prompt").write_text("<pdd-reason>Database</pdd-reason>")
+    
+    # Create architecture.json
+    arch_data = [
+        {
+            "filename": "auth_python.prompt",
+            "filepath": "pdd/auth.py",
+            "reason": "Old reason",
+            "dependencies": []
+        }
+    ]
+    arch_file.write_text(json.dumps(arch_data, indent=2))
+    
+    return prompts_dir, arch_file
 
 # --- Example 1: Parse PDD tags from prompt content ---
 def example_parse_tags():
@@ -44,99 +89,67 @@ Your goal is to implement user authentication...
 
     tags = parse_prompt_tags(prompt_content)
 
+    print("--- Example 1: parse_prompt_tags ---")
     print(f"Reason: {tags['reason']}")
     print(f"Interface type: {tags['interface']['type']}")
     print(f"Dependencies: {tags['dependencies']}")
     print(f"Has dependency tags: {tags['has_dependency_tags']}")
-
-    return tags
-
+    print()
 
 # --- Example 2: Update architecture.json from a single prompt ---
-def example_update_single_prompt():
+def example_update_single_prompt(prompts_dir, arch_file):
     """Update architecture.json from a single prompt file's PDD tags."""
+    print("--- Example 2: update_architecture_from_prompt ---")
     result = update_architecture_from_prompt(
-        prompt_filename="user_service_python.prompt",
-        prompts_dir=Path("prompts"),
-        architecture_path=Path("architecture.json"),
-        dry_run=True  # Preview changes without writing
+        prompt_filename="auth_python.prompt",
+        prompts_dir=prompts_dir,
+        architecture_path=arch_file,
+        dry_run=False
     )
 
     if result['success']:
-        if result['updated']:
-            print("Changes detected:")
-            for field, change in result['changes'].items():
-                print(f"  {field}: {change['old']} -> {change['new']}")
-        else:
-            print("No changes needed")
+        print(f"Updated: {result['updated']}")
+        print(f"Changes: {result['changes']}")
     else:
         print(f"Error: {result['error']}")
-
-    return result
-
+    print()
 
 # --- Example 3: Sync all prompts to architecture.json ---
-def example_sync_all():
+def example_sync_all(prompts_dir, arch_file):
     """Sync all prompt files to architecture.json."""
+    print("--- Example 3: sync_all_prompts_to_architecture ---")
     result = sync_all_prompts_to_architecture(
-        prompts_dir=Path("prompts"),
-        architecture_path=Path("architecture.json"),
+        prompts_dir=prompts_dir,
+        architecture_path=arch_file,
         dry_run=True  # Preview changes
     )
 
     print(f"Success: {result['success']}")
     print(f"Updated: {result['updated_count']} modules")
-    print(f"Skipped: {result['skipped_count']} modules")
-
-    if result['errors']:
-        print("Errors:")
-        for error in result['errors']:
-            print(f"  - {error}")
-
-    return result
-
-
-def example_sync_prompts_to_architecture():
-    """Sync selected prompt metadata tags into architecture.json."""
-    result = sync_prompts_to_architecture(
-        filenames=["commands/maintenance_python.prompt"],
-        dry_run=True,
-    )
-
-    print(f"Success: {result['success']}")
-    print(f"Updated: {result['updated_count']} modules")
-    print(f"Skipped: {result['skipped_count']} modules")
-
-    if result["errors"]:
-        print("Errors:")
-        for error in result["errors"]:
-            print(f"  - {error}")
-
-    return result
-
+    print(f"Registered: {result['registered']}")
+    print()
 
 # --- Example 4: Validate dependencies ---
-def example_validate_dependencies():
+def example_validate_dependencies(prompts_dir):
     """Validate that all dependencies exist and are unique."""
+    print("--- Example 4: validate_dependencies ---")
     dependencies = [
-        "database_python.prompt",
-        "config_python.prompt",
-        "missing_file.prompt",  # This will fail
-        "database_python.prompt",  # This is a duplicate
+        "auth_python.prompt",
+        "missing_file.prompt",
+        "auth_python.prompt",
     ]
 
-    result = validate_dependencies(dependencies, prompts_dir=Path("prompts"))
+    result = validate_dependencies(dependencies, prompts_dir=prompts_dir)
 
     print(f"Valid: {result['valid']}")
     print(f"Missing files: {result['missing']}")
     print(f"Duplicates: {result['duplicates']}")
-
-    return result
-
+    print()
 
 # --- Example 5: Validate interface structure ---
 def example_validate_interface():
     """Validate interface JSON structure."""
+    print("--- Example 5: validate_interface_structure ---")
     # Valid module interface
     valid_interface = {
         "type": "module",
@@ -153,132 +166,41 @@ def example_validate_interface():
     # Invalid interface (missing nested key)
     invalid_interface = {
         "type": "module"
-        # Missing "module" key
     }
 
     result = validate_interface_structure(invalid_interface)
-    print(f"Invalid interface errors: {result['errors']}")
+    print(f"Invalid interface valid: {result['valid']}")
+    print(f"Errors: {result['errors']}")
+    print()
 
-    return result
-
-
-# --- Example 6: Generate tags from architecture entry (reverse direction) ---
+# --- Example 6: Generate tags from architecture entry ---
 def example_generate_tags():
     """Generate PDD tags from an architecture.json entry."""
+    print("--- Example 6: generate_tags_from_architecture ---")
     arch_entry = {
-        "filename": "user_service_python.prompt",
-        "filepath": "pdd/user_service.py",
-        "reason": "Handles user authentication and profile management",
-        "interface": {
-            "type": "module",
-            "module": {
-                "functions": [
-                    {"name": "authenticate", "signature": "(username, password)", "returns": "User"}
-                ]
-            }
-        },
-        "dependencies": ["database_python.prompt", "config_python.prompt"]
+        "reason": "Handles user auth",
+        "interface": {"type": "module", "module": {"functions": []}},
+        "dependencies": ["db_python.prompt"]
     }
 
     tags = generate_tags_from_architecture(arch_entry)
     print("Generated tags:")
     print(tags)
-
-    return tags
-
-
-# --- Example 7: Check if prompt already has PDD tags ---
-def example_check_existing_tags():
-    """Check if a prompt already has PDD tags (to avoid overwriting)."""
-    prompt_with_tags = """
-<pdd-reason>Existing reason</pdd-reason>
-
-% Role & Scope
-...
-"""
-
-    prompt_without_tags = """
-% Role & Scope
-Your goal is to implement...
-"""
-
-    print(f"Prompt with tags: {has_pdd_tags(prompt_with_tags)}")  # True
-    print(f"Prompt without tags: {has_pdd_tags(prompt_without_tags)}")  # False
-
-    return has_pdd_tags(prompt_with_tags), has_pdd_tags(prompt_without_tags)
-
-
-# --- Example 8: Get architecture entry for a prompt ---
-def example_get_entry():
-    """Look up architecture entry by prompt filename."""
-    entry = get_architecture_entry_for_prompt(
-        "llm_invoke_python.prompt",
-        architecture_path=Path("architecture.json")
-    )
-
-    if entry:
-        print(f"Found entry for: {entry['filename']}")
-        print(f"Reason: {entry.get('reason', 'N/A')}")
-    else:
-        print("No entry found")
-
-    return entry
-
-
-# --- Example 9: Full workflow - inject tags into new prompt ---
-def example_inject_tags_workflow():
-    """
-    Complete workflow: Check if prompt needs tags, generate and inject them.
-    This is what preprocess_main does with --pdd-tags flag.
-    """
-    prompt_filename = "my_module_python.prompt"
-    prompt_content = """
-% Role & Scope
-Your goal is to implement a data processor...
-
-% Requirements
-1. Process input data
-2. Return results
-"""
-
-    # Step 1: Check if prompt already has tags
-    if has_pdd_tags(prompt_content):
-        print("Prompt already has PDD tags, skipping injection")
-        return prompt_content
-
-    # Step 2: Get architecture entry
-    arch_entry = get_architecture_entry_for_prompt(prompt_filename)
-
-    if not arch_entry:
-        print(f"No architecture entry found for {prompt_filename}")
-        return prompt_content
-
-    # Step 3: Generate and inject tags
-    tags = generate_tags_from_architecture(arch_entry)
-
-    if tags:
-        final_content = tags + '\n\n' + prompt_content
-        print("Tags injected successfully!")
-        return final_content
-
-    return prompt_content
-
+    print()
 
 if __name__ == "__main__":
-    print("=== Architecture Sync Examples ===\n")
-
-    print("1. Parse PDD tags:")
-    example_parse_tags()
-    print()
-
-    print("5. Validate interface:")
-    example_validate_interface()
-    print()
-
-    print("6. Generate tags from architecture:")
-    example_generate_tags()
-    print()
-
-    print("7. Check existing tags:")
-    example_check_existing_tags()
-    print()
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        p_dir, a_file = setup_mock_files(tmp_path)
+        
+        print("=== Architecture Sync Examples ===\n")
+        
+        example_parse_tags()
+        example_update_single_prompt(p_dir, a_file)
+        example_sync_all(p_dir, a_file)
+        example_validate_dependencies(p_dir)
+        example_validate_interface()
+        example_generate_tags()
+        
+    sys.exit(0)
