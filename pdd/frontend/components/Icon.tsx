@@ -180,3 +180,15 @@ export const PlusIcon = (props: React.SVGProps<SVGSVGElement>) => (
         <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
     </svg>
 );
+
+export const ShieldCheckIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" {...props}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
+  </svg>
+);
+
+export const ScissorsIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" {...props}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="m7.848 8.25 1.5 1.5m1.875-1.875-1.5 1.5M8.25 8.25L6.108 6.108a2.25 2.25 0 0 1 3.182-3.182l2.142 2.142m3.75 3.75 1.5 1.5m-1.5-1.5 2.142-2.142a2.25 2.25 0 0 0-3.182-3.182l-2.142 2.142m3.75 3.75 1.875 1.875m-9.75 9.75-1.875-1.875m9.75 9.75 2.142 2.142a2.25 2.25 0 0 0 3.182-3.182l-2.142-2.142m-3.75-3.75-1.5-1.5m1.5 1.5-2.142 2.142a2.25 2.25 0 0 1-3.182-3.182l2.142-2.142m3.75 3.75-1.875-1.875" />
+  </svg>
+);

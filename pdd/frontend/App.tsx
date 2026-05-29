@@ -16,13 +16,13 @@ import RemoteSessionSelector from './components/RemoteSessionSelector';
 import ExecutionModeToggle from './components/ExecutionModeToggle';
 import DeviceIndicator from './components/DeviceIndicator';
 import { api, PromptInfo, RunResult, CommandRequest, RemoteSessionInfo } from './api';
-import { Squares2X2Icon, DocumentTextIcon, BugAntIcon, Cog6ToothIcon } from './components/Icon';
+import { Squares2X2Icon, DocumentTextIcon, BugAntIcon, Cog6ToothIcon, ShieldCheckIcon, ScissorsIcon } from './components/Icon';
 import { useJobs, JobInfo } from './hooks/useJobs';
 import { useTaskQueue, TaskQueueItem } from './hooks/useTaskQueue';
 import { useToast } from './components/Toast';
 import { useAudioNotification } from './hooks/useAudioNotification';
 
-type View = 'devunits' | 'bug' | 'fix' | 'change' | 'settings';
+type View = 'devunits' | 'bug' | 'fix' | 'change' | 'checkup' | 'split' | 'settings';
 type DevUnitsSubView = 'graph' | 'list';
 
 // Parse URL hash to get initial view and prompt path
@@ -37,7 +37,7 @@ const parseHash = (): { view: View; promptPath?: string; subView?: DevUnitsSubVi
   if (viewPart === 'architecture') return { view: 'devunits', subView: 'graph', promptPath };
   if (viewPart === 'prompts') return { view: 'devunits', subView: 'list', promptPath };
 
-  const validViews: View[] = ['devunits', 'bug', 'fix', 'change', 'settings'];
+  const validViews: View[] = ['devunits', 'bug', 'fix', 'change', 'checkup', 'split', 'settings'];
   const view = validViews.includes(viewPart as View) ? (viewPart as View) : 'devunits';
 
   return { view, promptPath, subView: view === 'devunits' ? 'graph' : undefined };
@@ -67,6 +67,12 @@ const App: React.FC = () => {
 
   // Change command state
   const [changeIssueUrl, setChangeIssueUrl] = useState('');
+
+  // Checkup command state
+  const [checkupPrUrl, setCheckupPrUrl] = useState('');
+
+  // Split command state
+  const [splitModulePath, setSplitModulePath] = useState('');
 
   // Batch operation state (for architecture prompt generation)
   const [batchOperation, setBatchOperation] = useState<BatchOperation | null>(null);
@@ -729,6 +735,164 @@ const App: React.FC = () => {
     }
   };
 
+  const handleRunCheckupCommand = async () => {
+    if (!serverConnected) {
+      alert('Server not connected. Run "pdd connect" in your terminal first.');
+      return;
+    }
+
+    if (!checkupPrUrl.trim()) {
+      alert('Please enter a PR or Issue URL');
+      return;
+    }
+
+    setIsExecuting(true);
+    setExecutionStatus('running');
+    const displayCommand = `pdd checkup ${checkupPrUrl}`;
+    setLastCommand(displayCommand);
+
+    try {
+      // Check if we're in remote mode
+      if (executionMode === 'remote' && selectedRemoteSession) {
+        // Submit command to remote session via cloud
+        try {
+          const { commandId } = await api.submitRemoteCommand({
+            sessionId: selectedRemoteSession,
+            type: 'checkup',
+            payload: { args: { args: [checkupPrUrl] }, options: {} },
+          });
+
+          addSpawnedJob(
+            `[Remote] ${displayCommand}`,
+            'checkup',
+            commandId,
+            { remote: true, sessionId: selectedRemoteSession }
+          );
+
+          setExecutionStatus('success');
+          addToast(`Command submitted to remote session`, 'success', 3000);
+        } catch (error) {
+          setExecutionStatus('failed');
+          addToast(
+            `Failed to submit remote command: ${error instanceof Error ? error.message : String(error)}`,
+            'error',
+            5000
+          );
+        }
+      } else {
+        // Local execution: Spawn checkup command in a new terminal window
+        const result = await api.spawnTerminal({
+          command: 'checkup',
+          args: { args: [checkupPrUrl] },
+          options: {},
+        });
+
+        if (result.success) {
+          addSpawnedJob(displayCommand, 'checkup', result.job_id);
+          setExecutionStatus('success');
+          addToast(`Opened terminal: ${displayCommand}`, 'success', 3000);
+        } else {
+          setExecutionStatus('failed');
+          addToast(`Failed to open terminal: ${result.message}`, 'error', 5000);
+        }
+      }
+
+      setTimeout(() => {
+        setExecutionStatus('idle');
+        setLastCommand(null);
+      }, 3000);
+    } catch (error: any) {
+      console.error('Failed to execute checkup command:', error);
+      setExecutionStatus('failed');
+      addToast(`Error: ${error.message}`, 'error', 5000);
+      setTimeout(() => {
+        setExecutionStatus('idle');
+        setLastCommand(null);
+      }, 5000);
+    } finally {
+      setIsExecuting(false);
+    }
+  };
+
+  const handleRunSplitCommand = async () => {
+    if (!serverConnected) {
+      alert('Server not connected. Run "pdd connect" in your terminal first.');
+      return;
+    }
+
+    if (!splitModulePath.trim()) {
+      alert('Please enter a module path (filename)');
+      return;
+    }
+
+    setIsExecuting(true);
+    setExecutionStatus('running');
+    const displayCommand = `pdd split ${splitModulePath}`;
+    setLastCommand(displayCommand);
+
+    try {
+      // Check if we're in remote mode
+      if (executionMode === 'remote' && selectedRemoteSession) {
+        // Submit command to remote session via cloud
+        try {
+          const { commandId } = await api.submitRemoteCommand({
+            sessionId: selectedRemoteSession,
+            type: 'split',
+            payload: { args: { args: [splitModulePath] }, options: {} },
+          });
+
+          addSpawnedJob(
+            `[Remote] ${displayCommand}`,
+            'split',
+            commandId,
+            { remote: true, sessionId: selectedRemoteSession }
+          );
+
+          setExecutionStatus('success');
+          addToast(`Command submitted to remote session`, 'success', 3000);
+        } catch (error) {
+          setExecutionStatus('failed');
+          addToast(
+            `Failed to submit remote command: ${error instanceof Error ? error.message : String(error)}`,
+            'error',
+            5000
+          );
+        }
+      } else {
+        // Local execution: Spawn split command in a new terminal window
+        const result = await api.spawnTerminal({
+          command: 'split',
+          args: { args: [splitModulePath] },
+          options: {},
+        });
+
+        if (result.success) {
+          addSpawnedJob(displayCommand, 'split', result.job_id);
+          setExecutionStatus('success');
+          addToast(`Opened terminal: ${displayCommand}`, 'success', 3000);
+        } else {
+          setExecutionStatus('failed');
+          addToast(`Failed to open terminal: ${result.message}`, 'error', 5000);
+        }
+      }
+
+      setTimeout(() => {
+        setExecutionStatus('idle');
+        setLastCommand(null);
+      }, 3000);
+    } catch (error: any) {
+      console.error('Failed to execute split command:', error);
+      setExecutionStatus('failed');
+      addToast(`Error: ${error.message}`, 'error', 5000);
+      setTimeout(() => {
+        setExecutionStatus('idle');
+        setLastCommand(null);
+      }, 5000);
+    } finally {
+      setIsExecuting(false);
+    }
+  };
+
   // Handler for PromptSpace command execution
   const handlePromptSpaceCommand = (command: CommandType, options?: Record<string, any>) => {
     if (editingPrompt) {
@@ -903,6 +1067,26 @@ const App: React.FC = () => {
                   <svg className="hidden sm:inline w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
                   </svg>Change
+                </button>
+                <button
+                  onClick={() => setView('checkup')}
+                  className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 ${
+                    view === 'checkup'
+                      ? 'bg-[#DFA84A] text-surface-900 shadow-lg'
+                      : 'text-surface-300 hover:text-white hover:bg-surface-700/80 hover:shadow-[0_0_10px_rgba(253,206,73,0.3)]'
+                  }`}
+                >
+                  <ShieldCheckIcon className="hidden sm:inline w-4 h-4 mr-1.5" />Checkup
+                </button>
+                <button
+                  onClick={() => setView('split')}
+                  className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 ${
+                    view === 'split'
+                      ? 'bg-[#DFA84A] text-surface-900 shadow-lg'
+                      : 'text-surface-300 hover:text-white hover:bg-surface-700/80 hover:shadow-[0_0_10px_rgba(253,206,73,0.3)]'
+                  }`}
+                >
+                  <ScissorsIcon className="hidden sm:inline w-4 h-4 mr-1.5" />Split
                 </button>
                 <button
                   onClick={() => setView('settings')}
@@ -1222,8 +1406,29 @@ const App: React.FC = () => {
               </div>
             </div>
           )}
-          {view === 'settings' && (
+          {view === 'checkup' && (
             <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-green-500/20 flex items-center justify-center">
+                <ShieldCheckIcon className="w-5 h-5 text-green-400" />
+              </div>
+              <div>
+                <h2 className="text-lg sm:text-xl font-semibold text-white">Checkup Health Agent</h2>
+                <p className="text-xs sm:text-sm text-surface-400">Run health checkups and fix security/debt issues</p>
+              </div>
+            </div>
+          )}
+          {view === 'split' && (
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center">
+                <ScissorsIcon className="w-5 h-5 text-blue-400" />
+              </div>
+              <div>
+                <h2 className="text-lg sm:text-xl font-semibold text-white">Module Split Agent</h2>
+                <p className="text-xs sm:text-sm text-surface-400">Automatically refactor large modules into smaller ones</p>
+              </div>
+            </div>
+          )}
+          {view === 'settings' && (            <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-surface-700/50 flex items-center justify-center">
                 <Cog6ToothIcon className="w-5 h-5 text-surface-300" />
               </div>
@@ -1680,6 +1885,248 @@ const App: React.FC = () => {
                   <p className="text-xs text-surface-500">
                     <strong className="text-surface-400">Note:</strong> The agent analyzes the issue and implements the requested changes.
                     Progress is shown in the terminal.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : view === 'checkup' ? (
+          <div className="max-w-6xl mx-auto animate-fade-in">
+            <div className="grid gap-4 md:grid-cols-2">
+              {/* Left column: Input and action */}
+              <div className="space-y-4">
+                {/* Main input card */}
+                <div className="glass rounded-2xl p-4 sm:p-6 border border-surface-700/50">
+                  <label className="block text-sm font-medium text-surface-300 mb-2">
+                    GitHub Issue or PR URL
+                  </label>
+                  <input
+                    type="url"
+                    value={checkupPrUrl}
+                    onChange={(e) => setCheckupPrUrl(e.target.value)}
+                    placeholder="https://github.com/org/repo/issues/123"
+                    className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-surface-900/50 border border-surface-600 rounded-xl text-white placeholder-surface-500 focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all text-sm sm:text-base"
+                    disabled={isExecuting}
+                  />
+
+                  <button
+                    onClick={handleRunCheckupCommand}
+                    disabled={isExecuting || !serverConnected || !checkupPrUrl.trim()}
+                    className={`
+                      mt-4 w-full px-4 py-2.5 sm:py-3 rounded-xl font-medium transition-all duration-200 flex items-center justify-center gap-2 text-sm sm:text-base
+                      ${isExecuting || !serverConnected || !checkupPrUrl.trim()
+                        ? 'bg-surface-700 text-surface-500 cursor-not-allowed'
+                        : 'bg-gradient-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 text-white shadow-lg shadow-green-500/25 hover:shadow-green-500/40'}
+                    `}
+                  >
+                    <ShieldCheckIcon className="w-4 h-4" />
+                    <span>Start Checkup</span>
+                  </button>
+                </div>
+
+                {/* Prerequisites card */}
+                <div className="glass rounded-2xl p-4 sm:p-5 border border-surface-700/50">
+                  <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+                    <svg className="w-4 h-4 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Prerequisites
+                  </h3>
+                  <ul className="space-y-2 text-xs text-surface-400">
+                    <li className="flex items-start gap-2">
+                      <span className="w-4 h-4 rounded-full bg-surface-700 flex items-center justify-center text-[10px] text-surface-300 flex-shrink-0 mt-0.5">1</span>
+                      <span><strong className="text-surface-300">GitHub CLI installed</strong> - Install from <code className="bg-surface-800 px-1 rounded text-accent-300">brew install gh</code></span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="w-4 h-4 rounded-full bg-surface-700 flex items-center justify-center text-[10px] text-surface-300 flex-shrink-0 mt-0.5">2</span>
+                      <span><strong className="text-surface-300">Authenticated with GitHub</strong> - Run <code className="bg-surface-800 px-1 rounded text-accent-300">gh auth login</code> if needed</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="w-4 h-4 rounded-full bg-surface-700 flex items-center justify-center text-[10px] text-surface-300 flex-shrink-0 mt-0.5">3</span>
+                      <span><strong className="text-surface-300">Repository cloned locally</strong> - The agent works within your local codebase</span>
+                    </li>
+                  </ul>
+                </div>
+
+                {/* After checkup card */}
+                <div className="glass rounded-2xl p-4 sm:p-5 border border-surface-700/50">
+                  <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+                    <svg className="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    After Checkup
+                  </h3>
+                  <ul className="space-y-2 text-xs text-surface-400">
+                    <li className="flex items-start gap-2">
+                      <span className="text-green-400">1.</span>
+                      <span><strong className="text-surface-300">Review health report</strong> - The agent identifies security, debt, and architectural issues</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-green-400">2.</span>
+                      <span><strong className="text-surface-300">Apply fixes</strong> - The agent automatically fixes discovered issues in iterative rounds</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-green-400">3.</span>
+                      <span><strong className="text-surface-300">Verify</strong> - Final verification ensures all issues are resolved</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+
+              {/* Right column: Workflow steps */}
+              <div className="glass rounded-2xl p-4 sm:p-5 border border-surface-700/50">
+                <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
+                  <svg className="w-4 h-4 text-accent-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                  Agent Workflow (8 Steps)
+                </h3>
+                <div className="space-y-1">
+                  {[
+                    { step: 1, name: 'Discovery', desc: 'Identify tech stack and project structure' },
+                    { step: 2, name: 'Dependency Audit', desc: 'Check for outdated or vulnerable packages' },
+                    { step: 3, name: 'Build Check', desc: 'Verify the project builds successfully' },
+                    { step: 4, name: 'Interface Check', desc: 'Ensure module interfaces are consistent' },
+                    { step: 5, name: 'Test Execution', desc: 'Run the full test suite and audit coverage' },
+                    { step: 6, name: 'Fix Issues', desc: 'Apply fixes for discovered problems' },
+                    { step: 7, name: 'Regression Tests', desc: 'Verify fixes don\'t break existing code' },
+                    { step: 8, name: 'Create PR', desc: 'Open a pull request with all improvements' },
+                  ].map((item) => (
+                    <div key={item.step} className="flex items-start gap-3 py-1.5 px-2 rounded-lg hover:bg-surface-800/30 transition-colors">
+                      <div className="w-5 h-5 rounded-full bg-surface-700 flex items-center justify-center text-[10px] font-medium text-surface-300 flex-shrink-0">
+                        {item.step}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs text-white font-medium">{item.name}</div>
+                        <p className="text-[11px] text-surface-500">{item.desc}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4 pt-3 border-t border-surface-700/50">
+                  <p className="text-xs text-surface-500">
+                    <strong className="text-surface-400">Note:</strong> Health checkup runs a comprehensive 8-step process to ensure project quality.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : view === 'split' ? (
+          <div className="max-w-6xl mx-auto animate-fade-in">
+            <div className="grid gap-4 md:grid-cols-2">
+              {/* Left column: Input and action */}
+              <div className="space-y-4">
+                {/* Main input card */}
+                <div className="glass rounded-2xl p-4 sm:p-6 border border-surface-700/50">
+                  <label className="block text-sm font-medium text-surface-300 mb-2">
+                    Module Path
+                  </label>
+                  <input
+                    type="text"
+                    value={splitModulePath}
+                    onChange={(e) => setSplitModulePath(e.target.value)}
+                    placeholder="pdd/agentic_common.py"
+                    className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-surface-900/50 border border-surface-600 rounded-xl text-white placeholder-surface-500 focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all text-sm sm:text-base"
+                    disabled={isExecuting}
+                  />
+
+                  <button
+                    onClick={handleRunSplitCommand}
+                    disabled={isExecuting || !serverConnected || !splitModulePath.trim()}
+                    className={`
+                      mt-4 w-full px-4 py-2.5 sm:py-3 rounded-xl font-medium transition-all duration-200 flex items-center justify-center gap-2 text-sm sm:text-base
+                      ${isExecuting || !serverConnected || !splitModulePath.trim()
+                        ? 'bg-surface-700 text-surface-500 cursor-not-allowed'
+                        : 'bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40'}
+                    `}
+                  >
+                    <ScissorsIcon className="w-4 h-4" />
+                    <span>Start Split</span>
+                  </button>
+                </div>
+
+                {/* Prerequisites card */}
+                <div className="glass rounded-2xl p-4 sm:p-5 border border-surface-700/50">
+                  <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+                    <svg className="w-4 h-4 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Prerequisites
+                  </h3>
+                  <ul className="space-y-2 text-xs text-surface-400">
+                    <li className="flex items-start gap-2">
+                      <span className="w-4 h-4 rounded-full bg-surface-700 flex items-center justify-center text-[10px] text-surface-300 flex-shrink-0 mt-0.5">1</span>
+                      <span><strong className="text-surface-300">Module exists</strong> - The target file must be a valid Python module in the project</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="w-4 h-4 rounded-full bg-surface-700 flex items-center justify-center text-[10px] text-surface-300 flex-shrink-0 mt-0.5">2</span>
+                      <span><strong className="text-surface-300">Large module</strong> - Best for modules that have become monolithic and hard to maintain</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="w-4 h-4 rounded-full bg-surface-700 flex items-center justify-center text-[10px] text-surface-300 flex-shrink-0 mt-0.5">3</span>
+                      <span><strong className="text-surface-300">Test coverage</strong> - Ensure the module has tests to verify the split doesn't break logic</span>
+                    </li>
+                  </ul>
+                </div>
+
+                {/* After split card */}
+                <div className="glass rounded-2xl p-4 sm:p-5 border border-surface-700/50">
+                  <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+                    <svg className="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    After Split
+                  </h3>
+                  <ul className="space-y-2 text-xs text-surface-400">
+                    <li className="flex items-start gap-2">
+                      <span className="text-green-400">1.</span>
+                      <span><strong className="text-surface-300">Review extraction plan</strong> - The agent proposes how to split symbols into new modules</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-green-400">2.</span>
+                      <span><strong className="text-surface-300">Verify imports</strong> - The agent updates all callers to use the new module paths</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-green-400">3.</span>
+                      <span><strong className="text-surface-300">Commit changes</strong> - New modules are created and registered in architecture.json</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+
+              {/* Right column: Workflow steps */}
+              <div className="glass rounded-2xl p-4 sm:p-5 border border-surface-700/50">
+                <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
+                  <svg className="w-4 h-4 text-accent-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                  Agent Workflow
+                </h3>
+                <div className="space-y-1">
+                  {[
+                    { step: 1, name: 'Load Module', desc: 'Read target module and its dependencies' },
+                    { step: 2, name: 'Analyze Dependencies', desc: 'Map internal symbol relationships' },
+                    { step: 3, name: 'Identify Split Points', desc: 'Find logical boundaries for extraction' },
+                    { step: 4, name: 'Plan Extraction', desc: 'Design new module structure' },
+                    { step: 5, name: 'Extract Components', desc: 'Move code to new child modules' },
+                    { step: 6, name: 'Update Imports', desc: 'Fix all references in the codebase' },
+                    { step: 7, name: 'Verify Logic', desc: 'Run tests to ensure functional parity' },
+                    { step: 8, name: 'Finalize Split', desc: 'Update architecture registry' },
+                  ].map((item) => (
+                    <div key={item.step} className="flex items-start gap-3 py-1.5 px-2 rounded-lg hover:bg-surface-800/30 transition-colors">
+                      <div className="w-5 h-5 rounded-full bg-surface-700 flex items-center justify-center text-[10px] font-medium text-surface-300 flex-shrink-0">
+                        {item.step}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs text-white font-medium">{item.name}</div>
+                        <p className="text-[11px] text-surface-500">{item.desc}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4 pt-3 border-t border-surface-700/50">
+                  <p className="text-xs text-surface-500">
+                    <strong className="text-surface-400">Note:</strong> Splitting large modules improves build times and maintainability.
                   </p>
                 </div>
               </div>

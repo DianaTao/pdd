@@ -1,16 +1,21 @@
+"""
+User story testing and fix utilities for PDD.
+"""
 from __future__ import annotations
 
 import logging
 import os
 import re
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
-
-from rich import print as rprint
+from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Tuple
 
 from .detect_change import detect_change
 from .get_extension import get_extension
+from .contract_ir import parse_prompt_contracts
 
+if TYPE_CHECKING:
+    import click
+    from .contract_ir import PromptContractIR
 
 DEFAULT_STORIES_DIR = "user_stories"
 DEFAULT_PROMPTS_DIR = "prompts"
@@ -31,22 +36,31 @@ logger = logging.getLogger(__name__)
 
 def _resolve_stories_dir(stories_dir: Optional[str] = None) -> Path:
     """Resolve the directory containing story markdown files."""
-    resolved = stories_dir or os.environ.get("PDD_USER_STORIES_DIR") or DEFAULT_STORIES_DIR
+    resolved = (
+        stories_dir or
+        os.environ.get("PDD_USER_STORIES_DIR") or
+        DEFAULT_STORIES_DIR
+    )
     return Path(resolved)
 
 
 def _resolve_prompts_dir(prompts_dir: Optional[str] = None) -> Path:
     """Resolve the directory containing prompt files."""
-    resolved = prompts_dir or os.environ.get("PDD_PROMPTS_DIR") or DEFAULT_PROMPTS_DIR
+    resolved = (
+        prompts_dir or
+        os.environ.get("PDD_PROMPTS_DIR") or
+        DEFAULT_PROMPTS_DIR
+    )
     return Path(resolved)
 
 
 def discover_story_files(stories_dir: Optional[str] = None) -> List[Path]:
-    """Discover user story files matching story__*.md in the stories directory."""
+    """Discover user story files matching story__*.md."""
     base_dir = _resolve_stories_dir(stories_dir)
     if not base_dir.exists() or not base_dir.is_dir():
         return []
-    return sorted(p for p in base_dir.glob(f"{STORY_PREFIX}*{STORY_SUFFIX}") if p.is_file())
+    pattern = f"{STORY_PREFIX}*{STORY_SUFFIX}"
+    return sorted(p for p in base_dir.glob(pattern) if p.is_file())
 
 
 def discover_prompt_files(
@@ -54,13 +68,16 @@ def discover_prompt_files(
     *,
     include_llm: bool = False,
 ) -> List[Path]:
-    """Discover .prompt files from prompts_dir, optionally including *_llm.prompt."""
+    """Discover .prompt files, optionally including *_llm.prompt."""
     base_dir = _resolve_prompts_dir(prompts_dir)
     if not base_dir.exists() or not base_dir.is_dir():
         return []
     prompts = [p for p in base_dir.rglob("*.prompt") if p.is_file()]
     if not include_llm:
-        prompts = [p for p in prompts if not p.name.lower().endswith("_llm.prompt")]
+        prompts = [
+            p for p in prompts
+            if not p.name.lower().endswith("_llm.prompt")
+        ]
     return sorted(prompts)
 
 
@@ -73,7 +90,7 @@ def _build_prompt_name_map(
     prompt_files: Iterable[Path],
     prompts_dir: Optional[Path] = None,
 ) -> Dict[str, Path]:
-    """Build case-sensitive and case-insensitive lookup keys for prompt paths."""
+    """Build name lookup keys for prompt paths."""
     name_map: Dict[str, Path] = {}
     for pf in prompt_files:
         name_map[pf.name] = pf
@@ -124,7 +141,10 @@ def _parse_story_prompt_metadata(story_content: str) -> List[str]:
     return [entry.strip() for entry in raw.split(",") if entry.strip()]
 
 
-def _prompt_reference_for_metadata(prompt_path: Path, prompts_dir: Optional[Path]) -> str:
+def _prompt_reference_for_metadata(
+    prompt_path: Path,
+    prompts_dir: Optional[Path]
+) -> str:
     """Return a stable metadata reference for a prompt path."""
     if prompts_dir:
         try:
@@ -152,9 +172,14 @@ def _upsert_story_prompt_metadata(
         _prompt_reference_for_metadata(pf, prompts_dir)
         for pf in unique_sorted
     ]
-    metadata_line = f"<!-- {STORY_PROMPTS_METADATA_KEY}: {', '.join(metadata_refs)} -->"
+    metadata_line = (
+        f"<!-- {STORY_PROMPTS_METADATA_KEY}: "
+        f"{', '.join(metadata_refs)} -->"
+    )
     if STORY_PROMPTS_METADATA_RE.search(story_content):
-        updated = STORY_PROMPTS_METADATA_RE.sub(metadata_line, story_content, count=1)
+        updated = STORY_PROMPTS_METADATA_RE.sub(
+            metadata_line, story_content, count=1
+        )
     else:
         updated = f"{metadata_line}\n\n{story_content}"
 
@@ -209,14 +234,20 @@ def _resolve_prompt_refs_to_paths(
 
 
 def _resolve_src_dir(prompts_dir: Path) -> Path:
-    """Resolve source directory from PDD_SRC_DIR or default to ../src from prompts_dir."""
+    """
+    Resolve source directory from PDD_SRC_DIR or default to ../src
+    from prompts_dir.
+    """
     resolved = os.environ.get("PDD_SRC_DIR")
     if resolved:
         return Path(resolved)
     return prompts_dir.parent / DEFAULT_SRC_DIR
 
 
-def _prompt_to_code_path(prompt_path: Path, prompts_dir: Path) -> Optional[Path]:
+def _prompt_to_code_path(
+    prompt_path: Path,
+    prompts_dir: Path
+) -> Optional[Path]:
     """Map a prompt file path to its corresponding source file path."""
     try:
         rel_path = prompt_path.relative_to(prompts_dir)
@@ -247,11 +278,13 @@ def _change_main_succeeded(result_message: object) -> bool:
     change_main (non-CSV mode) reports success with:
     "Modified prompt saved to <path>".
     """
-    return isinstance(result_message, str) and result_message.startswith("Modified prompt saved to ")
+    if not isinstance(result_message, str):
+        return False
+    return result_message.startswith("Modified prompt saved to ")
 
 
 def _linked_prompts_from_changes(
-    changes_list: List[Dict[str, object]],
+    changes_list: List[Dict[str, str]],
     prompt_files: List[Path],
     prompts_root: Optional[Path],
 ) -> List[Path]:
@@ -259,7 +292,9 @@ def _linked_prompts_from_changes(
     linked_prompt_paths: List[Path] = []
     for change in changes_list:
         prompt_name = str(change.get("prompt_name") or "")
-        resolved_prompt = _resolve_prompt_path(prompt_name, prompt_files, prompts_root)
+        resolved_prompt = _resolve_prompt_path(
+            prompt_name, prompt_files, prompts_root
+        )
         if resolved_prompt:
             linked_prompt_paths.append(resolved_prompt)
     return _dedupe_prompt_paths(linked_prompt_paths)
@@ -270,7 +305,7 @@ def _select_story_prompt_links(
     story_content: str,
     prompt_files: List[Path],
     prompts_root: Optional[Path],
-    changes_list: Optional[List[Dict[str, object]]] = None,
+    changes_list: Optional[List[Dict[str, str]]] = None,
 ) -> Tuple[List[Path], str]:
     """
     Select deterministic story prompt links.
@@ -281,12 +316,16 @@ def _select_story_prompt_links(
     3) all prompt files (full-project fallback)
     """
     if changes_list is not None:
-        linked_from_changes = _linked_prompts_from_changes(changes_list, prompt_files, prompts_root)
+        linked_from_changes = _linked_prompts_from_changes(
+            changes_list, prompt_files, prompts_root
+        )
         if linked_from_changes:
             return linked_from_changes, "detect_change"
 
     story_refs = _extract_prompt_refs_from_story_text(story_content)
-    linked_from_story = _resolve_prompt_refs_to_paths(story_refs, prompt_files, prompts_root)
+    linked_from_story = _resolve_prompt_refs_to_paths(
+        story_refs, prompt_files, prompts_root
+    )
     if linked_from_story:
         return linked_from_story, "story_content"
 
@@ -315,9 +354,13 @@ def cache_story_prompt_links(
     if not story_path.exists() or not story_path.is_file():
         return False, f"User story file not found: {story_file}", 0.0, "", []
 
-    prompt_files = prompt_files or discover_prompt_files(prompts_dir, include_llm=include_llm_prompts)
     if not prompt_files:
-        return False, "No prompt files found to link user story metadata.", 0.0, "", []
+        prompt_files = discover_prompt_files(
+            prompts_dir, include_llm=include_llm_prompts
+        )
+    if not prompt_files:
+        msg = "No prompt files found to link user story metadata."
+        return False, msg, 0.0, "", []
 
     prompts_root = _resolve_prompts_dir(prompts_dir) if prompts_dir else None
     story_content = _read_story(story_path)
@@ -330,11 +373,18 @@ def cache_story_prompt_links(
         for ref in existing_refs:
             resolved = _resolve_prompt_path(ref, prompt_files, prompts_root)
             if resolved:
-                resolved_refs.append(_prompt_reference_for_metadata(resolved, prompts_root))
+                ref = _prompt_reference_for_metadata(resolved, prompts_root)
+                resolved_refs.append(ref)
             else:
                 unresolved_refs.append(ref)
         if resolved_refs and not unresolved_refs:
-            return True, "Story already contains prompt metadata.", 0.0, "", sorted(set(resolved_refs))
+            return (
+                True,
+                "Story already contains prompt metadata.",
+                0.0,
+                "",
+                sorted(set(resolved_refs)),
+            )
 
     changes_list, cost, model = detect_change(
         [str(p) for p in prompt_files],
@@ -366,15 +416,22 @@ def cache_story_prompt_links(
     )
     if updated:
         if link_source == "detect_change":
-            return True, "Story prompt metadata linked.", cost, model, linked_refs
+            msg = "Story prompt metadata linked."
+            return True, msg, cost, model, linked_refs
         if link_source == "story_content":
-            return True, "Story prompt metadata linked from story content.", cost, model, linked_refs
-        return True, "Story prompt metadata linked to full prompt set.", cost, model, linked_refs
+            msg = "Story prompt metadata linked from story content."
+            return True, msg, cost, model, linked_refs
+        msg = "Story prompt metadata linked to full prompt set."
+        return True, msg, cost, model, linked_refs
+
     if link_source == "detect_change":
-        return True, "Story prompt metadata already up to date.", cost, model, linked_refs
+        msg = "Story prompt metadata already up to date."
+        return True, msg, cost, model, linked_refs
     if link_source == "story_content":
-        return True, "Story prompt metadata already up to date from story content.", cost, model, linked_refs
-    return True, "Story prompt metadata already up to date for full prompt set.", cost, model, linked_refs
+        msg = "Story prompt metadata already up to date from story content."
+        return True, msg, cost, model, linked_refs
+    msg = "Story prompt metadata already up to date for full prompt set."
+    return True, msg, cost, model, linked_refs
 
 
 def _slugify_story_name(raw_name: str) -> str:
@@ -392,7 +449,9 @@ def _default_story_output_path(story_slug: str, stories_root: Path) -> Path:
 
     index = 1
     while True:
-        next_candidate = stories_root / f"{STORY_PREFIX}{stem}_{index}{STORY_SUFFIX}"
+        next_candidate = stories_root / (
+            f"{STORY_PREFIX}{stem}_{index}{STORY_SUFFIX}"
+        )
         if not next_candidate.exists():
             return next_candidate
         index += 1
@@ -409,7 +468,9 @@ def _prompt_topic_name(prompt_path: Path) -> str:
 
 def _story_title_from_prompts(prompt_paths: List[Path]) -> str:
     """Build a title from one or more prompt file names."""
-    topic_names = [_prompt_topic_name(path).title() for path in prompt_paths]
+    topic_names = [
+        _prompt_topic_name(path).title() for path in prompt_paths
+    ]
     if not topic_names:
         return "Generated Story"
     if len(topic_names) == 1:
@@ -421,7 +482,9 @@ def _story_title_from_prompts(prompt_paths: List[Path]) -> str:
 
 def _story_slug_from_prompts(prompt_paths: List[Path]) -> str:
     """Build a filesystem-safe slug from prompt file names."""
-    topic_names = [_slugify_story_name(_prompt_topic_name(path)) for path in prompt_paths]
+    topic_names = [
+        _slugify_story_name(_prompt_topic_name(path)) for path in prompt_paths
+    ]
     merged = "_".join(name for name in topic_names[:3] if name)
     return merged or "generated_story"
 
@@ -430,7 +493,7 @@ def _prompt_summary_line(prompt_path: Path) -> str:
     """Extract a compact summary line from prompt content."""
     try:
         content = prompt_path.read_text(encoding="utf-8")
-    except Exception:
+    except (OSError, UnicodeDecodeError):
         return "Prompt included in story scope."
     for raw_line in content.splitlines():
         line = raw_line.strip()
@@ -440,8 +503,9 @@ def _prompt_summary_line(prompt_path: Path) -> str:
             continue
         if line.startswith("#") and not line.startswith("##"):
             continue
-        if len(line) > 140:
-            return f"{line[:137].rstrip()}..."
+        # Truncate to a more reasonable length for story markdown
+        if len(line) > 80:
+            return f"{line[:77].rstrip()}..."
         return line
     return "Prompt included in story scope."
 
@@ -461,19 +525,51 @@ def _render_story_markdown_from_prompts(
     for path in prompt_paths:
         ref = _prompt_reference_for_metadata(path, prompts_root)
         summary = _prompt_summary_line(path)
-        scope_lines.append(f"- `{ref}`: {summary}")
+        # Fix long line debt by ensuring the formatted line stays reasonable
+        entry = f"- `{ref}`: {summary}"
+        scope_lines.append(entry)
 
     scope_block = "\n".join(scope_lines)
+
+    covers_lines = []
+    for path in prompt_paths:
+        try:
+            ir: PromptContractIR = parse_prompt_contracts(path)
+            for rule in ir.rules:
+                ref = _prompt_reference_for_metadata(path, prompts_root)
+                covers_lines.append(f"- {ref}#{rule.raw_id}: {rule.line}")
+        except (OSError, UnicodeDecodeError, ValueError):
+            # Skip prompts with missing or invalid contracts
+            continue
+    covers_block = (
+        "\n".join(covers_lines) or
+        "- (To be seeded from prompt contracts)"
+    )
+
+    metadata_tag = (
+        f"<!-- {STORY_PROMPTS_METADATA_KEY}: "
+        f"{', '.join(metadata_refs)} -->\n\n"
+    )
+
     return (
         f"# User Story: {title}\n\n"
-        f"<!-- {STORY_PROMPTS_METADATA_KEY}: {', '.join(metadata_refs)} -->\n\n"
+        f"{metadata_tag}"
         "## Story\n"
-        "As a user, I want the scoped prompt capabilities to compose correctly so that the full workflow works end-to-end.\n\n"
+        "As a user, I want the scoped prompt capabilities to compose correctly "
+        "so that the full workflow works end-to-end.\n\n"
         "## Prompt Scope\n"
         f"{scope_block}\n\n"
+        "## Covers\n"
+        f"{covers_block}\n\n"
+        "## Oracle\n"
+        "- (Description of how to verify behavioral success)\n\n"
+        "## Non-Oracle\n"
+        "- (Out-of-scope behaviors or known limitations)\n\n"
+        "## Negative Cases\n"
+        "- (Expected error handling or edge cases)\n\n"
         "## Acceptance Criteria\n"
-        "- [ ] Behavior required by all listed prompts works when used together.\n"
-        "- [ ] `pdd detect --stories` reports no required prompt changes for this story.\n"
+        "- [ ] Behavior required by all listed prompts works together.\n"
+        "- [ ] `pdd detect --stories` reports no prompt changes.\n"
     )
 
 
@@ -493,19 +589,22 @@ def generate_user_story(
     Generate a story__*.md file from one or more prompt files.
 
     Returns:
-        success flag, message, cost, model name, generated story path, linked prompt refs.
+        success flag, message, cost, model name, story path, linked prompt refs.
     """
     if not prompt_files:
-        return False, "No prompt files provided for story generation.", 0.0, "", "", []
+        msg = "No prompt files provided for story generation."
+        return False, msg, 0.0, "", "", []
 
     resolved_paths: List[Path] = []
     seen_keys = set()
     for prompt_file in prompt_files:
         prompt_path = Path(prompt_file)
         if not prompt_path.exists() or not prompt_path.is_file():
-            return False, f"Prompt file not found: {prompt_file}", 0.0, "", "", []
+            msg = f"Prompt file not found: {prompt_file}"
+            return False, msg, 0.0, "", "", []
         if prompt_path.suffix.lower() != ".prompt":
-            return False, f"Story generation requires .prompt files: {prompt_file}", 0.0, "", "", []
+            msg = f"Story generation requires .prompt files: {prompt_file}"
+            return False, msg, 0.0, "", "", []
         key = str(prompt_path.resolve()).lower()
         if key in seen_keys:
             continue
@@ -524,11 +623,14 @@ def generate_user_story(
         output_path = Path(output)
         if output_path.exists() and output_path.is_dir():
             story_slug = _story_slug_from_prompts(resolved_paths)
-            output_path = output_path / f"{STORY_PREFIX}{story_slug}{STORY_SUFFIX}"
+            output_path = (
+                output_path / f"{STORY_PREFIX}{story_slug}{STORY_SUFFIX}"
+            )
     else:
         stories_root = _resolve_stories_dir(stories_dir)
         stories_root.mkdir(parents=True, exist_ok=True)
-        output_path = _default_story_output_path(_story_slug_from_prompts(resolved_paths), stories_root)
+        slug = _story_slug_from_prompts(resolved_paths)
+        output_path = _default_story_output_path(slug, stories_root)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(story_markdown, encoding="utf-8")
@@ -543,7 +645,9 @@ def generate_user_story(
 
     # Generation-time auto-detection: run detect_change on the story and
     # cache detected prompt links into metadata for deterministic reruns.
-    detected_pool = discover_prompt_files(prompts_dir, include_llm=include_llm_prompts)
+    detected_pool = discover_prompt_files(
+        prompts_dir, include_llm=include_llm_prompts
+    )
     merged_pool: List[Path] = []
     seen_pool = set()
     for pf in resolved_paths + detected_pool:
@@ -553,7 +657,13 @@ def generate_user_story(
         merged_pool.append(pf)
         seen_pool.add(key)
 
-    detect_success, detect_message, detect_cost, detect_model, detected_links = cache_story_prompt_links(
+    (
+        detect_success,
+        detect_message,
+        detect_cost,
+        detect_model,
+        detected_links,
+    ) = cache_story_prompt_links(
         story_file=str(output_path),
         prompts_dir=prompts_dir,
         prompt_files=merged_pool,
@@ -569,7 +679,8 @@ def generate_user_story(
 
     if detect_success and detected_links:
         message_lower = detect_message.lower()
-        if "full prompt set" not in message_lower and "story content" not in message_lower:
+        if ("full prompt set" not in message_lower and
+                "story content" not in message_lower):
             linked_refs = detected_links
             status_message = (
                 f"Generated story file: {output_path}. "
@@ -630,14 +741,19 @@ def run_user_story_tests(
     quiet: bool = False,
     fail_fast: bool = False,
     include_llm_prompts: bool = False,
-    cache_story_prompt_links: bool = False,
+    should_cache_links: bool = False,
 ) -> Tuple[bool, List[Dict[str, object]], float, str]:
     """
     Run user story tests by calling detect_change on each story.
 
     A story passes if detect_change returns an empty changes_list.
     """
-    prompt_files = prompt_files or discover_prompt_files(prompts_dir, include_llm=include_llm_prompts)
+    from rich import print as rprint
+
+    if not prompt_files:
+        prompt_files = discover_prompt_files(
+            prompts_dir, include_llm=include_llm_prompts
+        )
     story_files = story_files or discover_story_files(stories_dir)
     prompts_root = _resolve_prompts_dir(prompts_dir) if prompts_dir else None
 
@@ -674,7 +790,9 @@ def run_user_story_tests(
                     f"{story_path}: {', '.join(unresolved_prompt_refs)}"
                 )
             if resolved_story_prompts:
-                story_prompt_files = _dedupe_prompt_paths(resolved_story_prompts)
+                story_prompt_files = _dedupe_prompt_paths(
+                    resolved_story_prompts
+                )
             else:
                 all_passed = False
                 results.append(
@@ -682,7 +800,10 @@ def run_user_story_tests(
                         "story": str(story_path),
                         "passed": False,
                         "changes": [],
-                        "error": "No prompts from pdd-story-prompts metadata could be resolved.",
+                        "error": (
+                            "No prompts from pdd-story-prompts "
+                            "metadata could be resolved."
+                        ),
                     }
                 )
                 if not quiet:
@@ -710,7 +831,7 @@ def run_user_story_tests(
             "changes": changes_list,
         })
 
-        if cache_story_prompt_links and not metadata_prompt_refs:
+        if should_cache_links and not metadata_prompt_refs:
             linked_prompt_paths, _ = _select_story_prompt_links(
                 story_content=story_content,
                 prompt_files=prompt_files,
@@ -724,7 +845,9 @@ def run_user_story_tests(
                 prompts_root,
             )
             if updated:
-                logger.info("Updated story prompt metadata links for %s", story_path)
+                logger.info(
+                    "Updated story prompt metadata links for %s", story_path
+                )
 
         if not quiet:
             status = "PASS" if passed else "FAIL"
@@ -738,7 +861,7 @@ def run_user_story_tests(
 
 def run_user_story_fix(
     *,
-    ctx: object,
+    ctx: click.Context,
     story_file: str,
     prompts_dir: Optional[str] = None,
     strength: float = 0.2,
@@ -778,7 +901,8 @@ def run_user_story_fix(
     )
 
     if not changes_list:
-        return True, "No prompt changes needed for this user story.", detect_cost, detect_model, []
+        msg = "No prompt changes needed for this user story."
+        return True, msg, detect_cost, detect_model, []
 
     total_cost = detect_cost
     model_name = detect_model
@@ -795,7 +919,9 @@ def run_user_story_fix(
     try:
         for change in changes_list:
             prompt_name = str(change.get("prompt_name") or "")
-            prompt_path = _resolve_prompt_path(prompt_name, prompt_files, prompts_root)
+            prompt_path = _resolve_prompt_path(
+                prompt_name, prompt_files, prompts_root
+            )
             if not prompt_path:
                 errors.append(f"Unable to resolve prompt path: {prompt_name}")
                 continue
@@ -819,7 +945,9 @@ def run_user_story_fix(
             if _change_main_succeeded(result_message):
                 changed_files.append(str(prompt_path))
             else:
-                logger.debug("Story fix failed for %s: %s", prompt_path, result_message)
+                logger.debug(
+                    "Story fix failed for %s: %s", prompt_path, result_message
+                )
                 errors.append(str(result_message))
 
     finally:
@@ -848,6 +976,8 @@ def run_user_story_fix(
         model_name = validation_model
 
     if not passed:
-        return False, "User story still failing after prompt updates.", total_cost, model_name, changed_files
+        msg = "User story still failing after prompt updates."
+        return False, msg, total_cost, model_name, changed_files
 
-    return True, "User story prompts updated successfully.", total_cost, model_name, changed_files
+    msg = "User story prompts updated successfully."
+    return True, msg, total_cost, model_name, changed_files

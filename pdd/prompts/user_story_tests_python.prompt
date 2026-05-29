@@ -7,12 +7,15 @@ Implement user story utilities that:
 - discover story files (`story__*.md`) and prompt files (`*.prompt`)
 - validate stories against prompts via `detect_change`
 - apply prompt fixes for a single story by orchestrating `change_main`
+- generate new user story markdown files from prompt inputs
 
 % Inputs and Outputs
 - `run_user_story_tests(...) -> Tuple[bool, List[Dict[str, object]], float, str]`
   - returns: `all_passed`, per-story results list, total cost, model name
 - `run_user_story_fix(...) -> Tuple[bool, str, float, str, List[str]]`
   - returns: success flag, status message, total cost, model name, changed prompt paths
+- `generate_user_story(...) -> Tuple[bool, str, float, str, str, List[str]]`
+  - returns: success flag, status message, cost, model name, generated story path, linked prompt refs
 
 % Requirements
 1. **Story and prompt discovery**
@@ -30,7 +33,21 @@ Implement user story utilities that:
    - If no stories are found, return success with zero cost.
    - If no prompt files are found, return failure with a clear message and zero cost.
 
-3. **Story fix flow**
+3. **Story generation**
+   - `generate_user_story` must:
+     - discover prompt files and title the story based on their human-friendly topic names.
+     - render canonical story markdown including:
+       - `## Story`: standardized user persona and goal.
+       - `## Prompt Scope`: list of prompt references and compact summaries.
+       - `## Covers`: rule IDs covered by this story; seed from `contract_ir` if the prompt has contracts.
+       - `## Oracle`: description of how to verify behavioral success.
+       - `## Non-Oracle`: out-of-scope behaviors or known limitations.
+       - `## Negative Cases`: expected error handling or edge cases.
+       - `## Acceptance Criteria`: checklist including functional verification and `pdd detect --stories` validation.
+     - support auto-detection of touched prompts to cache metadata in the story file.
+     - support explicit output path or default to `user_stories/story__<slug>.md`.
+
+4. **Story fix flow**
    - `run_user_story_fix` must:
      - load the target story file and run `detect_change` over prompt files
      - for each reported prompt, resolve prompt path robustly (case-insensitive + basename fallback)
@@ -42,11 +59,11 @@ Implement user story utilities that:
    - Append to changed files only on successful `change_main` calls.
    - Re-run `run_user_story_tests` on just the target story after applying changes; fail if still not passing.
 
-4. **Recursion prevention and context hygiene**
+5. **Recursion prevention and context hygiene**
    - While calling `change_main` from story fix flow, set `ctx.obj["skip_user_stories"] = True` and restore original value afterward.
    - Ensure restoration runs via `finally` block even on errors.
 
-5. **Error handling and diagnostics**
+6. **Error handling and diagnostics**
    - Return actionable messages for missing story file, missing prompts, unresolved prompt path, missing mapped code file, and failed post-fix validation.
    - Keep a module logger (`logging.getLogger(__name__)`) for debug traces.
    - Use type annotations and concise docstrings.
@@ -55,4 +72,5 @@ Implement user story utilities that:
 - `.detect_change.detect_change`
 - `.change_main.change_main` (import lazily inside fix function to avoid cycles)
 - `.get_extension.get_extension`
+- `.contract_ir.parse_prompt_contracts` (optional, for seeding `## Covers`)
 - `rich.print` for PASS/FAIL output when not quiet

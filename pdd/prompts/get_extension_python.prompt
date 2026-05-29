@@ -1,3 +1,18 @@
+<pdd-reason>Returns the file extension for a given programming language using the language_format.csv data source.</pdd-reason>
+
+<pdd-interface>
+{
+  "type": "module",
+  "module": {
+    "functions": [
+      {"name": "get_extension", "signature": "(language: str)", "returns": "str"}
+    ]
+  }
+}
+</pdd-interface>
+
+<pdd-dependency>path_resolution_python.prompt</pdd-dependency>
+
 % Write a function `get_extension` that returns the file extension for a given programming language.
 
 <include>context/python_preamble.prompt</include>
