@@ -3,16 +3,17 @@ The `SyncFromPromptModal` is a React UI component designed for an architecture m
 
 **Requirements**
 1. **Visibility Control**: The modal must respond to an `isOpen` prop. When closed, it should return `null`. It should include a backdrop that closes the modal on click, unless a sync is currently in progress.
-2. **Pre-Sync State**: Before a sync result is available, display an educational view explaining that prompts are the "Source of Truth" and listing the specific PDD tags being scanned.
+2. **Pre-Sync State**: Before a sync result is available, display an educational view explaining that prompts are the "Source of Truth" and listing the specific PDD tags being scanned (reason, interface, dependencies, plus new contract rules, capabilities, and evidence status).
 3. **Sync Execution**: Provide a "Sync Now" button that triggers the `onSync` callback. Show a loading spinner and disable interaction while `isSyncing` is true.
 4. **Post-Sync Summary**: 
     - Display a success or error banner based on `result.success` and `result.validation.valid`.
     - Show a count of updated vs. skipped modules.
     - List validation errors (e.g., circular dependencies) and general sync warnings.
+    - Display aggregate contract stats if available (total rules and stories found).
 5. **Detailed Results**: 
     - Implement a toggleable "Detailed Changes" section.
     - For each module, show its filename and status (success/error/no changes).
-    - Provide a nested "Show changes" toggle for each module that displays a diff-style view (Old vs. New) for modified fields.
+    - Provide a nested "Show changes" toggle for each module that displays a diff-style view (Old vs. New) for modified fields, including `contract_summary` fields (rules, capabilities, evidence status). Use color coding for evidence freshness changes.
 6. **Styling**: Use Tailwind CSS with a "glass-morphism" aesthetic (dark theme, blurred backdrops, `surface` and `accent` color scales).
 7. **Error Handling**: Gracefully handle null results and empty error arrays.
 

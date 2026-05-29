@@ -72,13 +72,13 @@
    - `PromptExtractInfo { include_path, query, cache_key, has_cached_entry:boolean, source_path?:string, timestamp?:string, is_fresh?:boolean|null }`
 
 6) Architecture/auth/remote-generation types:
-   - `ArchitectureModule { reason, description, dependencies:string[], priority, filename, filepath, tags?:string[], interface?:{ type:string; [key:string]:any }, position?:{x:number;y:number} }`
+   - `ArchitectureModule { reason, description, dependencies:string[], priority, filename, filepath, tags?:string[], interface?:{ type:string; [key:string]:any }, position?:{x:number;y:number}, contract_summary?:any }`
    - `ArchitectureCheckResult { exists:boolean, path?:string }`
    - `ArchitectureValidationError { type:'circular_dependency'|'missing_dependency'|'invalid_field', message, modules:string[] }`
    - `ArchitectureValidationWarning { type:'duplicate_dependency'|'orphan_module', message, modules:string[] }`
    - `ArchitectureValidationResult { valid, errors:ArchitectureValidationError[], warnings:ArchitectureValidationWarning[] }`
    - `ArchitectureSyncRequest { filenames?:string[]|null, dry_run?:boolean }`
-   - `ArchitectureSyncModuleResult { filename, success, updated, changes:{ reason?:{old:string;new:string}; interface?:{old:any;new:any}; dependencies?:{old:string[];new:string[]} }, error? }`
+   - `ArchitectureSyncModuleResult { filename, success, updated, changes:{ reason?:{old:string;new:string}; interface?:{old:any;new:any}; dependencies?:{old:string[];new:string[]}; contract_summary?:{old:any;new:any} }, error? }`
    - `ArchitectureSyncResult { success, updated_count, skipped_count, results:ArchitectureSyncModuleResult[], validation:ArchitectureValidationResult, errors:string[] }`
    - `GenerateTagsResult { success, tags:string|null, has_existing_tags, architecture_entry:Record<string, any>|null, error:string|null }`
    - `AuthStatus { authenticated, cached, expires_at:number|null }`

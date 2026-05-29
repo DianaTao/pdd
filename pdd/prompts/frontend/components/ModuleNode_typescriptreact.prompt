@@ -33,13 +33,18 @@ Requirements
 12. If `hasPrompt`, render:
    - top-right green check badge; move it to `right-5` when sync button is present, otherwise keep near the right edge
    - bottom-right C/T/E circular indicators with active colors (`green/yellow/blue`) and muted fallback, each with exists/missing titles
-13. Render text rows inside the card:
+   - if `module.contract_summary` exists, render a contract health status dot (top-left, next to any edit button) color-coded by `evidence_status`: green for 'fresh', yellow for 'stale', red for 'missing'. Add a small 'C' badge next to the C/T/E indicators if the module has contract rules (`rules.length > 0`).
+13. Update Tooltip content: when `module.contract_summary` exists, include a "Contract" section showing:
+   - Rule count and Story count
+   - Evidence status (Fresh/Stale/Missing)
+   - Coverage status (e.g., 'full', 'story-only')
+14. Render text rows inside the card:
    - label (`text-sm`, white, truncated)
    - development-only coordinate row when `process.env.NODE_ENV === 'development'`, showing rounded `x`/`y` and a detailed `title`
    - module type row from `module.interface?.type || 'module'` using `colors.text`
    - priority row `Priority: {module.priority}`
-14. Keep inline SVG icons for prompt check, edit, and sync controls as in-component markup.
-15. Export default `memo(ModuleNode)`.
+15. Keep inline SVG icons for prompt check, edit, and sync controls as in-component markup.
+16. Export default `memo(ModuleNode)`.
 
 Deliverable
 - Output only `pdd/frontend/components/ModuleNode.tsx`.

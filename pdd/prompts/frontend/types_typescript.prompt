@@ -9,9 +9,10 @@
 6) `PromptInfo`: `{prompt:string; basename:string; code?:string; test?:string; example?:string}`.
 7) `DevUnit`: `{prompt:string; code:string; example:string; test:string}`. `MockPrompt`: `{id:string; includes:string[]; devUnit:DevUnit}`.
 8) `ArchitectureInterface`: `{type:'page'|'component'|'module'|'api'|'graphql'|'cli'|'job'|'message'|'config'; page?:{route:string; params?:{name:string;type:string;description?:string}[]; dataSources?:{kind:string;source:string;method?:string;description?:string}[]}; component?:{props:{name:string;type:string;required?:boolean;description?:string}[]; emits?:string[]; context?:string[]}; module?:{functions:{name:string;signature:string;returns?:string;errors?:string[];sideEffects?:string[]}[]}; api?:{endpoints:{method:string;path:string;auth?:string;requestSchema?:any;responseSchema?:any}[]}; graphql?:{sdl?:string;queries?:string[];mutations?:string[];subscriptions?:string[]}; cli?:{commands:{name:string;args?:string[];flags?:string[];exitCodes?:number[]}[];io?:{stdin?:string;stdout?:string}}; job?:{trigger:{schedule?:string;event?:string};inputs?:string[];outputs?:string[];retryPolicy?:string}; message?:{topics:{name:string;direction:'publish'|'subscribe';schema?:any;qos?:string}[]}; config?:{keys:{name:string;type:string;default?:any;required?:boolean;source:'env'|'file'|'secret'}[]}}`.
-9) `ArchitectureModule`: `{reason:string; description:string; dependencies:string[]; priority:number; filename:string; filepath:string; tags?:string[]; interface?:ArchitectureInterface; position?:{x:number;y:number}}`.
-10) `ProjectArchitecture`: `{appName?:string; prdPath?:string; techStackPath?:string; modules:ArchitectureModule[]}`.
-11) `.pddrc` types:
+9) `ContractSummary`: `{rules:string[]; critical:string[]; stories:string[]; capabilities:string[]; coverage_status:string; evidence_status:string; waived:string[]}`.
+10) `ArchitectureModule`: `{reason:string; description:string; dependencies:string[]; priority:number; filename:string; filepath:string; tags?:string[]; interface?:ArchitectureInterface; position?:{x:number;y:number}; contract_summary?:ContractSummary}`.
+11) `ProjectArchitecture`: `{appName?:string; prdPath?:string; techStackPath?:string; modules:ArchitectureModule[]}`.
+12) `.pddrc` types:
     - `PddrcContextDefaults`: `{generate_output_path?:string; test_output_path?:string; example_output_path?:string; prompts_dir?:string; default_language?:string; strength?:number; temperature?:number; budget?:number; max_attempts?:number}`.
     - `PddrcContext`: `{paths:string[]; defaults:PddrcContextDefaults}`.
     - `PddrcConfig`: `{version?:string; contexts:Record<string, PddrcContext>}`.
