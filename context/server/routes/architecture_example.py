@@ -1,92 +1,99 @@
-import asyncio
-import uvicorn
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
+import sys
+import os
+import json
+from unittest.mock import MagicMock, patch
 
-# Assuming the module is saved as pdd/server/routes/architecture.py
-# In a real app, you would use: from pdd.server.routes.architecture import router as architecture_router
-# For this standalone example, we import from the local file context:
-try:
-    from architecture import (
-        router as architecture_router,
-        ArchitectureModule,
-        ValidateArchitectureRequest,
-        _validate_architecture,  # Importing internal function for direct demonstration
-    )
-except ImportError:
-    # Fallback or mock for demonstration if the module is not present in the environment
-    pass
+# Ensure the project root is in sys.path so we can import pdd
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../")))
 
-def create_app() -> FastAPI:
-    """Create the main FastAPI application and include the architecture router."""
-    app = FastAPI(title="Architecture Validator Example")
-    
-    # Include the router defined in the module
-    app.include_router(architecture_router)
-    
-    return app
+# Mock the dependencies of the module we are about to import
+# This is necessary because they might import other things that are not present
+mock_architecture_sync = MagicMock()
+mock_agentic_common = MagicMock()
+mock_load_prompt_template = MagicMock()
+mock_app = MagicMock()
 
-def demonstrate_direct_validation():
+sys.modules["pdd.architecture_sync"] = mock_architecture_sync
+sys.modules["pdd.agentic_common"] = mock_agentic_common
+sys.modules["pdd.load_prompt_template"] = mock_load_prompt_template
+sys.modules["pdd.server.app"] = mock_app
+
+# Now import the module under test
+from pdd.server.routes.architecture import (
+    ArchitectureModule,
+    ValidateArchitectureRequest,
+    _validate_architecture,
+)
+
+def demonstrate_validation():
     """
-    Demonstrates how to use the validation logic directly (e.g., in a CLI tool or unit test)
-    without spinning up the full HTTP server.
+    Demonstrates how to use the validation logic.
+    
+    Inputs:
+        modules: List of ArchitectureModule objects
+        
+    Outputs:
+        ValidationResult: Object containing 'valid' boolean, 'errors' and 'warnings' lists.
     """
-    print("\n--- Direct Validation Logic Demo ---")
+    print("--- Architecture Validation Demo ---")
+    print()
 
-    # Scenario 1: A valid architecture
+    # 1. Valid Architecture
     valid_modules = [
         ArchitectureModule(
             filename="core.py",
             filepath="src/core.py",
             description="Core logic",
-            reason="Base module",
+            reason="Foundation",
             priority=10,
             dependencies=[]
         ),
         ArchitectureModule(
-            filename="utils.py",
-            filepath="src/utils.py",
-            description="Utilities",
-            reason="Helper functions",
+            filename="api.py",
+            filepath="src/api.py",
+            description="API endpoints",
+            reason="Interface",
             priority=5,
             dependencies=["core.py"]
         )
     ]
     
     result = _validate_architecture(valid_modules)
-    print(f"Scenario 1 (Valid): Valid={result.valid}, Errors={len(result.errors)}")
+    print(f"Valid case: valid={result.valid}, errors={len(result.errors)}, warnings={len(result.warnings)}")
+    print()
 
-    # Scenario 2: Circular Dependency
+    # 2. Circular Dependency
     circular_modules = [
         ArchitectureModule(
-            filename="a.py",
-            filepath="src/a.py",
+            filename="A.py",
+            filepath="src/A.py",
             description="Module A",
-            reason="A",
+            reason="Cycle test",
             priority=1,
-            dependencies=["b.py"]
+            dependencies=["B.py"]
         ),
         ArchitectureModule(
-            filename="b.py",
-            filepath="src/b.py",
+            filename="B.py",
+            filepath="src/B.py",
             description="Module B",
-            reason="B",
+            reason="Cycle test",
             priority=1,
-            dependencies=["a.py"]  # Cycle!
+            dependencies=["A.py"]
         )
     ]
-
+    
     result = _validate_architecture(circular_modules)
-    print(f"Scenario 2 (Circular): Valid={result.valid}")
+    print(f"Circular case: valid={result.valid}")
     for err in result.errors:
         print(f"  [Error] {err.type}: {err.message}")
+    print()
 
-    # Scenario 3: Missing Dependency & Warnings
-    broken_modules = [
+    # 3. Missing Dependency and Orphan Warning
+    mixed_modules = [
         ArchitectureModule(
             filename="orphan.py",
             filepath="src/orphan.py",
-            description="Lonely module",
+            description="Lonely",
             reason="Test",
             priority=1,
             dependencies=[]
@@ -94,75 +101,26 @@ def demonstrate_direct_validation():
         ArchitectureModule(
             filename="broken.py",
             filepath="src/broken.py",
-            description="Broken links",
+            description="Missing link",
             reason="Test",
             priority=1,
-            dependencies=["ghost.py", "ghost.py"] # Missing + Duplicate
+            dependencies=["non_existent.py"]
         )
     ]
-
-    result = _validate_architecture(broken_modules)
-    print(f"Scenario 3 (Mixed): Valid={result.valid}")
+    
+    result = _validate_architecture(mixed_modules)
+    print(f"Mixed case: valid={result.valid}")
     for err in result.errors:
         print(f"  [Error] {err.type}: {err.message}")
     for warn in result.warnings:
         print(f"  [Warning] {warn.type}: {warn.message}")
-
-
-def demonstrate_api_usage():
-    """
-    Demonstrates how to call the endpoint via HTTP using TestClient.
-    """
-    print("\n--- API Endpoint Demo ---")
-    
-    app = create_app()
-    client = TestClient(app)
-
-    # Construct the request payload
-    payload = {
-        "modules": [
-            {
-                "filename": "api.py",
-                "filepath": "src/api.py",
-                "description": "API Layer",
-                "reason": "Expose endpoints",
-                "priority": 100,
-                "dependencies": ["service.py"]
-            },
-            {
-                "filename": "service.py",
-                "filepath": "src/service.py",
-                "description": "Business Logic",
-                "reason": "Process data",
-                "priority": 50,
-                "dependencies": []
-            }
-        ]
-    }
-
-    response = client.post("/api/v1/architecture/validate", json=payload)
-    
-    if response.status_code == 200:
-        data = response.json()
-        print(f"API Response Status: {response.status_code}")
-        print(f"Is Valid: {data['valid']}")
-        print(f"Errors: {len(data['errors'])}")
-        print(f"Warnings: {len(data['warnings'])}")
-    else:
-        print(f"Request failed: {response.text}")
+    print()
 
 if __name__ == "__main__":
-    # 1. Show internal logic working
     try:
-        demonstrate_direct_validation()
-    except NameError:
-        print("Architecture module not found, skipping direct validation demo.")
-
-    # 2. Show API integration working
-    try:
-        demonstrate_api_usage()
+        demonstrate_validation()
     except Exception as e:
-        print(f"API demo failed: {e}")
+        print(f"Example failed: {e}")
+        sys.exit(1)
     
-    # 3. To run the actual server, uncomment below:
-    # uvicorn.run(create_app(), host="127.0.0.1", port=8000)
+    sys.exit(0)

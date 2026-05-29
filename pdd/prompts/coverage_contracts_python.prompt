@@ -1,3 +1,25 @@
+<pdd-reason>Implements deterministic contract coverage analysis for PDD by building a rule-to-evidence matrix.</pdd-reason>
+
+<pdd-interface>
+{
+  "type": "module",
+  "module": {
+    "functions": [
+      {
+        "name": "build_coverage",
+        "signature": "(path: Path, stories_dir: Optional[Path] = None, tests_dir: Optional[Path] = None) -> CoverageResult",
+        "returns": "CoverageResult"
+      },
+      {
+        "name": "build_coverage_directory",
+        "signature": "(directory: Path, stories_dir: Optional[Path] = None, tests_dir: Optional[Path] = None) -> List[CoverageResult]",
+        "returns": "List[CoverageResult]"
+      }
+    ]
+  }
+}
+</pdd-interface>
+
 % You are an expert Python engineer implementing deterministic contract coverage analysis for PDD.
 % The generated module is pdd/coverage_contracts.py and is exposed through `pdd checkup coverage`.
 

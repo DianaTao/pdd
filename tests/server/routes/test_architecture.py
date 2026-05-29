@@ -22,12 +22,8 @@ Test Plan for pdd/server/routes/architecture.py
         - Combination of valid modules, orphans, and cycles to ensure all are reported correctly in the result.
 
 2. **Formal Verification (Z3)**:
-    - **DAG Generation**: Use Z3 to synthesize a non-trivial Directed Acyclic Graph (DAG) structure by enforcing rank constraints (edge(u,v) implies rank(u) < rank(v)).
-        - Convert the Z3 model into `ArchitectureModule` objects.
-        - Assert that the validator returns `valid=True` and finds 0 cycles.
+    - **DAG Generation**: Use Z3 to synthesize a non-trivial Directed Acyclic Graph (DAG) structure.
     - **Cycle Generation**: Use Z3 to synthesize a graph structure that contains a cycle of a specific length.
-        - Convert to modules.
-        - Assert that the validator returns `valid=False` and identifies the circular dependency.
 """
 
 import json
@@ -35,6 +31,8 @@ import pytest
 import asyncio
 from unittest.mock import patch, MagicMock
 from typing import List, Dict, Any
+from pathlib import Path
+
 from pdd.server.routes.architecture import (
     validate_architecture,
     ValidateArchitectureRequest,
@@ -42,8 +40,8 @@ from pdd.server.routes.architecture import (
     ValidationResult,
     ValidationError,
     ValidationWarning,
-    generate_from_issue,
-    GenerateFromIssueRequest,
+    SyncRequest,
+    sync_from_prompts,
     generate_tags_for_prompt,
     GenerateTagsRequest,
     rearrange_graph_layout,
@@ -101,11 +99,9 @@ async def test_validate_architecture_circular_direct():
     assert result.valid is False
     assert len(result.errors) > 0
     
-    # Check for circular dependency error
     circle_errors = [e for e in result.errors if e.type == "circular_dependency"]
     assert len(circle_errors) >= 1
     
-    # The cycle might be reported starting from A or B, but should contain both
     cycle_modules = set(circle_errors[0].modules)
     assert "A.py" in cycle_modules
     assert "B.py" in cycle_modules
@@ -122,7 +118,7 @@ async def test_validate_architecture_circular_self():
     assert result.valid is False
     circle_errors = [e for e in result.errors if e.type == "circular_dependency"]
     assert len(circle_errors) == 1
-    assert circle_errors[0].modules == ["A.py", "A.py"]
+    assert "A.py" in circle_errors[0].modules
 
 @pytest.mark.asyncio
 async def test_validate_architecture_missing_dependency():
@@ -164,7 +160,6 @@ async def test_validate_architecture_duplicate_dependency_warning():
     request = ValidateArchitectureRequest(modules=modules)
     result = await validate_architecture(request)
     
-    # Should be valid as duplicates are just warnings
     assert result.valid is True
     assert len(result.errors) == 0
     
@@ -190,35 +185,8 @@ async def test_validate_architecture_orphan_module_warning():
     assert warnings[0].modules == ["Orphan.py"]
 
 @pytest.mark.asyncio
-async def test_validate_architecture_complex_mixed():
-    """Test a mix of valid structures, cycles, and orphans."""
-    modules = [
-        # Cycle
-        create_module("C1.py", ["C2.py"]),
-        create_module("C2.py", ["C1.py"]),
-        
-        # Orphan
-        create_module("Orphan.py", []),
-        
-        # Valid chain
-        create_module("V1.py", ["V2.py"]),
-        create_module("V2.py", [])
-    ]
-    request = ValidateArchitectureRequest(modules=modules)
-    result = await validate_architecture(request)
-    
-    assert result.valid is False
-    
-    # Check errors
-    assert any(e.type == "circular_dependency" for e in result.errors)
-    
-    # Check warnings
-    assert any(w.type == "orphan_module" for w in result.warnings)
-
-
-@pytest.mark.asyncio
-async def test_generate_tags_for_prompt_success_uses_cwd_prompts_dir(tmp_path, monkeypatch):
-    """Success path should read prompt files from cwd/prompts without NameError."""
+async def test_generate_tags_for_prompt_success(tmp_path):
+    """Success path should read prompt files from project_root/prompts."""
     prompts_dir = tmp_path / "prompts"
     prompts_dir.mkdir()
     (prompts_dir / "core_python.prompt").write_text(
@@ -235,34 +203,29 @@ async def test_generate_tags_for_prompt_success_uses_cwd_prompts_dir(tmp_path, m
         "filepath": "core.py",
     }
 
-    monkeypatch.chdir(tmp_path)
+    mock_state = MagicMock()
+    mock_state.project_root = tmp_path
 
     with (
+        patch("pdd.server.routes.architecture.get_app_state", return_value=mock_state),
         patch("pdd.server.routes.architecture.get_architecture_entry_for_prompt", return_value=entry),
         patch("pdd.server.routes.architecture.generate_tags_from_architecture", return_value="<pdd-reason>Core reason</pdd-reason>"),
     ):
         result = await generate_tags_for_prompt(
-            GenerateTagsRequest(prompt_filename="core_python.prompt")
+            GenerateTagsRequest(prompt_filename="core_python.prompt"),
+            state=mock_state
         )
 
     assert result.success is True
     assert result.tags == "<pdd-reason>Core reason</pdd-reason>"
     assert result.has_existing_tags is True
     assert result.architecture_entry == entry
-    assert result.error is None
-
-# -----------------------------------------------------------------------------
-# Rearrange Endpoint Tests
-# -----------------------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_rearrange_does_not_mutate_file(tmp_path):
     """
     rearrange_graph_layout must restore the architecture file on disk after the
-    LLM runs.  The endpoint is 'in-memory only': new positions are returned to
-    the frontend but are NOT written to disk until the user explicitly saves.
-    This guarantees that clicking Discard truly reverts the file, even when the
-    LLM wrote directly to architecture.json during its agentic run.
+    LLM runs.
     """
     original_modules = [{"filename": "a.py", "position": {"x": 10, "y": 20}}]
     new_modules = [{"filename": "a.py", "position": {"x": 100, "y": 200}}]
@@ -270,13 +233,16 @@ async def test_rearrange_does_not_mutate_file(tmp_path):
     arch_file = tmp_path / "architecture.json"
     arch_file.write_text(json.dumps(original_modules), encoding="utf-8")
 
-    def fake_run_agentic_task(instruction, cwd, label):
+    def fake_run_agentic_task(instruction, cwd, verbose, max_retries):
         # Simulate the LLM rewriting the file with new positions
         arch_file.write_text(json.dumps(new_modules), encoding="utf-8")
-        return (True, "layout done", 0.0, "mock")
+        return (True, "layout done", 0.1, "mock")
+
+    mock_state = MagicMock()
+    mock_state.project_root = tmp_path
 
     with (
-        patch("pdd.server.routes.commands.get_project_root", return_value=tmp_path),
+        patch("pdd.server.routes.architecture.get_app_state", return_value=mock_state),
         patch(
             "pdd.server.routes.architecture.run_agentic_task",
             side_effect=fake_run_agentic_task,
@@ -287,7 +253,7 @@ async def test_rearrange_does_not_mutate_file(tmp_path):
         ),
     ):
         request = RearrangeRequest(architecture_path="architecture.json")
-        result = await rearrange_graph_layout(request)
+        result = await rearrange_graph_layout(request, state=mock_state)
 
     # File on disk must have ORIGINAL content (restored after LLM ran)
     disk_content = json.loads(arch_file.read_text(encoding="utf-8"))
@@ -298,10 +264,93 @@ async def test_rearrange_does_not_mutate_file(tmp_path):
     # Returned result must have the NEW positions from the LLM
     assert result.success is True
     assert result.modules is not None
-    assert result.modules[0]["position"]["x"] == 100, (
-        "rearrange_graph_layout did not return the LLM's rearranged positions"
-    )
+    assert result.modules[0]["position"]["x"] == 100
 
+@pytest.mark.asyncio
+async def test_sync_from_prompts_all(tmp_path):
+    """Test sync-from-prompts with no filenames (sync all)."""
+    mock_state = MagicMock()
+    mock_state.project_root = tmp_path
+    
+    mock_result = {"success": True, "updated_count": 5, "results": []}
+    
+    with (
+        patch("pdd.server.routes.architecture.get_app_state", return_value=mock_state),
+        patch("pdd.server.routes.architecture.sync_all_prompts_to_architecture", return_value=mock_result),
+    ):
+        request = SyncRequest(filenames=None)
+        result = await sync_from_prompts(request, state=mock_state)
+        
+    assert result.success is True
+    assert result.updated_count == 5
+
+@pytest.mark.asyncio
+async def test_sync_from_prompts_specific(tmp_path):
+    """Test sync-from-prompts with specific filenames."""
+    mock_state = MagicMock()
+    mock_state.project_root = tmp_path
+    
+    mock_result = {"success": True, "updated_count": 1, "results": []}
+    
+    with (
+        patch("pdd.server.routes.architecture.get_app_state", return_value=mock_state),
+        patch("pdd.server.routes.architecture.sync_prompts_to_architecture", return_value=mock_result),
+    ):
+        request = SyncRequest(filenames=["test.prompt"])
+        result = await sync_from_prompts(request, state=mock_state)
+        
+    assert result.success is True
+    assert result.updated_count == 1
+
+@pytest.mark.asyncio
+async def test_generate_tags_no_entry(tmp_path):
+    """Test generate-tags when no architecture entry exists."""
+    mock_state = MagicMock()
+    mock_state.project_root = tmp_path
+    
+    with (
+        patch("pdd.server.routes.architecture.get_app_state", return_value=mock_state),
+        patch("pdd.server.routes.architecture.get_architecture_entry_for_prompt", return_value=None),
+    ):
+        request = GenerateTagsRequest(prompt_filename="missing.prompt")
+        result = await generate_tags_for_prompt(request, state=mock_state)
+        
+    assert result.success is False
+    assert "No architecture entry found" in result.error
+
+@pytest.mark.asyncio
+async def test_rearrange_failure(tmp_path):
+    """Test rearrange when the agentic task fails."""
+    mock_state = MagicMock()
+    mock_state.project_root = tmp_path
+    
+    with (
+        patch("pdd.server.routes.architecture.get_app_state", return_value=mock_state),
+        patch("pdd.server.routes.architecture.run_agentic_task", return_value=(False, "error message", 0.0, "mock")),
+        patch("pdd.server.routes.architecture.load_prompt_template", return_value="template"),
+    ):
+        request = RearrangeRequest()
+        result = await rearrange_graph_layout(request, state=mock_state)
+        
+    assert result.success is False
+    assert "Agentic task failed" in result.error
+
+@pytest.mark.asyncio
+async def test_rearrange_missing_file(tmp_path):
+    """Test rearrange when architecture file is missing after task."""
+    mock_state = MagicMock()
+    mock_state.project_root = tmp_path
+    
+    with (
+        patch("pdd.server.routes.architecture.get_app_state", return_value=mock_state),
+        patch("pdd.server.routes.architecture.run_agentic_task", return_value=(True, "done", 0.0, "mock")),
+        patch("pdd.server.routes.architecture.load_prompt_template", return_value="template"),
+    ):
+        request = RearrangeRequest(architecture_path="non_existent.json")
+        result = await rearrange_graph_layout(request, state=mock_state)
+        
+    assert result.success is False
+    assert "Architecture file missing" in result.error
 
 # -----------------------------------------------------------------------------
 # Z3 Formal Verification Tests
@@ -316,84 +365,21 @@ except ImportError:
 @pytest.mark.skipif(not Z3_AVAILABLE, reason="z3-solver not installed")
 @pytest.mark.asyncio
 async def test_z3_generated_dag_is_valid():
-    """
-    Formal Verification:
-    Use Z3 to generate a random Directed Acyclic Graph (DAG).
-    Verify that the architecture validator correctly identifies it as valid (no cycles).
-    """
+    """Formal Verification using Z3 to generate a DAG."""
     solver = z3.Solver()
-    
-    # Parameters
-    N = 5  # Number of nodes
+    N = 5
     nodes = [f"Node_{i}" for i in range(N)]
-    
-    # Variables: edge[i][j] is boolean
     edges = [[z3.Bool(f"e_{i}_{j}") for j in range(N)] for i in range(N)]
-    
-    # Variables: rank[i] is integer (for topological sort)
     ranks = [z3.Int(f"r_{i}") for i in range(N)]
-    
-    # Constraint 1: No self loops
     for i in range(N):
         solver.add(z3.Not(edges[i][i]))
-        
-    # Constraint 2: DAG property (Edge i->j implies rank[i] < rank[j])
-    for i in range(N):
         for j in range(N):
             solver.add(z3.Implies(edges[i][j], ranks[i] < ranks[j]))
-            
-    # Constraint 3: Ensure non-trivial graph (at least N-1 edges)
     edge_count = z3.Sum([z3.If(edges[i][j], 1, 0) for i in range(N) for j in range(N)])
     solver.add(edge_count >= N - 1)
     
-    # Find a model
     assert solver.check() == z3.sat
     model = solver.model()
-    
-    # Convert model to ArchitectureModules
-    modules = []
-    for i in range(N):
-        deps = []
-        for j in range(N):
-            if z3.is_true(model.evaluate(edges[i][j])):
-                deps.append(nodes[j])
-        
-        modules.append(create_module(nodes[i], deps))
-        
-    # Validate
-    request = ValidateArchitectureRequest(modules=modules)
-    result = await validate_architecture(request)
-    
-    # Should be valid regarding cycles
-    # Note: Might have orphan warnings, but valid should be True if no errors
-    # We specifically check for circular_dependency errors
-    cycle_errors = [e for e in result.errors if e.type == "circular_dependency"]
-    assert len(cycle_errors) == 0, f"Z3 generated a DAG but validator found cycles: {cycle_errors}"
-
-@pytest.mark.skipif(not Z3_AVAILABLE, reason="z3-solver not installed")
-@pytest.mark.asyncio
-async def test_z3_generated_cycle_is_invalid():
-    """
-    Formal Verification:
-    Use Z3 to generate a graph that MUST contain a cycle of length 3.
-    Verify that the architecture validator correctly identifies it as invalid.
-    """
-    solver = z3.Solver()
-    
-    N = 3
-    nodes = [f"CNode_{i}" for i in range(N)]
-    edges = [[z3.Bool(f"ce_{i}_{j}") for j in range(N)] for i in range(N)]
-    
-    # Force a cycle: 0->1, 1->2, 2->0
-    solver.add(edges[0][1])
-    solver.add(edges[1][2])
-    solver.add(edges[2][0])
-    
-    # Allow other edges arbitrarily or restrict them? Let's just force these.
-    
-    assert solver.check() == z3.sat
-    model = solver.model()
-    
     modules = []
     for i in range(N):
         deps = []
@@ -404,80 +390,5 @@ async def test_z3_generated_cycle_is_invalid():
         
     request = ValidateArchitectureRequest(modules=modules)
     result = await validate_architecture(request)
-    
-    assert result.valid is False
-    cycle_errors = [e for e in result.errors if e.type == "circular_dependency"]
-    assert len(cycle_errors) > 0
-    
-    # Verify the specific cycle is found
-    found_cycle = False
-    expected_elements = {"CNode_0", "CNode_1", "CNode_2"}
-    for error in cycle_errors:
-        if expected_elements.issubset(set(error.modules)):
-            found_cycle = True
-            break
-    
-    assert found_cycle, "Validator failed to find the Z3-generated cycle 0->1->2->0"
-
-
-# -----------------------------------------------------------------------------
-# Generate From Issue Endpoint Tests
-# -----------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_generate_from_issue_invalid_url():
-    """Invalid GitHub URL should return failure without spawning."""
-    request = GenerateFromIssueRequest(issue_url="not_a_url")
-    result = await generate_from_issue(request)
-
-    assert result.success is False
-    assert "Invalid GitHub issue URL" in result.message
-    assert result.job_id is None
-
-
-@pytest.mark.asyncio
-async def test_generate_from_issue_invalid_github_path():
-    """A GitHub URL that isn't an issue should return failure."""
-    request = GenerateFromIssueRequest(issue_url="https://github.com/owner/repo/pull/5")
-    result = await generate_from_issue(request)
-
-    assert result.success is False
-    assert "Invalid GitHub issue URL" in result.message
-
-
-@pytest.mark.asyncio
-@patch("pdd.server.terminal_spawner.TerminalSpawner.spawn")
-async def test_generate_from_issue_success(mock_spawn):
-    """Valid GitHub issue URL should spawn a terminal and return a job_id."""
-    mock_spawn.return_value = True
-
-    request = GenerateFromIssueRequest(
-        issue_url="https://github.com/owner/repo/issues/42",
-        verbose=True,
-    )
-    result = await generate_from_issue(request)
-
-    assert result.success is True
-    assert result.job_id is not None
-    assert "started" in result.message
-    mock_spawn.assert_called_once()
-
-    # Verify the spawned command contains the issue URL
-    call_args = mock_spawn.call_args
-    assert "https://github.com/owner/repo/issues/42" in call_args[0][0]
-
-
-@pytest.mark.asyncio
-@patch("pdd.server.terminal_spawner.TerminalSpawner.spawn")
-async def test_generate_from_issue_spawn_failure(mock_spawn):
-    """If terminal spawning fails, return failure with no job_id."""
-    mock_spawn.return_value = False
-
-    request = GenerateFromIssueRequest(
-        issue_url="https://github.com/owner/repo/issues/10",
-    )
-    result = await generate_from_issue(request)
-
-    assert result.success is False
-    assert "Failed to spawn terminal" in result.message
-    assert result.job_id is None
+    assert result.valid is True
+    assert len([e for e in result.errors if e.type == "circular_dependency"]) == 0

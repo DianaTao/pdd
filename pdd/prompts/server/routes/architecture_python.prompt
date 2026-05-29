@@ -74,6 +74,15 @@
 
 % Models
   ```python
+  class ContractSummary(BaseModel):
+      rules: List[str]
+      critical: List[str]
+      stories: List[str]
+      capabilities: List[str]
+      coverage_status: str
+      evidence_status: str
+      waived: List[str]
+
   class ArchitectureModule(BaseModel):
       reason: str
       description: str
@@ -83,6 +92,7 @@
       filepath: str
       tags: List[str] = Field(default_factory=list)
       interface: Optional[Dict[str, Any]] = None
+      contract_summary: Optional[ContractSummary] = None
 
   class ValidationError(BaseModel):
       type: str  # circular_dependency, missing_dependency, invalid_field

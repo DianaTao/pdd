@@ -1,46 +1,53 @@
-"""
-REST API endpoints for architecture.json validation and sync operations.
-
-Provides endpoints for:
-- Validating architecture changes before saving
-- Detecting circular dependencies, missing references, and structural issues
-- Syncing architecture.json from prompt file metadata tags
-- Generating architecture from a GitHub issue URL
-"""
-
 from __future__ import annotations
 
 import asyncio
-import re
 import json
+import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
-from fastapi import APIRouter
-from pydantic import BaseModel, Field
+try:
+    from fastapi import APIRouter, Depends, HTTPException
+    from pydantic import BaseModel, Field
+except ImportError:
+    # Optional dependencies for environments where server is not run
+    pass
 
-from pdd.load_prompt_template import load_prompt_template
-from pdd.agentic_common import run_agentic_task
+from rich.console import Console
 
-from pdd.architecture_registry import extract_modules
-from pdd.architecture_sync import (
-    get_architecture_entry_for_prompt,
+from ...architecture_sync import (
     generate_tags_from_architecture,
+    get_architecture_entry_for_prompt,
     has_pdd_tags,
+    sync_all_prompts_to_architecture,
     sync_prompts_to_architecture,
-    validate_architecture_modules,
 )
+from ...agentic_common import run_agentic_task
+from ...load_prompt_template import load_prompt_template
+from ..app import get_app_state, AppState
 
 
+console = Console()
+executor = ThreadPoolExecutor(max_workers=2)
 router = APIRouter(prefix="/api/v1/architecture", tags=["architecture"])
 
-_rearrange_executor = ThreadPoolExecutor(max_workers=2)
+
+# ============================================================================
+# Pydantic Models
+# ============================================================================
+
+class ContractSummary(BaseModel):
+    rules: List[str]
+    critical: List[str]
+    stories: List[str]
+    capabilities: List[str]
+    coverage_status: str
+    evidence_status: str
+    waived: List[str]
 
 
 class ArchitectureModule(BaseModel):
-    """Schema for an architecture module."""
-
     reason: str
     description: str
     dependencies: List[str]
@@ -49,49 +56,37 @@ class ArchitectureModule(BaseModel):
     filepath: str
     tags: List[str] = Field(default_factory=list)
     interface: Optional[Dict[str, Any]] = None
-    group: Optional[str] = None
+    contract_summary: Optional[ContractSummary] = None
 
 
 class ValidationError(BaseModel):
-    """Validation error that blocks saving."""
-
     type: str  # circular_dependency, missing_dependency, invalid_field
     message: str
-    modules: List[str]  # Affected module filenames
+    modules: List[str]
 
 
 class ValidationWarning(BaseModel):
-    """Validation warning that is informational only."""
-
     type: str  # duplicate_dependency, orphan_module
     message: str
     modules: List[str]
 
 
 class ValidateArchitectureRequest(BaseModel):
-    """Request body for architecture validation."""
-
     modules: List[ArchitectureModule]
 
 
 class ValidationResult(BaseModel):
-    """Result of architecture validation."""
-
-    valid: bool  # True if no errors (warnings are OK)
+    valid: bool  # True if no errors (warnings OK)
     errors: List[ValidationError]
     warnings: List[ValidationWarning]
 
 
 class SyncRequest(BaseModel):
-    """Request body for sync-from-prompts operation."""
-
-    filenames: Optional[List[str]] = None  # None = sync all prompts
+    filenames: Optional[List[str]] = None  # None = sync all
     dry_run: bool = False
 
 
 class SyncResult(BaseModel):
-    """Result of sync-from-prompts operation."""
-
     success: bool
     updated_count: int
     skipped_count: int = 0
@@ -101,379 +96,266 @@ class SyncResult(BaseModel):
 
 
 class GenerateTagsRequest(BaseModel):
-    """Request body for generate-tags-for-prompt operation."""
-
-    prompt_filename: str  # e.g., "llm_invoke_python.prompt"
+    prompt_filename: str
 
 
 class GenerateTagsResult(BaseModel):
-    """Result of generate-tags-for-prompt operation."""
-
     success: bool
-    tags: Optional[str] = None  # Generated XML tags or None if not found
-    has_existing_tags: bool = False  # True if prompt already has PDD tags
-    architecture_entry: Optional[Dict[str, Any]] = None  # The full architecture entry
+    tags: Optional[str] = None
+    has_existing_tags: bool = False
+    architecture_entry: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
 
 
 class RearrangeRequest(BaseModel):
-    """Request body for agentic graph layout rearrangement."""
-
     architecture_path: str = Field(
         "architecture.json",
-        description="Path to the architecture file, relative to project root"
+        description="Path to architecture file, relative to project root"
     )
 
 
 class RearrangeResult(BaseModel):
-    """Result of agentic graph rearrangement."""
-
     success: bool
     modules: Optional[List[Dict[str, Any]]] = None
     message: Optional[str] = None
     error: Optional[str] = None
 
 
-@router.post("/validate", response_model=ValidationResult)
-async def validate_architecture(request: ValidateArchitectureRequest) -> ValidationResult:
-    """
-    Validate architecture for structural issues.
+# ============================================================================
+# Helper Functions
+# ============================================================================
 
-    Checks for:
-    - Circular dependencies (error)
-    - Missing dependencies (error)
-    - Invalid/missing required fields (error)
-    - Duplicate dependencies (warning)
-    - Orphan modules (warning)
+def _detect_cycles(modules: List[ArchitectureModule]) -> List[List[str]]:
+    """Detect all circular dependencies using DFS."""
+    graph = {m.filename: m.dependencies for m in modules}
+    cycles = []
+    visited = set()
+    stack = []
+    
+    def dfs(node: str):
+        if node in stack:
+            cycle_start = stack.index(node)
+            cycles.append(stack[cycle_start:] + [node])
+            return
+        if node in visited:
+            return
+            
+        visited.add(node)
+        stack.append(node)
+        
+        for neighbor in graph.get(node, []):
+            dfs(neighbor)
+            
+        stack.pop()
+        
+    for module in graph:
+        dfs(module)
+        
+    return cycles
 
-    Returns validation result with valid flag, errors, and warnings.
-    Errors block saving (valid=False), warnings are informational (valid=True).
-    """
-    raw_result = validate_architecture_modules(
-        [module.model_dump() for module in request.modules]
+
+def _validate_architecture(modules: List[ArchitectureModule]) -> ValidationResult:
+    """Core validation logic for architecture.json."""
+    errors = []
+    warnings = []
+    
+    module_names = {m.filename for m in modules}
+    depended_upon = set()
+    
+    # Missing, duplicates, and invalid fields
+    for mod in modules:
+        if not mod.filename or not mod.filepath or not mod.description:
+            errors.append(ValidationError(
+                type="invalid_field",
+                message=f"Module {mod.filename} is missing required fields (filename, filepath, description).",
+                modules=[mod.filename]
+            ))
+            
+        seen_deps = set()
+        for dep in mod.dependencies:
+            depended_upon.add(dep)
+            if dep not in module_names:
+                errors.append(ValidationError(
+                    type="missing_dependency",
+                    message=f"Module {mod.filename} depends on missing module {dep}.",
+                    modules=[mod.filename, dep]
+                ))
+            if dep in seen_deps:
+                warnings.append(ValidationWarning(
+                    type="duplicate_dependency",
+                    message=f"Module {mod.filename} lists dependency {dep} multiple times.",
+                    modules=[mod.filename]
+                ))
+            seen_deps.add(dep)
+            
+    # Orphans
+    for mod in modules:
+        if not mod.dependencies and mod.filename not in depended_upon:
+            warnings.append(ValidationWarning(
+                type="orphan_module",
+                message=f"Module {mod.filename} is an orphan (no dependencies, not depended upon).",
+                modules=[mod.filename]
+            ))
+            
+    # Cycles
+    cycles = _detect_cycles(modules)
+    for cycle in cycles:
+        errors.append(ValidationError(
+            type="circular_dependency",
+            message=f"Circular dependency detected: {' -> '.join(cycle)}",
+            modules=list(set(cycle))
+        ))
+        
+    return ValidationResult(
+        valid=len(errors) == 0,
+        errors=errors,
+        warnings=warnings
     )
-    return ValidationResult(**raw_result)
+
+
+# ============================================================================
+# Routes
+# ============================================================================
+
+@router.post("/validate", response_model=ValidationResult)
+async def validate_architecture(request: ValidateArchitectureRequest):
+    """Validate architecture for structural issues."""
+    return _validate_architecture(request.modules)
 
 
 @router.post("/sync-from-prompts", response_model=SyncResult)
-async def sync_from_prompts(request: SyncRequest) -> SyncResult:
-    """
-    Sync architecture.json from prompt file metadata tags.
-
-    This endpoint reads PDD metadata tags (<pdd-reason>, <pdd-interface>,
-    <pdd-dependency>) from prompt files and updates the corresponding entries
-    in architecture.json.
-
-    Prompts are the source of truth - tags in prompts override architecture.json.
-    Validation is lenient - missing tags are OK, only updates fields with tags.
-
-    Request body:
-        {
-            "filenames": ["llm_invoke_python.prompt", ...] | null,
-            "dry_run": false
-        }
-
-    If filenames is null, syncs ALL prompt files.
-    If dry_run is true, validates changes without writing.
-
-    Returns:
-        {
-            "success": bool,  // True if no errors and validation passed
-            "updated_count": int,  // Number of modules updated
-            "skipped_count": int,  // Number of modules skipped (no prompt file)
-            "results": [
-                {
-                    "filename": "...",
-                    "success": bool,
-                    "updated": bool,
-                    "changes": {"reason": {"old": ..., "new": ...}, ...}
-                },
-                ...
-            ],
-            "validation": {
-                "valid": bool,
-                "errors": [...],  // Circular deps, missing deps, etc.
-                "warnings": [...]  // Duplicates, orphans, etc.
-            },
-            "errors": [str, ...]  // Sync operation errors
-        }
-    """
+async def sync_from_prompts(
+    request: SyncRequest,
+    state: AppState = Depends(get_app_state)
+):
+    """Sync architecture.json from PDD metadata tags in prompt files."""
+    arch_path = state.project_root / "architecture.json"
+    prompts_dir = state.project_root / "prompts"
+    
     try:
-        sync_result = sync_prompts_to_architecture(
-            filenames=request.filenames,
-            dry_run=request.dry_run,
-        )
-        return SyncResult(**sync_result)
-
-    except Exception as e:
-        # Return error result
+        if request.filenames is None:
+            result = sync_all_prompts_to_architecture(
+                prompts_dir=prompts_dir,
+                architecture_path=arch_path,
+                dry_run=request.dry_run
+            )
+        else:
+            result = sync_prompts_to_architecture(
+                filenames=request.filenames,
+                prompts_dir=prompts_dir,
+                architecture_path=arch_path,
+                dry_run=request.dry_run
+            )
+            
+        # Validate the resulting architecture
+        arch_data = json.loads(arch_path.read_text(encoding="utf-8")) if arch_path.exists() else []
+        modules = [ArchitectureModule(**m) for m in arch_data]
+        validation = _validate_architecture(modules)
+        
         return SyncResult(
-            success=False,
-            updated_count=0,
-            skipped_count=0,
-            results=[],
-            validation=ValidationResult(valid=True, errors=[], warnings=[]),
-            errors=[f"Unexpected error: {str(e)}"]
+            success=result.get("success", False),
+            updated_count=result.get("updated_count", 0),
+            skipped_count=result.get("skipped_count", 0),
+            results=result.get("results", []),
+            validation=validation,
+            errors=result.get("errors", [])
         )
+    except Exception as e:
+        console.print(f"[bold red]Sync Error:[/bold red] {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/generate-tags-for-prompt", response_model=GenerateTagsResult)
-async def generate_tags_for_prompt(request: GenerateTagsRequest) -> GenerateTagsResult:
-    """
-    Generate PDD metadata tags for a prompt from architecture.json.
-
-    This is the reverse direction of sync-from-prompts: it reads the architecture.json
-    entry for a prompt and generates XML tags (<pdd-reason>, <pdd-interface>,
-    <pdd-dependency>) that can be injected into the prompt file.
-
-    Request body:
-        {
-            "prompt_filename": "llm_invoke_python.prompt"
-        }
-
-    Returns:
-        {
-            "success": bool,
-            "tags": "<pdd-reason>...</pdd-reason>\\n<pdd-interface>...</pdd-interface>\\n...",
-            "has_existing_tags": false,  // True if prompt already has PDD tags
-            "architecture_entry": {...},  // The full architecture entry (for preview)
-            "error": "Error message if failed"
-        }
-    """
+async def generate_tags_for_prompt(
+    request: GenerateTagsRequest,
+    state: AppState = Depends(get_app_state)
+):
+    """Generate PDD metadata tags for prompts from architecture.json."""
+    arch_path = state.project_root / "architecture.json"
+    prompt_path = state.project_root / "prompts" / request.prompt_filename
+    
     try:
-        # Get architecture entry for this prompt
-        entry = get_architecture_entry_for_prompt(request.prompt_filename)
-
-        if entry is None:
+        has_tags = False
+        if prompt_path.exists():
+            content = prompt_path.read_text(encoding="utf-8")
+            has_tags = has_pdd_tags(content)
+            
+        entry = get_architecture_entry_for_prompt(request.prompt_filename, architecture_path=arch_path)
+        if not entry:
             return GenerateTagsResult(
                 success=False,
-                tags=None,
-                has_existing_tags=False,
-                architecture_entry=None,
-                error=f"No architecture entry found for '{request.prompt_filename}'"
+                error=f"No architecture entry found for {request.prompt_filename}",
+                has_existing_tags=has_tags
             )
-
-        # Check if the prompt file already has PDD tags
-        prompts_dir = Path.cwd() / "prompts"
-        prompt_path = prompts_dir / request.prompt_filename
-        existing_tags = False
-
-        if prompt_path.exists():
-            prompt_content = prompt_path.read_text(encoding='utf-8')
-            existing_tags = has_pdd_tags(prompt_content)
-
-        # Generate tags from architecture entry
+            
         tags = generate_tags_from_architecture(entry)
-
         return GenerateTagsResult(
             success=True,
-            tags=tags if tags else None,
-            has_existing_tags=existing_tags,
-            architecture_entry=entry,
-            error=None
+            tags=tags,
+            has_existing_tags=has_tags,
+            architecture_entry=entry
         )
-
     except Exception as e:
-        return GenerateTagsResult(
-            success=False,
-            tags=None,
-            has_existing_tags=False,
-            architecture_entry=None,
-            error=f"Error generating tags: {str(e)}"
-        )
+        console.print(f"[bold red]Generate Tags Error:[/bold red] {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-
-# ============================================================================
-# Generate Architecture from GitHub Issue
-# ============================================================================
-
-_GITHUB_ISSUE_RE = re.compile(
-    r"(?:https?://)?(?:www\.)?github\.com/([^/]+)/([^/]+)/issues/(\d+)"
-)
-
-
-class GenerateFromIssueRequest(BaseModel):
-    """Request body for generating architecture from a GitHub issue URL."""
-
-    issue_url: str = Field(..., description="GitHub issue URL (e.g., https://github.com/owner/repo/issues/42)")
-    verbose: bool = Field(False, description="Enable verbose output")
-    quiet: bool = Field(False, description="Suppress non-error output")
-    timeout_adder: float = Field(0.0, description="Additional seconds to add to each step's timeout")
-
-
-class GenerateFromIssueResult(BaseModel):
-    """Result of triggering architecture generation from a GitHub issue."""
-
-    success: bool
-    message: str
-    job_id: Optional[str] = None
-
-
-@router.post("/generate-from-issue", response_model=GenerateFromIssueResult)
-async def generate_from_issue(request: GenerateFromIssueRequest) -> GenerateFromIssueResult:
-    """
-    Generate architecture from a GitHub issue URL.
-
-    Validates the URL, then spawns `pdd generate <issue_url>` in a terminal
-    window to run the agentic architecture workflow. The frontend can poll
-    the spawned job status via /api/v1/commands/spawned-jobs/{job_id}/status.
-
-    This mirrors how `pdd bug <url>` and `pdd change <url>` trigger their
-    respective agentic workflows from the web interface.
-    """
-    # Validate URL format
-    if not _GITHUB_ISSUE_RE.search(request.issue_url):
-        return GenerateFromIssueResult(
-            success=False,
-            message=f"Invalid GitHub issue URL: {request.issue_url}",
-            job_id=None,
-        )
-
-    try:
-        from .commands import (
-            _build_pdd_command_args,
-            _spawned_jobs,
-            get_project_root,
-            get_server_port,
-        )
-        from ..terminal_spawner import TerminalSpawner
-        import time
-        import uuid
-
-        project_root = get_project_root()
-        server_port = get_server_port()
-
-        # Build options dict
-        options: Dict[str, Any] = {}
-        if request.verbose:
-            options["verbose"] = True
-        if request.quiet:
-            options["quiet"] = True
-
-        # Build command args: pdd generate <issue_url>
-        args = {"prompt_file": request.issue_url}
-        cmd_args = _build_pdd_command_args("generate", args, options)
-        cmd_str = " ".join(cmd_args)
-
-        # Generate job ID
-        job_id = f"spawned-{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
-
-        # Track the job
-        from datetime import datetime, timezone as tz
-        _spawned_jobs[job_id] = {
-            "job_id": job_id,
-            "command": "generate",
-            "status": "running",
-            "started_at": datetime.now(tz.utc).isoformat(),
-            "completed_at": None,
-            "exit_code": None,
-        }
-
-        # Spawn terminal
-        spawned = TerminalSpawner.spawn(
-            cmd_str,
-            working_dir=str(project_root),
-            job_id=job_id,
-            server_port=server_port,
-        )
-
-        if not spawned:
-            del _spawned_jobs[job_id]
-            return GenerateFromIssueResult(
-                success=False,
-                message="Failed to spawn terminal for architecture generation",
-                job_id=None,
-            )
-
-        return GenerateFromIssueResult(
-            success=True,
-            message=f"Architecture generation started for {request.issue_url}",
-            job_id=job_id,
-        )
-
-    except Exception as e:
-        return GenerateFromIssueResult(
-            success=False,
-            message=f"Error starting architecture generation: {str(e)}",
-            job_id=None,
-        )
-
-
-# ============================================================================
-# Agentic Graph Layout Rearrangement
-# ============================================================================
 
 @router.post("/rearrange", response_model=RearrangeResult)
-async def rearrange_graph_layout(request: RearrangeRequest) -> RearrangeResult:
-    """
-    Use an agentic workflow to assign logical swimlane positions to all modules.
+async def rearrange_graph_layout(
+    request: RearrangeRequest,
+    state: AppState = Depends(get_app_state)
+):
+    """Run an agentic task to rearrange the architecture layout."""
+    arch_full_path = state.project_root / request.architecture_path
+    original_content = None
+    if arch_full_path.exists():
+        original_content = arch_full_path.read_text(encoding="utf-8")
 
-    Runs arrange_graph_layout_LLM.prompt via run_agentic_task. The agent reads
-    the specified architecture file and any PRD from the project root, reasons
-    about the architecture's logical structure, assigns swimlane positions,
-    and writes the updated file in-place. Returns the updated modules array.
-    """
     try:
-        from .commands import get_project_root
-        project_root = get_project_root()
-
-        arch_path = project_root / request.architecture_path
-        if not arch_path.exists():
-            return RearrangeResult(
-                success=False,
-                error=f"{request.architecture_path} not found"
-            )
-
-        # Snapshot the original file so we can restore it after the LLM runs.
-        # Re-arrange is treated as an in-memory-only operation: positions are
-        # returned to the frontend but the file on disk is kept as-is.  The
-        # user must explicitly click Save to persist them.  This ensures that
-        # clicking Discard truly reverts everything, including the on-disk file.
-        original_content = arch_path.read_text(encoding="utf-8")
-
-        template = load_prompt_template("arrange_graph_layout_LLM")
-        # Use str.replace instead of .format() to avoid escaping issues with
-        # any literal {} characters in the prompt body.
-        instruction = (template
-            .replace("{project_root}", str(project_root))
-            .replace("{architecture_path}", str(arch_path))
+        prompt_content = load_prompt_template(
+            "arrange_graph_layout_LLM.prompt",
+            project_root=str(state.project_root),
+            architecture_path=request.architecture_path
         )
-
-        loop = asyncio.get_running_loop()
-        success, output, cost_usd, provider = await loop.run_in_executor(
-            _rearrange_executor,
-            lambda: run_agentic_task(
-                instruction=instruction,
-                cwd=project_root,
-                label="arrange_graph_layout",
-            )
+        
+        loop = asyncio.get_event_loop()
+        success, output, _, _ = await loop.run_in_executor(
+            executor,
+            run_agentic_task,
+            prompt_content,
+            state.project_root,
+            False,
+            1
         )
-
+        
         if not success:
-            return RearrangeResult(success=False, error=f"Agent failed: {output[:500]}")
-
-        updated_content = arch_path.read_text(encoding="utf-8")
-        updated_modules = extract_modules(json.loads(updated_content))
-        if not updated_modules:
             return RearrangeResult(
                 success=False,
-                error="Updated architecture file contains no valid modules"
+                error=f"Agentic task failed: {output}"
             )
-
-        # Restore original file — positions live in the frontend state only
-        # until the user explicitly saves them.
-        arch_path.write_text(original_content, encoding="utf-8")
-
-        return RearrangeResult(
-            success=True,
-            modules=updated_modules,
-            message=output.strip(),
-        )
-
-    except json.JSONDecodeError as e:
-        return RearrangeResult(
-            success=False,
-            error=f"Updated architecture file has invalid JSON: {str(e)}"
-        )
+            
+        if arch_full_path.exists():
+            # Read the NEW content generated by the agent
+            new_modules_data = json.loads(arch_full_path.read_text(encoding="utf-8"))
+            
+            # RESTORE the original content if it existed (as per test requirements)
+            if original_content is not None:
+                arch_full_path.write_text(original_content, encoding="utf-8")
+                
+            return RearrangeResult(
+                success=True,
+                modules=new_modules_data,
+                message="Rearranged successfully."
+            )
+        else:
+            return RearrangeResult(
+                success=False,
+                error="Architecture file missing after task completion."
+            )
+            
     except Exception as e:
-        return RearrangeResult(success=False, error=f"Rearrange failed: {str(e)}")
+        console.print(f"[bold red]Rearrange Error:[/bold red] {e}")
+        # Attempt to restore on error too
+        if original_content is not None and arch_full_path.exists():
+             arch_full_path.write_text(original_content, encoding="utf-8")
+        raise HTTPException(status_code=500, detail=str(e))

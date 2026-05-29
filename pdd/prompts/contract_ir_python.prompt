@@ -1,5 +1,40 @@
 <pdd-reason>Parses contract-related sections from prompt files into a structured intermediate representation.</pdd-reason>
 
+<pdd-interface>
+{
+  "type": "module",
+  "module": {
+    "functions": [
+      {
+        "name": "parse_prompt_contracts",
+        "signature": "(path: Path) -> PromptContractIR",
+        "returns": "PromptContractIR"
+      },
+      {
+        "name": "extract_sections",
+        "signature": "(text: str) -> dict",
+        "returns": "dict"
+      },
+      {
+        "name": "extract_rules",
+        "signature": "(text: str) -> list[Rule]",
+        "returns": "list[Rule]"
+      },
+      {
+        "name": "extract_waivers",
+        "signature": "(text: str) -> list[Waiver]",
+        "returns": "list[Waiver]"
+      },
+      {
+        "name": "iter_covers_refs",
+        "signature": "(story_text: str) -> \"Iterator[str]\"",
+        "returns": "Iterator[str]"
+      }
+    ]
+  }
+}
+</pdd-interface>
+
 % Write `pdd/contract_ir.py`.
 
 <include>context/python_preamble.prompt</include>

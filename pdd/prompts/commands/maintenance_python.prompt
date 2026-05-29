@@ -77,7 +77,16 @@
      - Exception policy: re-raise `click.Abort` and `click.exceptions.Exit`; for any other exception call `handle_error(exception, "sync-architecture", quiet)` and return `None`.
   3. **_echo_architecture_sync_result(result, *, dry_run)** helper:
      - Prints a one-line summary. Dry-run wording: `f"Dry run: would update {result['updated_count']} module(s); skipped {result['skipped_count']}."` Non-dry-run wording: `f"Updated {result['updated_count']} module(s); skipped {result['skipped_count']}."`
-     - For each entry in `result.get("results", [])`: if `entry.get("updated")` print `f"UPDATED {entry['filename']}"`; elif `not entry.get("success")` print `f"ERROR {entry['filename']}: {entry.get('error')}"`.
+     - Aggregate and print total contract stats if present: `f"Total Contracts: {total_rules} rules, {total_stories} stories found across synced modules."`
+     - For each entry in `result.get("results", [])`:
+       - If `entry.get("updated")`:
+         - Print `f"UPDATED {entry['filename']}"`.
+         - If `contract_summary := entry.get("contract_summary")` (from the new sync result):
+           - Print `f"  Contracts: {len(contract_summary['rules'])} rules, {len(contract_summary['stories'])} stories"`.
+           - If `contract_summary['evidence_status'] == 'stale'`, print a yellow warning: `click.style(f"  Warning: Evidence is STALE for {entry['filename']}", fg="yellow")`.
+           - If `contract_summary['evidence_status'] == 'missing'`, print a red warning: `click.style(f"  Warning: Evidence is MISSING for {entry['filename']}", fg="red")`.
+       - Elif `not entry.get("success")`:
+         - Print `f"ERROR {entry['filename']}: {entry.get('error')}"`.
      - If `result.get("errors")` is non-empty, print `"Sync errors:"` then `f"- {error}"` per entry.
      - Read `validation = result.get("validation", {})`. If `validation.get("errors")` is non-empty, print `"Validation errors:"` then `f"- {error['message']}"` per entry. If `validation.get("warnings")` is non-empty, print `"Validation warnings:"` then `f"- {warning['message']}"` per entry.
   4. **auto-deps**:

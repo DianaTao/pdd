@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "run": {
+    "id": "90178c93",
+    "command": "pdd sync",
+    "pdd_version": "unknown",
+    "timestamp": "2026-05-29T02:41:56.827630+00:00"
+  },
+  "prompt": {
+    "path": "prompts/auth_python.prompt",
+    "sha256": "90178c93d20761fa6fd3a67ebb4f1b1d7ff48d2d4bb9b8ccc153ce101cc95170",
+    "expanded_sha256": "90178c93d20761fa6fd3a67ebb4f1b1d7ff48d2d4bb9b8ccc153ce101cc95170",
+    "uses_nondeterministic_tags": false
+  },
+  "context": {
+    "includes": [],
+    "web_snapshots": [],
+    "shell_snapshots": []
+  },
+  "generation": {
+    "model": "gpt-4o",
+    "temperature": 0.0,
+    "cost_usd": 0.01,
+    "grounding_examples": []
+  },
+  "outputs": [
+    {
+      "path": "src/auth_service.py",
+      "sha256": "cad59b04fe6dd24beb4434168bb1dfc17e897ae7081901f941e532b635ef6bf9"
+    }
+  ],
+  "contracts": {
+    "status": "not_applicable",
+    "rules": {}
+  },
+  "validation": {
+    "detect_stories": "not_applicable",
+    "unit_tests": "not_applicable",
+    "verify": "not_applicable"
+  },
+  "logs": {
+    "core_dump": null,
+    "verify_results": null,
+    "cost_csv": null
+  }
+}

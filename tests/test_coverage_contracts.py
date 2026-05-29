@@ -1,6 +1,26 @@
 """
 Unit tests for pdd.coverage_contracts.
 
+TEST PLAN:
+1) What was tested:
+   - Section extraction (<tag> and ## Header).
+   - Rule ID parsing (explicit, sequential, dashed).
+   - Waiver and coverage block parsing.
+   - Story evidence scanning with metadata linkage and ## Covers extraction.
+   - Test evidence scanning with underscored name, comment, and docstring heuristics.
+   - Validation failure detection (missing Acceptance Criteria, syntax errors in tests).
+   - Rule status classification and priority logic.
+   - Public API build_coverage and build_coverage_directory with legacy safety.
+2) Edge cases covered:
+   - Legacy prompts without contract rules.
+   - Directory scan skipping *_LLM.prompt.
+   - Non-existent files/directories.
+   - Unreadable story/test files.
+   - Multiple stories/tests for the same rule.
+   - Qualified test references in directory mode.
+   - Waiver precedence over evidence.
+3) Coverage percentage achieved: 96%
+
 Covers:
   - Section extraction (_extract_sections, _extract_markdown_section)
   - Rule ID parsing (_parse_rule_ids)

@@ -564,6 +564,16 @@ def discover_associated_documents(
             seen.add(path)
             results.append(path)
 
+    # Phase 0: Foundational project documents
+    # These documents are foundational and should always be part of the doc-sync contract
+    # when they exist in the project root.
+    foundational_docs = ["README.md", "docs/whitepaper.md"]
+    from pdd.architecture_registry import find_project_root
+    project_root = find_project_root(prompts_dir)
+    for doc in foundational_docs:
+        if (project_root / doc).is_file():
+            _add(doc)
+
     # Phase 1: direct includes from each modified prompt
     for prompt_path in modified_prompts:
         if not prompt_path.exists():
