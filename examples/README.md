@@ -27,8 +27,9 @@ source ~/.zshrc  # or source ~/.bashrc / fish equivalent
 
 ### Checkup gate (evidence policy)
 Branch `demo/checkup-gate-showcase` (or `feat/issue-825-gate` / PR #1260) adds `pdd checkup gate`.
-Run the offline walkthrough with `python examples/checkup_gate_example.py`, then use
-`examples/checkup_gate_demo/agent.prompt` as the coding-agent task prompt.
+From `examples/checkup_gate_demo/`, only `prompts/refund_python.prompt` is hand-crafted;
+run `./run_demo.sh` to `pdd sync refund --evidence` then checkup contract/coverage/gate.
+Offline policy demo: `python examples/checkup_gate_example.py`.
 See [docs/checkup_gate_demo.md](../docs/checkup_gate_demo.md).
 
 ### Agentic Fallback

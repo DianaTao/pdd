@@ -18,7 +18,7 @@ def write_demo_manifest(
 ) -> Path:
     """Write a minimal schema-v1 dev-unit manifest for gate demonstrations."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    prompt_path = prompt_rel or f"prompts/{basename}_demo_python.prompt"
+    prompt_path = prompt_rel or f"prompts/{basename}_python.prompt"
     payload: dict[str, Any] = {
         "schema_version": 1,
         "run": {

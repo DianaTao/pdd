@@ -1,0 +1,58 @@
+# Refund helper (checkup gate demo dev unit)
+
+Hand-crafted **prompt only** for issue #833. Do not commit generated code, tests,
+examples, or stories — produce them with `pdd sync refund --evidence` (or
+`pdd generate` / `pdd test` / `pdd detect --stories`).
+
+<contract_rules>
+R1 - Non-positive amount rejection
+
+For every refund request,
+the system MUST reject amounts that are zero or negative
+when the amount is supplied.
+
+This rule is violated if a zero or negative amount is accepted.
+
+R2 - Over-refund prevention
+
+For every refund request,
+the system MUST NOT allow the refund amount to exceed the original charge
+when the original charge is known.
+
+R3 - No provider call on invalid input
+
+For invalid refund requests (R1 or R2),
+the system MUST NOT invoke an external payment provider
+when validation has already failed.
+</contract_rules>
+
+<vocabulary>
+refund amount: monetary value returned to the customer; must be positive
+original charge: the payment being refunded
+payment provider: external gateway (stubbed in this demo; no real network I/O)
+invalid refund request: zero/negative amount or amount greater than original charge
+</vocabulary>
+
+<coverage>
+R1: story__refund_invalid.md, test_R1_rejects_non_positive_amount
+R2: story__refund_invalid.md, test_R2_rejects_over_refund
+R3: test_R3_no_provider_on_invalid
+</coverage>
+
+<capabilities>
+- The module MUST expose `refund(amount: float, original_charge: float | None = None) -> float`.
+- The module MUST raise `ValueError` for R1 and R2 violations before any provider call.
+- The module MUST allow tests to observe whether a provider call would have occurred on invalid input (e.g. a testable flag or stub).
+</capabilities>
+
+<non_responsibilities>
+- The module DOES NOT perform real payment network I/O in this demo.
+</non_responsibilities>
+
+## Implementation notes (for PDD generation)
+
+- Target language: Python 3.12+.
+- Primary module path: `src/refund.py`.
+- Runnable example: `examples/refund_example.py` demonstrating one successful refund.
+- Unit tests in `tests/test_refund.py` using the exact test function names listed in `<coverage>`.
+- User stories under `user_stories/` with filenames referenced in `<coverage>`; each story MUST include `## Covers` for its rules and `## Acceptance Criteria`.

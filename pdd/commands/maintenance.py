@@ -13,7 +13,11 @@ from ..construct_paths import _find_pddrc_file, _load_pddrc_config
 from ..track_cost import track_cost
 from ..core.errors import handle_error
 from ..core.utils import _run_setup_utility, echo_model_line
-from ..evidence_manifest import validation_from_sync, write_evidence_manifest
+from ..evidence_manifest import (
+    collect_sync_evidence_paths,
+    validation_from_sync,
+    write_evidence_manifest,
+)
 
 DEFAULT_SYNC_BUDGET = 20.0
 
@@ -272,9 +276,17 @@ def sync(
             one_session=effective_one_session,
         )
         if evidence:
-            write_evidence_manifest(
+            project_root = Path.cwd()
+            prompt_path, output_files = collect_sync_evidence_paths(
+                basename,
+                result,
+                project_root=project_root,
+            )
+            manifest_path = write_evidence_manifest(
                 command="pdd sync",
                 basename=basename,
+                prompt_file=prompt_path,
+                output_files=output_files,
                 model=model_name,
                 cost_usd=total_cost,
                 temperature=ctx.obj.get("temperature", 0.0),
@@ -284,7 +296,15 @@ def sync(
                     skip_verify=skip_verify,
                     dry_run=dry_run,
                 ),
+                project_root=project_root,
             )
+            if not ctx.obj.get("quiet", False):
+                click.echo(
+                    click.style(
+                        f"Evidence manifest: {manifest_path}",
+                        fg="cyan",
+                    )
+                )
         return str(result), total_cost, model_name
     except click.Abort:
         raise

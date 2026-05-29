@@ -75,15 +75,27 @@ def _run_scenario(
     print("OK")
 
 
-def _copy_fixture(project: Path) -> tuple[Path, Path]:
-    """Copy refund demo source and prompt into a temp project."""
-    dest_src = project / "src" / "refund.py"
-    dest_src.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(FIXTURE_ROOT / "src" / "refund.py", dest_src)
-    dest_prompt = project / "prompts" / "refund_demo_python.prompt"
+def _write_minimal_refund_code(code_path: Path) -> Path:
+    """Write minimal generated-style code for offline gate hash checks."""
+    code_path.parent.mkdir(parents=True, exist_ok=True)
+    code_path.write_text(
+        "def refund(amount: float, original_charge: float | None = None) -> float:\n"
+        "    if amount <= 0:\n"
+        "        raise ValueError('amount must be positive')\n"
+        "    if original_charge is not None and amount > original_charge:\n"
+        "        raise ValueError('refund exceeds original charge')\n"
+        "    return amount\n",
+        encoding="utf-8",
+    )
+    return code_path
+
+
+def _copy_fixture_prompt(project: Path) -> Path:
+    """Copy only the hand-crafted prompt into a temp project."""
+    dest_prompt = project / "prompts" / "refund_python.prompt"
     dest_prompt.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(FIXTURE_ROOT / "prompts" / "refund_demo_python.prompt", dest_prompt)
-    return dest_src, dest_prompt
+    shutil.copy2(FIXTURE_ROOT / "prompts" / "refund_python.prompt", dest_prompt)
+    return dest_prompt
 
 
 def main() -> None:
@@ -102,12 +114,17 @@ def main() -> None:
 
     _run_scenario(
         "2. Generate-only validation (not_available)",
-        setup=lambda project: write_demo_manifest(
-            project / ".pdd" / "evidence" / "devunits" / "refund.latest.json",
-            basename="refund",
-            output_rel="src/refund.py",
-            output_hash=sha256_file(_copy_fixture(project)[0]),
-            validation=GENERATE_ONLY_VALIDATION,
+        setup=lambda project: (
+            _copy_fixture_prompt(project),
+            write_demo_manifest(
+                project / ".pdd" / "evidence" / "devunits" / "refund.latest.json",
+                basename="refund",
+                output_rel="src/refund.py",
+                output_hash=sha256_file(
+                    _write_minimal_refund_code(project / "src" / "refund.py")
+                ),
+                validation=GENERATE_ONLY_VALIDATION,
+            ),
         ),
         target="refund",
         expect_passed=False,
@@ -121,22 +138,35 @@ def main() -> None:
 
     _run_scenario(
         "3. Fresh manifest (pass)",
-        setup=lambda project: write_demo_manifest(
-            project / ".pdd" / "evidence" / "devunits" / "refund.latest.json",
-            basename="refund",
-            output_rel="src/refund.py",
-            output_hash=sha256_file(_copy_fixture(project)[0]),
-            validation=PASSING_VALIDATION,
+        setup=lambda project: (
+            _copy_fixture_prompt(project),
+            write_demo_manifest(
+                project / ".pdd" / "evidence" / "devunits" / "refund.latest.json",
+                basename="refund",
+                output_rel="src/refund.py",
+                output_hash=sha256_file(
+                    _write_minimal_refund_code(project / "src" / "refund.py")
+                ),
+                validation=PASSING_VALIDATION,
+            ),
         ),
         target="refund",
         expect_passed=True,
         expect_codes=set(),
-        cli_hint="cd examples/checkup_gate_demo && pdd checkup gate refund --json",
+        cli_hint=(
+            "cd examples/checkup_gate_demo && "
+            "pdd sync refund --evidence && "
+            "pdd checkup contract check prompts/ && "
+            "pdd checkup coverage prompts/ && "
+            "pdd checkup gate refund --json"
+        ),
     )
 
     _run_scenario(
         "4. Stale output hash (stale_output)",
         setup=lambda project: (
+            _copy_fixture_prompt(project),
+            _write_minimal_refund_code(project / "src" / "refund.py"),
             write_demo_manifest(
                 project / ".pdd" / "evidence" / "devunits" / "refund.latest.json",
                 basename="refund",
@@ -144,7 +174,6 @@ def main() -> None:
                 output_hash="deadbeef",
                 validation=PASSING_VALIDATION,
             ),
-            _copy_fixture(project),
         ),
         target="refund",
         expect_passed=False,
@@ -153,7 +182,8 @@ def main() -> None:
     )
 
     def _skip_shaped_setup(project: Path) -> None:
-        code, _prompt = _copy_fixture(project)
+        _copy_fixture_prompt(project)
+        code = _write_minimal_refund_code(project / "src" / "refund.py")
         validation = validation_from_sync({}, skip_tests=True, skip_verify=True)
         validation["detect_stories"] = "passed"
         write_demo_manifest(
@@ -191,8 +221,8 @@ def main() -> None:
     print()
     print("Next: run the agent walkthrough prompt:")
     print(f"  less {FIXTURE_ROOT / 'agent.prompt'}")
-    print("Or exercise the fixture tree with the real CLI:")
-    print("  cd examples/checkup_gate_demo && pdd checkup gate refund --json")
+    print("Or run the full CLI showcase:")
+    print("  cd examples/checkup_gate_demo && ./run_demo.sh")
 
 
 if __name__ == "__main__":
