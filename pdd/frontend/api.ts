@@ -1219,30 +1219,38 @@ class PDDApiClient {
   }
 
   /**
-   * List remote sessions for authenticated user.
-   * Fetches from cloud, requires JWT token.
+   * Helper for cloud API requests with authentication.
    */
-  async listRemoteSessions(): Promise<RemoteSessionInfo[]> {
+  private async cloudRequest<T>(endpoint: string, options?: RequestInit): Promise<T> {
     const token = await this.getJWTToken();
     if (!token) {
       throw new Error('Not authenticated. Please run: pdd auth login');
     }
 
     const cloudUrl = await this.getCloudUrl();
-    const response = await fetch(`${cloudUrl}/listSessions`, {
-      method: 'GET',
+    const response = await fetch(`${cloudUrl}${endpoint}`, {
+      ...options,
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
+        ...options?.headers,
       },
     });
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: response.statusText }));
-      throw new Error(error.error || `Failed to list sessions: ${response.status}`);
+      throw new Error(error.error || `Cloud API Error: ${response.status}`);
     }
 
-    const data = await response.json();
+    return response.json();
+  }
+
+  /**
+   * List remote sessions for authenticated user.
+   * Fetches from cloud, requires JWT token.
+   */
+  async listRemoteSessions(): Promise<RemoteSessionInfo[]> {
+    const data = await this.cloudRequest<{ sessions: RemoteSessionInfo[] }>('/listSessions');
     return data.sessions || [];
   }
 
@@ -1251,27 +1259,10 @@ class PDDApiClient {
    * Returns command ID for polling status.
    */
   async submitRemoteCommand(request: RemoteCommandRequest): Promise<{ commandId: string; status: string }> {
-    const token = await this.getJWTToken();
-    if (!token) {
-      throw new Error('Not authenticated. Please run: pdd auth login');
-    }
-
-    const cloudUrl = await this.getCloudUrl();
-    const response = await fetch(`${cloudUrl}/submitCommand`, {
+    return this.cloudRequest<{ commandId: string; status: string }>('/submitCommand', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
       body: JSON.stringify(request),
     });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: response.statusText }));
-      throw new Error(error.error || `Failed to submit command: ${response.status}`);
-    }
-
-    return await response.json();
   }
 
   /**
@@ -1282,47 +1273,32 @@ class PDDApiClient {
     sessionId: string,
     commandId: string
   ): Promise<RemoteCommandStatus | null> {
-    const token = await this.getJWTToken();
-    if (!token) {
-      throw new Error('Not authenticated. Please run: pdd auth login');
-    }
+    try {
+      const data = await this.cloudRequest<{ command: any }>(
+        `/getCommandStatus?sessionId=${encodeURIComponent(sessionId)}&commandId=${encodeURIComponent(commandId)}`
+      );
+      const command = data.command;
 
-    const cloudUrl = await this.getCloudUrl();
-    const response = await fetch(
-      `${cloudUrl}/getCommandStatus?sessionId=${encodeURIComponent(sessionId)}&commandId=${encodeURIComponent(commandId)}`,
-      {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+      if (!command) {
+        return null;
       }
-    );
 
-    if (!response.ok) {
-      if (response.status === 404) {
-        return null; // Command not found
+      // Map cloud response to RemoteCommandStatus
+      return {
+        commandId: command.commandId,
+        type: command.type,
+        status: command.status,
+        createdAt: command.createdAt,
+        updatedAt: command.updatedAt,
+        response: command.response,
+      };
+    } catch (error) {
+      // Check if it's a 404 (not found) error from cloud API
+      if (error instanceof Error && error.message.includes('404')) {
+        return null;
       }
-      const error = await response.json().catch(() => ({ error: response.statusText }));
-      throw new Error(error.error || `Failed to get command status: ${response.status}`);
+      throw error;
     }
-
-    const data = await response.json();
-    const command = data.command;
-
-    if (!command) {
-      return null;
-    }
-
-    // Map cloud response to RemoteCommandStatus
-    return {
-      commandId: command.commandId,
-      type: command.type,
-      status: command.status,
-      createdAt: command.createdAt,
-      updatedAt: command.updatedAt,
-      response: command.response,
-    };
   }
 
   /**
@@ -1336,27 +1312,10 @@ class PDDApiClient {
     sessionId: string;
     commandId: string;
   }): Promise<{ success: boolean; message: string }> {
-    const token = await this.getJWTToken();
-    if (!token) {
-      throw new Error('Not authenticated. Please run: pdd auth login');
-    }
-
-    const cloudUrl = await this.getCloudUrl();
-    const response = await fetch(`${cloudUrl}/cancelCommand`, {
+    return this.cloudRequest<{ success: boolean; message: string }>('/cancelCommand', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
       body: JSON.stringify(params),
     });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: response.statusText }));
-      throw new Error(error.error || `Failed to cancel command: ${response.status}`);
-    }
-
-    return response.json();
   }
 
   // Extracts cache

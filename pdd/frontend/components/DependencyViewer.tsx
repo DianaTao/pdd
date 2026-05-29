@@ -19,6 +19,7 @@ import ReactFlow, {
   getBezierPath,
   Viewport,
   useViewport,
+  XYPosition,
 } from 'reactflow';
 import dagre from 'dagre';
 import 'reactflow/dist/style.css';
@@ -180,7 +181,7 @@ export const getLayoutedElements = (
 
   dagre.layout(g);
 
-  const layoutedNodes = nodes.map((node) => {
+  const layoutedNodes: Node<ModuleNodeData | GroupNodeData>[] = nodes.map((node) => {
     const nodeWithPosition = g.node(node.id);
     const w = (node.style as any)?.width ?? NODE_WIDTH;
     const h = (node.style as any)?.height ?? NODE_HEIGHT;
@@ -514,8 +515,8 @@ const DependencyViewer: React.FC<DependencyViewerProps> = ({
           .filter((m) => m.position && !(m.group && expandedGroups.has(m.group)))
           .map((m) => [m.filename, m.position!])
       );
-      positionedTopLevelNodes = layouted.nodes.map((node) => {
-        const savedPos = savedPositions.get(node.id);
+      positionedTopLevelNodes = layouted.nodes.map((node): Node<ModuleNodeData | GroupNodeData> => {
+        const savedPos = savedPositions.get(node.id) as XYPosition | undefined;
         return savedPos ? { ...node, position: savedPos } : node;
       });
     } else {

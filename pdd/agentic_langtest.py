@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import csv
 import os
+import sys
 from pathlib import Path
 
 
@@ -58,7 +59,7 @@ def default_verify_cmd_for(lang: str, unit_test_file: str) -> str | None:
 
     # 2. Hardcoded Python fallback
     if lang == "python":
-        return f'{os.sys.executable} -m pytest "{unit_test_file}" -q'
+        return f'{sys.executable} -m pytest "{unit_test_file}" -q'
 
     # 3. No command available — triggers agentic fallback
     return None

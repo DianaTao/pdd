@@ -614,7 +614,6 @@ def fix_main(
                  rprint(escape(str(e)))
             else:
                  # Print other errors normally, escaping the error string
-                 from rich.markup import escape # Ensure escape is imported
                  rprint(f"[bold red]Error:[/bold red] {escape(str(e))}")
         # Return error result instead of sys.exit(1) to allow orchestrator to handle gracefully
         return False, "", "", 0, 0.0, f"Error: {e}"

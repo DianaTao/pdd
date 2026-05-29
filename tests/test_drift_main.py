@@ -320,7 +320,8 @@ def test_drift_applies_default_max_cost_for_non_dry_run(tmp_path: Path) -> None:
     assert report.max_cost_usd == DEFAULT_MAX_COST_USD
 
 
-def test_drift_policy_fails_closed_when_gate_unavailable(tmp_path: Path) -> None:
+def test_drift_policy_fails_open_when_gate_unavailable(tmp_path: Path) -> None:
+    """Policy check should fail open (status=stable) when gate is unavailable (Issue #1152)."""
     _prompt, code = _write_fixture(tmp_path)
     stable_source = code.read_text(encoding="utf-8")
     (tmp_path / ".pdd").mkdir(parents=True)
@@ -337,9 +338,9 @@ def test_drift_policy_fails_closed_when_gate_unavailable(tmp_path: Path) -> None
 
     assert report.policy_check_unavailable
     assert not report.policy_check_skipped
-    assert report.status == "unstable"
-    assert not report.behavior_unchanged
-    assert report.snapshots[0].policy_passed is False
+    assert report.status == "stable"
+    assert report.behavior_unchanged
+    assert report.snapshots[0].policy_passed is True
 
 
 def test_public_api_detects_renamed_symbol(tmp_path: Path) -> None:

@@ -587,6 +587,29 @@ def test_compute_sccs_deterministic_regardless_of_dep_order():
     assert sync_order.compute_sccs(g_multi_1) == sync_order.compute_sccs(g_multi_2)
 
 
+def test_compute_sccs_complex_cycles():
+    """Verify SCC computation for a graph with multiple nested cycles (Issue #1152)."""
+    import pdd.sync_order as sync_order
+    # A -> B -> A (Cycle 1)
+    # B -> C
+    # C -> D -> C (Cycle 2)
+    # D -> E
+    graph = {
+        "A": ["B"],
+        "B": ["A", "C"],
+        "C": ["D"],
+        "D": ["C", "E"],
+        "E": []
+    }
+    sccs = sync_order.compute_sccs(graph)
+    # Expected SCCs: [["E"], ["C", "D"], ["A", "B"]] or similar (order of nodes in SCC may vary)
+    sccs_sets = [set(scc) for scc in sccs]
+    assert set("E") in sccs_sets
+    assert {"C", "D"} in sccs_sets
+    assert {"A", "B"} in sccs_sets
+    assert len(sccs) == 3
+
+
 # ==============================================================================
 # TDD Tests: Script Path Fix
 # ==============================================================================

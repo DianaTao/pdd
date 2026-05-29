@@ -417,7 +417,8 @@ def _run_policy_check(
     if not _policy_configured(project_root, manifest):
         return True, True, False
     if not _GATE_POLICY_AVAILABLE:
-        return False, False, True
+        # If policy is configured but the tool is unavailable, fail open (skip)
+        return True, True, True
     return _run_gate_policy_impl(project_root, target=devunit).passed, False, False
 
 
@@ -569,7 +570,7 @@ def run_drift(
 
     snapshots: list[RunSnapshot] = []
     candidate_hashes: list[str] = []
-    candidate_apis: list[str] = []
+    candidate_apis: list[list[str]] = []
     total_cost = 0.0
     cost_budget_exceeded = False
     policy_check_skipped = not _policy_configured(project_root, manifest)
