@@ -11,6 +11,8 @@ import TaskQueuePanel from './components/TaskQueuePanel';
 import AddToQueueModal from './components/AddToQueueModal';
 import AuthStatusIndicator from './components/AuthStatusIndicator';
 import ReauthModal from './components/ReauthModal';
+import BugModal from './components/BugModal';
+import ChangeModal from './components/ChangeModal';
 import ErrorBoundary from './components/ErrorBoundary';
 import RemoteSessionSelector from './components/RemoteSessionSelector';
 import ExecutionModeToggle from './components/ExecutionModeToggle';
@@ -77,6 +79,30 @@ const App: React.FC = () => {
   // Add to queue modal state
   const [showAddToQueueModal, setShowAddToQueueModal] = useState(false);
   const [addToQueuePrompt, setAddToQueuePrompt] = useState<PromptInfo | null>(null);
+
+  // AI-assist modal state
+  const [showBugModal, setShowBugModal] = useState(false);
+  const [showChangeModal, setShowChangeModal] = useState(false);
+
+  // AI-assist modal handlers
+  const handleOpenBugModal = useCallback(() => setShowBugModal(true), []);
+  const handleBugModalSubmit = useCallback((description: string) => {
+    setShowBugModal(false);
+    addToast(`AI Assistant: Investigating "${description.substring(0, 30)}..."`, 'info', 5000);
+  }, [addToast]);
+
+  const handleOpenChangeModal = useCallback(() => setShowChangeModal(true), []);
+  const handleChangeModalSubmit = useCallback((request: string) => {
+    setShowChangeModal(false);
+    addToast(`AI Assistant: Implementing change for "${request.substring(0, 30)}..."`, 'info', 5000);
+  }, [addToast]);
+
+  const handleChangeModalDetect = useCallback(async (request: string): Promise<string> => {
+    // This would ideally call a backend endpoint to analyze the request
+    // For now, we simulate detection with a delay
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    return "pdd/cli.py"; // Example suggested file
+  }, []);
 
   // Toast notifications
   const { addToast } = useToast();
@@ -1345,10 +1371,25 @@ const App: React.FC = () => {
                   >
                     <BugAntIcon className="w-4 h-4" />
                     <span>Start Investigation</span>
-                  </button>
-                </div>
+                    </button>
+                    </div>
 
-                {/* Prerequisites card */}
+                    {/* AI Assist card */}
+                    <div className="glass rounded-2xl p-4 sm:p-6 border border-surface-700/50">
+                    <h3 className="text-sm font-semibold text-white mb-2">AI-Assisted Investigation</h3>
+                    <p className="text-xs text-surface-400 mb-4">Don't have a GitHub issue URL? Describe the bug in plain English and let the AI assistant generate a reproduction test case.</p>
+                    <button
+                    onClick={handleOpenBugModal}
+                    className="w-full px-4 py-2 rounded-xl bg-surface-800 text-surface-300 hover:text-white hover:bg-surface-700 transition-all text-sm font-medium border border-surface-700 flex items-center justify-center gap-2"
+                    >
+                    <svg className="w-4 h-4 text-accent-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    <span>Use AI Assistant</span>
+                    </button>
+                    </div>
+
+                    {/* Prerequisites card */}
                 <div className="glass rounded-2xl p-4 sm:p-5 border border-surface-700/50">
                   <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
                     <svg className="w-4 h-4 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1594,10 +1635,25 @@ const App: React.FC = () => {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
                     </svg>
                     <span>Start Implementation</span>
-                  </button>
-                </div>
+                    </button>
+                    </div>
 
-                {/* Prerequisites card */}
+                    {/* AI Assist card */}
+                    <div className="glass rounded-2xl p-4 sm:p-6 border border-surface-700/50">
+                    <h3 className="text-sm font-semibold text-white mb-2">AI-Assisted Change</h3>
+                    <p className="text-xs text-surface-400 mb-4">Describe the desired change in plain English and let the AI assistant identify which prompt needs modification.</p>
+                    <button
+                    onClick={handleOpenChangeModal}
+                    className="w-full px-4 py-2 rounded-xl bg-surface-800 text-surface-300 hover:text-white hover:bg-surface-700 transition-all text-sm font-medium border border-surface-700 flex items-center justify-center gap-2"
+                    >
+                    <svg className="w-4 h-4 text-accent-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    <span>Use AI Assistant</span>
+                    </button>
+                    </div>
+
+                    {/* Prerequisites card */}
                 <div className="glass rounded-2xl p-4 sm:p-5 border border-surface-700/50">
                   <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
                     <svg className="w-4 h-4 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1758,6 +1814,21 @@ const App: React.FC = () => {
       {/* Re-authentication modal */}
       {showReauthModal && (
         <ReauthModal onClose={() => setShowReauthModal(false)} />
+      )}
+
+      {/* AI Assistant Modals */}
+      {showBugModal && (
+        <BugModal
+          onClose={() => setShowBugModal(false)}
+          onSubmit={handleBugModalSubmit}
+        />
+      )}
+      {showChangeModal && (
+        <ChangeModal
+          onClose={() => setShowChangeModal(false)}
+          onSubmit={handleChangeModalSubmit}
+          onDetect={handleChangeModalDetect}
+        />
       )}
 
       {/* Device indicator for responsive testing (dev only) */}
