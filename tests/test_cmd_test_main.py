@@ -107,73 +107,6 @@ def test_generate_test_llm_prompts_reference_contract_rule_planning():
     assert "MUST NOT" in agentic_prompt
 
 
-def test_cmd_test_main_forwards_contract_rules_and_merge_preserves_tests(
-    mock_ctx_fixture,
-    tmp_path,
-):
-    """
-    Contract-aware generation depends on the module prompt reaching the
-    generator intact. In merge mode, accumulated tests must be preserved
-    and new contract-ID-visible tests appended.
-    """
-    fixture_dir = REPO_ROOT / "tests" / "fixtures" / "test_generation"
-    prompt_path = fixture_dir / "refund_policy_python.prompt"
-    code_path = fixture_dir / "refund_policy.py"
-    existing_test_path = tmp_path / "test_refund_policy.py"
-    existing_test_path.write_text(
-        "def test_existing_accumulated_refund_case():\n"
-        "    assert True\n",
-        encoding="utf-8",
-    )
-
-    generated_tests = (
-        "def test_R1_approves_valid_refund():\n"
-        "    assert validate_refund(1000, 500) == \"approved\"\n\n"
-        "def test_R2_rejects_over_refund():\n"
-        "    assert validate_refund(1000, 1500) == \"rejected\"\n"
-    )
-
-    with patch("pdd.cmd_test_main.construct_paths") as mock_construct_paths, \
-         patch("pdd.cmd_test_main.generate_test") as mock_generate_test:
-        mock_construct_paths.return_value = (
-            {},
-            {
-                "prompt_file": prompt_path.read_text(encoding="utf-8"),
-                "code_file": code_path.read_text(encoding="utf-8"),
-            },
-            {"output": str(tmp_path / "unused_output.py")},
-            "python",
-        )
-        mock_generate_test.return_value = (generated_tests, 0.05, "model_v1")
-
-        result = cmd_test_main(
-            ctx=mock_ctx_fixture,
-            prompt_file=str(prompt_path),
-            code_file=str(code_path),
-            output=str(tmp_path / "unused_output.py"),
-            language=None,
-            coverage_report=None,
-            existing_tests=[str(existing_test_path)],
-            target_coverage=None,
-            merge=True,
-        )
-
-    assert result[0] == generated_tests
-    sent_prompt = mock_generate_test.call_args.kwargs["prompt"]
-    assert "<contract_rules>" in sent_prompt
-    assert "R1:" in sent_prompt
-    assert "R2:" in sent_prompt
-    assert "MUST NOT approve" in sent_prompt
-
-    sent_existing_tests = mock_generate_test.call_args.kwargs["existing_tests"]
-    assert "test_existing_accumulated_refund_case" in sent_existing_tests
-
-    merged_content = existing_test_path.read_text(encoding="utf-8")
-    assert "test_existing_accumulated_refund_case" in merged_content
-    assert "test_R1_approves_valid_refund" in merged_content
-    assert "test_R2_rejects_over_refund" in merged_content
-
-
 # pylint: disable=redefined-outer-name
 @pytest.mark.parametrize("coverage_report, existing_tests, expect_error", [
     (None, None, False),
@@ -1950,6 +1883,88 @@ def test_cmd_test_main_cloud_e2e_generate_mode(tmp_path, monkeypatch, capsys):
     assert output_file.exists(), "Output file should be created"
     assert "Cloud Success" in captured.out, \
         f"Expected 'Cloud Success' in output, got: {captured.out[:500]}"
+
+
+@pytest.mark.real
+@pytest.mark.integration
+@pytest.mark.e2e
+@requires_cloud_e2e
+def test_cmd_test_main_cloud_e2e_contract_rules_merge(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    """
+    Cloud E2E: contract_rules prompt + ``--merge`` preserves accumulated tests.
+
+    No mocked ``generate_test``; uses PDD Cloud ``generateTest`` endpoint.
+    """
+    from tests.contract_rule_cloud_e2e import (
+        assert_contract_rule_merge_quality,
+        real_llm_tests_enabled,
+        setup_contract_rule_project,
+    )
+
+    if not real_llm_tests_enabled():
+        pytest.skip(
+            "Set PDD_RUN_REAL_LLM_TESTS=1 or PDD_RUN_ALL_TESTS=1 for real cloud LLM tests"
+        )
+
+    if not _wait_for_cloud_credentials(max_retries=3, delay=1.0):
+        pytest.skip("Cloud credentials not available after retries")
+
+    monkeypatch.setenv("PDD_CLOUD_ONLY", "1")
+    monkeypatch.delenv("PDD_FORCE_LOCAL", raising=False)
+
+    project = setup_contract_rule_project(tmp_path)
+    prompt_path = project / "refund_policy_python.prompt"
+    code_path = project / "refund_policy.py"
+    existing_test_path = project / "tests" / "test_refund_policy.py"
+    output_path = project / "tests" / "unused_output.py"
+
+    monkeypatch.chdir(project)
+
+    ctx = MagicMock(spec=Context)
+    ctx.obj = {
+        "verbose": True,
+        "force": True,
+        "quiet": False,
+        "local": False,
+        "strength": 0.25,
+        "temperature": 0.0,
+    }
+
+    try:
+        result = cmd_test_main(
+            ctx=ctx,
+            prompt_file=str(prompt_path),
+            code_file=str(code_path),
+            output=str(output_path),
+            language="python",
+            coverage_report=None,
+            existing_tests=[str(existing_test_path)],
+            target_coverage=None,
+            merge=True,
+            manual=True,
+        )
+    except click.UsageError as exc:
+        error_msg = str(exc)
+        if "Account not approved" in error_msg or "Insufficient credits" in error_msg:
+            pytest.skip(f"PDD Cloud not available: {error_msg}")
+        raise
+
+    captured = capsys.readouterr()
+    generated_test, cost, _model, _, _ = result
+    assert len(generated_test) > 0
+    assert isinstance(cost, (int, float)) and cost >= 0
+    assert "Cloud Success" in captured.out, (
+        f"expected cloud path; output:\n{captured.out[:500]}"
+    )
+
+    merged_content = existing_test_path.read_text(encoding="utf-8")
+    assert_contract_rule_merge_quality(merged_content)
+
+
 def test_cmd_test_main_example_file_detection(mock_ctx_fixture, mock_files_fixture):
     """
     Test that cmd_test_main detects example files (ending with _example)

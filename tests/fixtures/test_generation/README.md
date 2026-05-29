@@ -5,17 +5,18 @@ Used by issue #821 / PR #1283 regression and CLI smoke tests.
 - `refund_policy_python.prompt` — module prompt with one `MUST` and one `MUST NOT` rule (`R1`, `R2`).
 - `refund_policy.py` — minimal implementation under test.
 
-Run smoke:
+Offline regression (no LLM):
 
 ```bash
-PYTHONPATH=. pytest -q tests/commands/test_contract_rule_test_smoke.py
+PYTHONPATH=. pytest -q tests/test_generate_test_llm_preprocess.py
+PYTHONPATH=. pytest -q tests/test_cmd_test_main.py -k "context_test_prompt or contract_rule_planning"
 ```
 
-Manual `pdd test` (requires API keys): see [docs/manual_test_plan_issue_821.md](../../../docs/manual_test_plan_issue_821.md).
-
-Quick smoke:
+Cloud E2E (real PDD Cloud `generateTest`, costs credits; requires `pdd auth login`):
 
 ```bash
-pdd --local test --manual refund_policy_python.prompt refund_policy.py \
-  --existing-tests /path/to/test_refund_policy.py --merge
+PDD_RUN_REAL_LLM_TESTS=1 PYTHONPATH=. pytest -q tests/commands/test_contract_rule_test_smoke.py -v
+PDD_RUN_REAL_LLM_TESTS=1 PYTHONPATH=. pytest -q tests/test_cmd_test_main.py -k cloud_e2e_contract_rules_merge -v
 ```
+
+Manual CLI walkthrough: branch `docs/issue-821-manual-test-plan` → `examples/contract_rule_test_demo/README.md`.

@@ -122,15 +122,27 @@ PY
 
 ## Test 3 — Automated regression (pytest)
 
-**Testing for:** Unit tests guard prompt source text, preprocess output, `cmd_test_main` forwarding of `<contract_rules>`, and CLI `--merge` behavior (mocked LLM).
+**Testing for:** Unit tests guard prompt source text and preprocess output (no LLM). Cloud E2E tests call **real PDD Cloud** `generateTest` (no mocked `generate_test`).
+
+### 3a — Offline (no API / no cloud auth)
 
 ```bash
 PYTHONPATH=. pytest -q tests/test_generate_test_llm_preprocess.py
-PYTHONPATH=. pytest -q tests/commands/test_contract_rule_test_smoke.py
-PYTHONPATH=. pytest -q tests/test_cmd_test_main.py -k "contract or context_test_prompt"
+PYTHONPATH=. pytest -q tests/test_cmd_test_main.py -k "context_test_prompt or contract_rule_planning"
 ```
 
-**Pass:** All tests pass (expect 2 + 1 + several for the last command).
+**Pass:** All selected tests pass.
+
+### 3b — Cloud E2E (requires `pdd auth login` + credits)
+
+```bash
+PDD_RUN_REAL_LLM_TESTS=1 PYTHONPATH=. pytest -q tests/commands/test_contract_rule_test_smoke.py -v
+PDD_RUN_REAL_LLM_TESTS=1 PYTHONPATH=. pytest -q tests/test_cmd_test_main.py -k cloud_e2e_contract_rules_merge -v
+```
+
+**Pass:** Tests do not skip; output includes `Cloud Success`; merged tests keep the accumulated stub and add contract-related cases.
+
+**Note:** Do **not** set `PDD_FORCE_LOCAL=1` or pass `--local` for 3b — those force local LiteLLM instead of PDD Cloud.
 
 ---
 
@@ -173,12 +185,12 @@ ls -la "$DEMO_ROOT/workspace"
 - **`--merge`** appends to the existing file without removing `test_existing_accumulated_refund_case`.
 
 ```bash
-export PDD_FORCE_LOCAL=1
-# export OPENAI_API_KEY=sk-...   # if not using ~/.pdd from pdd setup
+# PDD Cloud (default when authenticated — omit --local and PDD_FORCE_LOCAL)
+# pdd auth login   # once, if needed
 
 cd "$DEMO_ROOT/workspace"
 
-pdd --local test --manual \
+pdd test --manual \
   refund_policy_python.prompt \
   src/refund_policy.py \
   --existing-tests tests/test_refund_policy.py \
@@ -221,7 +233,7 @@ pytest -q tests/test_refund_policy.py -v
 ```bash
 cd "$DEMO_ROOT/workspace"
 
-pdd --local test --manual \
+pdd test --manual \
   refund_policy_python.prompt \
   src/refund_policy_example.py \
   --output tests/test_refund_policy_from_example.py
