@@ -10,30 +10,10 @@ from typing import Tuple, Optional, Union, List
 
 import requests
 
-# Try to import DEFAULT_TIME, with fallback
-try:
-    from . import DEFAULT_TIME
-except ImportError:
-    DEFAULT_TIME = 0.5
-
-# Try to import agentic modules, with fallbacks
-try:
-    from .agentic_crash import run_agentic_crash
-except ImportError:
-    def run_agentic_crash(**kwargs):
-        return (False, "Agentic crash handler not available", 0.0, "N/A", [])
-
-try:
-    from .get_language import get_language
-except ImportError:
-    def get_language(ext):
-        return "unknown"
-
-try:
-    from .agentic_langtest import default_verify_cmd_for
-except ImportError:
-    def default_verify_cmd_for(lang, verification_program):
-        return None
+from . import DEFAULT_TIME
+from .agentic_crash import run_agentic_crash
+from .get_language import get_language
+from .agentic_langtest import default_verify_cmd_for
 
 def _normalize_agentic_result(result):
     """
@@ -171,15 +151,7 @@ def cloud_crash_fix(
 
 
 # Use relative import for internal modules
-try:
-    from .fix_code_module_errors import fix_code_module_errors
-except ImportError:
-    try:
-        from fix_code_module_errors import fix_code_module_errors
-    except ImportError:
-        # Provide a stub that will fail gracefully
-        def fix_code_module_errors(**kwargs):
-            return (False, False, "", "", "Module not available", 0.0, None)
+from .fix_code_module_errors import fix_code_module_errors
 
 
 class ProcessResult:
