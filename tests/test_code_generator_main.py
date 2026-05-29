@@ -2860,6 +2860,46 @@ def test_cloud_response_with_examples_used(
         assert example_info_found, f"Expected example info 'ex-123 (Test Example Title)' in console output"
 
 
+def test_cloud_response_id_title_populates_last_grounding_selected_examples(
+    mock_ctx, temp_dir_setup, mock_construct_paths_fixture, mock_pdd_preprocess_fixture,
+    mock_get_jwt_token_fixture, mock_requests_post_fixture, mock_env_vars
+):
+    """Regression: id/title-only examplesUsed must not produce empty selected_examples."""
+    mock_ctx.obj["local"] = False
+    prompt_content = "Test prompt"
+    prompt_file_path = temp_dir_setup["prompts_dir"] / "example_grounding.prompt"
+    create_file(prompt_file_path, prompt_content)
+    output_file_path_str = str(temp_dir_setup["output_dir"] / "example_grounding_output.py")
+
+    mock_construct_paths_fixture.return_value = (
+        {},
+        {"prompt_file": prompt_content},
+        {"output": output_file_path_str},
+        "python",
+    )
+    mock_pdd_preprocess_fixture.return_value = prompt_content
+
+    mock_response = MagicMock(spec=requests.Response)
+    mock_response.json.return_value = {
+        "generatedCode": DEFAULT_MOCK_GENERATED_CODE,
+        "totalCost": 0.001,
+        "modelName": "test-model",
+        "examplesUsed": [{"id": "ex-123", "title": "Test Example Title"}],
+    }
+    mock_response.raise_for_status = MagicMock()
+    mock_requests_post_fixture.return_value = mock_response
+
+    code_generator_main(mock_ctx, str(prompt_file_path), output_file_path_str, None, False)
+
+    grounding = mock_ctx.obj["last_grounding"]
+    selected = grounding["selected_examples"]
+    assert len(selected) == 1
+    assert selected[0]["module"] == "ex-123"
+    assert selected[0]["id"] == "ex-123"
+    assert selected[0]["title"] == "Test Example Title"
+    assert grounding["reviewed"] is False
+
+
 def test_cloud_response_empty_examples_used(
     mock_ctx, temp_dir_setup, mock_construct_paths_fixture, mock_pdd_preprocess_fixture,
     mock_get_jwt_token_fixture, mock_requests_post_fixture, mock_env_vars

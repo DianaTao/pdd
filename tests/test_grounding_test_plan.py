@@ -137,7 +137,7 @@ def test_generate_pin_tags_appear_in_evidence_artifact(
 
 
 @pytest.mark.timeout(60)
-def test_generate_review_examples_records_reviewed_in_evidence(
+def test_generate_review_examples_records_post_generation_decisions_not_reviewed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -163,7 +163,8 @@ def test_generate_review_examples_records_reviewed_in_evidence(
             mode="cloud",
             examples_used=examples_used,
             grounding_overrides=obj.get("grounding_overrides"),
-            reviewed=reviewed_from_decisions(obj.get("grounding_review_decisions")),
+            reviewed=False,
+            example_review_decisions=obj.get("grounding_review_decisions"),
         )
         return ("def pay():\n    pass\n", False, 0.01, "model")
 
@@ -185,4 +186,6 @@ def test_generate_review_examples_records_reviewed_in_evidence(
             encoding="utf-8"
         )
     )
-    assert manifest["generation"]["grounding"]["reviewed"] is True
+    grounding = manifest["generation"]["grounding"]
+    assert grounding["reviewed"] is False
+    assert grounding["example_review_decisions"][0]["decision"] == "accept"

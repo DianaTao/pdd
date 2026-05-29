@@ -33,12 +33,24 @@ def _lists_from_overrides(
 
 
 def _example_module_slug(raw: Mapping[str, Any]) -> Optional[str]:
-    """Return a stable module slug from a cloud example record."""
-    for key in ("module", "slug"):
+    """Return a stable module slug from a cloud examplesUsed record."""
+    for key in ("module", "slug", "id"):
         value = raw.get(key)
         if value is not None and str(value).strip():
             return str(value).strip()
     return None
+
+
+def reviewed_from_cloud_response(response: Optional[Mapping[str, Any]]) -> bool:
+    """True only when the cloud API reports examples were reviewed before generation."""
+    if not isinstance(response, Mapping):
+        return False
+    if response.get("examplesReviewed") is True:
+        return True
+    grounding = response.get("grounding")
+    if isinstance(grounding, Mapping) and grounding.get("reviewed") is True:
+        return True
+    return False
 
 
 def selected_examples_from_cloud(examples_used: Any) -> List[Dict[str, Any]]:
@@ -54,6 +66,12 @@ def selected_examples_from_cloud(examples_used: Any) -> List[Dict[str, Any]]:
         if not module:
             continue
         entry: Dict[str, Any] = {"module": module}
+        example_id = raw.get("id")
+        if example_id is not None and str(example_id).strip():
+            entry["id"] = str(example_id).strip()
+        title = raw.get("title")
+        if title is not None and str(title).strip():
+            entry["title"] = str(title).strip()
         prompt_hash = raw.get("prompt_sha256") or raw.get("promptSha256")
         code_hash = raw.get("code_sha256") or raw.get("codeSha256")
         similarity = raw.get("similarity")
@@ -80,6 +98,7 @@ def build_grounding_metadata(
     grounding_overrides: Optional[Mapping[str, Sequence[str]]] = None,
     reviewed: bool = False,
     selected_examples: Optional[Sequence[Mapping[str, Any]]] = None,
+    example_review_decisions: Optional[Sequence[Mapping[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Build a generation.grounding object for evidence manifests and llm_invoke returns."""
     pinned, excluded = _lists_from_overrides(grounding_overrides)
@@ -88,13 +107,18 @@ def build_grounding_metadata(
         if selected_examples is not None
         else selected_examples_from_cloud(examples_used)
     )
-    return {
+    metadata: Dict[str, Any] = {
         "mode": mode,
         "selected_examples": examples,
         "pinned": pinned,
         "excluded": excluded,
         "reviewed": bool(reviewed),
     }
+    if example_review_decisions:
+        metadata["example_review_decisions"] = [
+            dict(item) for item in example_review_decisions if isinstance(item, Mapping)
+        ]
+    return metadata
 
 
 def normalize_grounding(
@@ -120,23 +144,35 @@ def normalize_grounding(
     if not excluded and isinstance(grounding.get("excluded"), list):
         excluded = [str(item) for item in grounding["excluded"] if str(item).strip()]
 
-    return {
+    normalized: Dict[str, Any] = {
         "mode": str(mode),
         "selected_examples": selected,
         "pinned": pinned,
         "excluded": excluded,
         "reviewed": bool(grounding.get("reviewed")) or reviewed,
     }
+    decisions = grounding.get("example_review_decisions")
+    if isinstance(decisions, list) and decisions:
+        normalized["example_review_decisions"] = [
+            dict(item) for item in decisions if isinstance(item, Mapping)
+        ]
+    return normalized
 
 
 def reviewed_from_decisions(decisions: Optional[Sequence[Any]]) -> bool:
-    """True when at least one --review-examples decision was recorded."""
+    """True when every reviewed example was accepted (post-generation acknowledgment only)."""
     if not decisions:
         return False
+    saw_example = False
     for item in decisions:
-        if isinstance(item, Mapping) and item.get("decision") == "accept":
-            return True
-    return False
+        if not isinstance(item, Mapping):
+            continue
+        if item.get("reason") == "no_examples":
+            continue
+        saw_example = True
+        if item.get("decision") != "accept":
+            return False
+    return saw_example
 
 
 def record_grounding_review_decision(
@@ -168,19 +204,16 @@ def review_grounding_examples_interactive(
     force: bool = False,
     quiet: bool = False,
 ) -> None:
-    """Interactively accept or reject cloud-selected grounding examples."""
+    """Record post-generation acknowledgment for examples already used by cloud."""
     if ctx_obj is None:
         return
 
     if not isinstance(examples_used, list) or not examples_used:
         if not quiet:
-            click.echo("No grounding examples were selected for review.")
-        record_grounding_review_decision(
-            ctx_obj,
-            module="_run",
-            decision="accept",
-            reason="no_examples",
-        )
+            click.echo(
+                "No grounding examples were returned; generation.grounding.reviewed "
+                "remains false."
+            )
         return
 
     accepted = False
@@ -201,8 +234,11 @@ def review_grounding_examples_interactive(
             continue
 
         if not quiet:
-            click.echo(f"Grounding example: {label}")
-        if click.confirm("Accept this example for generation?", default=True):
+            click.echo(f"Grounding example used: {label}")
+        if click.confirm(
+            "Acknowledge this example was already used for the generated output?",
+            default=True,
+        ):
             record_grounding_review_decision(ctx_obj, module=module, decision="accept")
             accepted = True
         else:
@@ -230,14 +266,8 @@ def grounding_overrides_from_click_ctx() -> Optional[Dict[str, List[str]]]:
 
 
 def reviewed_from_click_ctx() -> bool:
-    """Return whether review decisions on the Click context mark the run reviewed."""
-    try:
-        ctx = click.get_current_context(silent=True)
-    except Exception:
-        return False
-    if not ctx or not isinstance(ctx.obj, dict):
-        return False
-    return reviewed_from_decisions(ctx.obj.get("grounding_review_decisions"))
+    """Post-generation CLI review does not satisfy generation.grounding.reviewed."""
+    return False
 
 
 def resolve_grounding_overrides_for_invoke(

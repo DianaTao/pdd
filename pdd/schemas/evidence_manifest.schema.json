@@ -99,6 +99,8 @@
             "required": ["module"],
             "properties": {
               "module": {"type": "string"},
+              "id": {"type": "string"},
+              "title": {"type": "string"},
               "prompt_sha256": {"type": "string"},
               "code_sha256": {"type": "string"},
               "similarity": {"type": "number"},
@@ -109,7 +111,20 @@
         },
         "pinned": {"type": "array", "items": {"type": "string"}},
         "excluded": {"type": "array", "items": {"type": "string"}},
-        "reviewed": {"type": "boolean"}
+        "reviewed": {"type": "boolean"},
+        "example_review_decisions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["module", "decision"],
+            "properties": {
+              "module": {"type": "string"},
+              "decision": {"type": "string"},
+              "reason": {"type": "string"}
+            },
+            "additionalProperties": false
+          }
+        }
       },
       "additionalProperties": false
     }

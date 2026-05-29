@@ -31,6 +31,7 @@ from .grounding_provenance import (
     build_grounding_metadata,
     resolve_grounding_overrides_for_invoke,
     reviewed_from_click_ctx,
+    reviewed_from_cloud_response,
 )
 
 # Environment variable to control log level
@@ -972,14 +973,14 @@ def _llm_invoke_cloud(
                     mode="cloud",
                     examples_used=examples_used,
                     grounding_overrides=resolved_overrides,
-                    reviewed=reviewed_from_click_ctx(),
+                    reviewed=reviewed_from_cloud_response(data),
                 )
             except (TypeError, ValueError, KeyError) as exc:
                 logger.warning("Grounding metadata extraction failed: %s", exc)
                 grounding = build_grounding_metadata(
                     mode="unavailable",
                     grounding_overrides=resolved_overrides,
-                    reviewed=reviewed_from_click_ctx(),
+                    reviewed=False,
                 )
 
             if verbose and grounding.get("selected_examples"):

@@ -114,15 +114,37 @@ def test_write_evidence_manifest_serializes_cloud_grounding(tmp_path: Path) -> N
     assert manifest["generation"]["grounding_examples"] == grounding["selected_examples"]
 
 
-def test_grounding_kwargs_from_ctx_merges_review_decisions() -> None:
+def test_grounding_kwargs_from_ctx_uses_last_grounding_reviewed_flag() -> None:
     kwargs = grounding_kwargs_from_ctx(
         {
-            "last_grounding": {"mode": "cloud", "selected_examples": [], "pinned": [], "excluded": []},
+            "last_grounding": {
+                "mode": "cloud",
+                "selected_examples": [],
+                "pinned": [],
+                "excluded": [],
+                "reviewed": True,
+            },
             "grounding_review_decisions": [{"module": "auth", "decision": "accept"}],
         }
     )
     assert kwargs["reviewed"] is True
     assert kwargs["grounding"]["mode"] == "cloud"
+
+
+def test_grounding_kwargs_from_ctx_ignores_post_generation_decisions() -> None:
+    kwargs = grounding_kwargs_from_ctx(
+        {
+            "last_grounding": {
+                "mode": "cloud",
+                "selected_examples": [],
+                "pinned": [],
+                "excluded": [],
+                "reviewed": False,
+            },
+            "grounding_review_decisions": [{"module": "auth", "decision": "accept"}],
+        }
+    )
+    assert kwargs["reviewed"] is False
 
 
 def test_output_hash_changes_with_output_content(tmp_path: Path) -> None:

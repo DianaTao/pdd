@@ -145,9 +145,12 @@ explicitly choose **at least one** of:
   cannot silently drift to a different prior implementation.
 - **`<exclude>old_module</exclude>`** — block any superseded or known-bad
   implementation from being retrieved.
-- **`pdd ... --review-examples`** — interactively review the selected examples
-  before generation; the decision is recorded in the run's evidence manifest
-  under `generation.grounding.reviewed`.
+- **`pdd ... --review-examples`** — after cloud generation, interactively
+  acknowledge which `examplesUsed` entries shaped the output. Decisions are
+  recorded under `generation.grounding.example_review_decisions`. The
+  `generation.grounding.reviewed` flag is set to `true` only when the cloud API
+  reports pre-generation review (for example `examplesReviewed: true` in the
+  `generateCode` response), not from this post-generation prompt.
 
 These decisions land in the evidence manifest (`generation.grounding`, see
 `docs/evidence_manifest.md`), so reviewers can audit exactly which examples

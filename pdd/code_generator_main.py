@@ -36,7 +36,7 @@ from .architecture_include_validation import validate_prompt_contract_context
 from .validate_prompt_includes import validate_prompt_includes
 from .grounding_provenance import (
     build_grounding_metadata,
-    reviewed_from_decisions,
+    reviewed_from_cloud_response,
     review_grounding_examples_interactive,
     stash_grounding_overrides_on_ctx,
 )
@@ -3734,13 +3734,19 @@ def code_generator_main(
                                 prompt_content,
                             )
                         )
+                        review_decisions = (
+                            ctx.obj.get("grounding_review_decisions")
+                            if isinstance(ctx.obj, dict)
+                            else None
+                        )
                         grounding_meta = build_grounding_metadata(
                             mode="cloud",
                             examples_used=examples_used,
                             grounding_overrides=overrides,
-                            reviewed=reviewed_from_decisions(
-                                cli_params.get("grounding_review_decisions")
-                            ),
+                            reviewed=reviewed_from_cloud_response(response_data),
+                            example_review_decisions=review_decisions
+                            if cli_params.get("review_examples")
+                            else None,
                         )
                         if ctx.obj is None:
                             ctx.obj = {}
@@ -4294,9 +4300,7 @@ def code_generator_main(
         ctx.obj["last_grounding"] = build_grounding_metadata(
             mode="unavailable",
             grounding_overrides=overrides,
-            reviewed=reviewed_from_decisions(
-                cli_params.get("grounding_review_decisions")
-            ),
+            reviewed=False,
         )
 
     return generated_code_content or "", was_incremental_operation, total_cost, model_name
