@@ -302,7 +302,10 @@ def connect(
         config = ServerConfig(
             host=host,
             port=port,  # The ACTUAL port after smart detection
+            token=token,
+            allow_remote=False,
             allowed_origins=allowed_origins,
+            log_level="info",
         )
         app = create_app(project_root, config=config)
     except Exception as e:

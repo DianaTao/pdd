@@ -375,6 +375,7 @@ async def emit_job_output(job_id: str, stream: str, text: str):
     msg_type = "stdout" if stream == "stdout" else "stderr"
     
     # Create specific message model
+    msg: Union[StdoutMessage, StderrMessage]
     if stream == "stdout":
         msg = StdoutMessage(
             data=clean_ansi(text),
@@ -399,6 +400,7 @@ async def emit_job_progress(job_id: str, current: int, total: int, message: str)
         current=current,
         total=total,
         message=message,
+        data=None,
         timestamp=datetime.now(timezone.utc)
     )
     await manager.broadcast_job_message(job_id, msg)

@@ -29,27 +29,56 @@ from pathlib import Path
 import importlib.resources
 
 # LangGraph imports
-from langgraph.graph import StateGraph, END, START
-from langgraph.graph.message import add_messages
-from langgraph.prebuilt import ToolNode
+try:
+    from langgraph.graph import StateGraph, END, START
+    from langgraph.graph.message import add_messages
+    from langgraph.prebuilt import ToolNode
 
-# LangChain imports (assuming a model is needed for planning)
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage
-# Replace with your preferred LLM provider if needed, e.g., langchain_anthropic
-# from langchain_openai import ChatOpenAI
-from pydantic import BaseModel, Field
-from langchain_core.tools import BaseTool # Import BaseTool
+    # LangChain imports (assuming a model is needed for planning)
+    from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage
+    from pydantic import BaseModel, Field
+    from langchain_core.tools import BaseTool # Import BaseTool
 
-# Anthropic imports for Claude 3.7
-from langchain_anthropic import ChatAnthropic
-from langchain_core.prompts import ChatPromptTemplate
+    # Anthropic imports for Claude 3.7
+    from langchain_anthropic import ChatAnthropic
+    from langchain_core.prompts import ChatPromptTemplate
 
-# Import LangChain caching - use community package
-from langchain import globals as langchain_globals
-from langchain_community.cache import SQLiteCache
+    # Import LangChain caching - use community package
+    from langchain import globals as langchain_globals
+    from langchain_community.cache import SQLiteCache
 
-# MCP Adapter imports
-from langchain_mcp_adapters.client import MultiServerMCPClient
+    # MCP Adapter imports
+    from langchain_mcp_adapters.client import MultiServerMCPClient
+    
+    HAS_LANGGRAPH = True
+except ImportError:
+    HAS_LANGGRAPH = False
+    # Define placeholder classes/types if needed to avoid NameErrors during module load
+    class BaseMessage: pass
+    class HumanMessage: pass
+    class AIMessage: pass
+    class ToolMessage: pass
+    class StateGraph: 
+        def __init__(self, *args, **kwargs): pass
+        def add_node(self, *args, **kwargs): pass
+        def add_edge(self, *args, **kwargs): pass
+        def add_conditional_edges(self, *args, **kwargs): pass
+        def compile(self, *args, **kwargs): return None
+    def add_messages(*args, **kwargs): pass
+    def ToolNode(*args, **kwargs): pass
+    END = "end"
+    START = "start"
+    class ChatAnthropic: pass
+    class ChatPromptTemplate: pass
+    class MultiServerMCPClient:
+        def __init__(self, *args, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args, **kwargs): pass
+    class SQLiteCache:
+        def __init__(self, *args, **kwargs): pass
+    class langchain_globals:
+        @staticmethod
+        def set_llm_cache(*args, **kwargs): pass
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -379,17 +408,10 @@ graph = graph_builder.compile()
 async def edit_file(file_path: str, edit_instructions: str, mcp_config_path: str = None) -> tuple[bool, Optional[str]]:
     """
     Asynchronously edits a file based on instructions using LangGraph and MCP tools.
-
-    Args:
-        file_path: The path to the file to edit.
-        edit_instructions: A description of the changes to make.
-        mcp_config_path: Optional path to MCP config. If None, will look for 'pdd/mcp_config.json' within the package.
-
-    Returns:
-        A tuple containing:
-            - success (boolean): Whether the file was edited successfully.
-            - error_message (Optional[str]): An error message if unsuccessful, None otherwise.
     """
+    if not HAS_LANGGRAPH:
+        return False, "edit_file requires langgraph and langchain-anthropic dependencies which are not installed."
+
     # Print current working directory
     current_dir = os.getcwd()
     logger.info(f"Current working directory: {current_dir}")
@@ -780,4 +802,5 @@ if __name__ == "__main__":
             asyncio.run(main())
 
         else:
-            raise e 
+            raise e
+ 

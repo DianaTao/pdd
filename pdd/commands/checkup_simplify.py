@@ -120,3 +120,5 @@ def checkup_simplify(  # pylint: disable=too-many-arguments,too-many-locals
 
     if result.exit_code:
         raise click.exceptions.Exit(result.exit_code)
+
+    return "\n".join(result.summary_lines), result.cost, result.provider

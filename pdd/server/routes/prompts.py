@@ -331,8 +331,13 @@ async def analyze_prompt(
                     token_count=processed_metrics_obj.token_count,
                     context_limit=processed_metrics_obj.context_limit,
                     context_usage_percent=processed_metrics_obj.context_usage_percent,
-                    cost_estimate=CostEstimateResponse(**processed_metrics_obj.cost_estimate.to_dict())
-                        if processed_metrics_obj.cost_estimate else None
+                    cost_estimate=CostEstimateResponse(
+                        input_cost=processed_metrics_obj.cost_estimate.input_cost,
+                        model=str(processed_metrics_obj.cost_estimate.model),
+                        tokens=processed_metrics_obj.cost_estimate.tokens,
+                        cost_per_million=processed_metrics_obj.cost_estimate.cost_per_million,
+                        currency=str(processed_metrics_obj.cost_estimate.currency),
+                    ) if processed_metrics_obj.cost_estimate else None
                 )
             except Exception as e:
                 preprocessing_succeeded = False
@@ -344,10 +349,14 @@ async def analyze_prompt(
             token_count=raw_metrics.token_count,
             context_limit=raw_metrics.context_limit,
             context_usage_percent=raw_metrics.context_usage_percent,
-            cost_estimate=CostEstimateResponse(**raw_metrics.cost_estimate.to_dict())
-                if raw_metrics.cost_estimate else None
+            cost_estimate=CostEstimateResponse(
+                input_cost=raw_metrics.cost_estimate.input_cost,
+                model=str(raw_metrics.cost_estimate.model),
+                tokens=raw_metrics.cost_estimate.tokens,
+                cost_per_million=raw_metrics.cost_estimate.cost_per_million,
+                currency=str(raw_metrics.cost_estimate.currency),
+            ) if raw_metrics.cost_estimate else None
         )
-
         return PromptAnalyzeResponse(
             raw_content=raw_content,
             processed_content=processed_content,
@@ -407,6 +416,10 @@ async def get_sync_status(
                 # No fingerprint - never synced
                 return SyncStatusResponse(
                     status="never_synced",
+                    last_sync_timestamp=None,
+                    last_sync_command=None,
+                    prompt_modified=False,
+                    code_modified=False,
                     fingerprint_exists=False,
                     prompt_exists=prompt_exists,
                     code_exists=code_exists,
@@ -886,6 +899,21 @@ async def analyze_diff(request: DiffAnalysisRequest):
                 matchType=lm.get('matchType', 'none'),
             ))
 
+        # Build hidden knowledge
+        hidden_knowledge = [
+            HiddenKnowledge(
+                type=hk.get('type', 'magic_value'),
+                location=HiddenKnowledgeLocation(
+                    startLine=hk.get('location', {}).get('startLine', 1),
+                    endLine=hk.get('location', {}).get('endLine', 1),
+                ),
+                description=hk.get('description', ''),
+                regenerationImpact=hk.get('regenerationImpact', 'would_differ'),
+                suggestedPromptAddition=hk.get('suggestedPromptAddition', ''),
+            )
+            for hk in llm_result.get('hiddenKnowledge', [])
+        ]
+
         # Build stats with bidirectional coverage
         stats_data = llm_result.get('stats', {})
         stats = DiffStats(
@@ -897,17 +925,22 @@ async def analyze_diff(request: DiffAnalysisRequest):
             undocumentedFeatures=stats_data.get('undocumentedFeatures', 0),
             promptToCodeCoverage=stats_data.get('promptToCodeCoverage', 0.0),
             codeToPromptCoverage=stats_data.get('codeToPromptCoverage', 0.0),
+            hiddenKnowledgeCount=stats_data.get('hiddenKnowledgeCount', 0),
+            criticalGaps=stats_data.get('criticalGaps', 0),
         )
 
         # Build response with bidirectional scores
         response = DiffAnalysisResponse(
             result=DiffAnalysisResult(
                 overallScore=llm_result.get('overallScore', 0),
+                canRegenerate=llm_result.get('canRegenerate', False),
+                regenerationRisk=llm_result.get('regenerationRisk', 'high'),
                 promptToCodeScore=llm_result.get('promptToCodeScore', 0),
                 codeToPromptScore=llm_result.get('codeToPromptScore', 0),
                 summary=llm_result.get('summary', ''),
                 sections=sections,
                 codeSections=code_sections,
+                hiddenKnowledge=hidden_knowledge,
                 lineMappings=line_mappings,
                 stats=stats,
                 missing=llm_result.get('missing', []),

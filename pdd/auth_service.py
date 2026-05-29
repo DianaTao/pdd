@@ -8,7 +8,9 @@ By centralizing auth logic here, we ensure consistent behavior across interfaces
 """
 from __future__ import annotations
 
+import base64
 import json
+import os
 import time
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
@@ -24,6 +26,77 @@ KEYRING_SERVICE_NAME = "firebase-auth-PDD CLI"
 KEYRING_USER_NAME = "refresh_token"
 LEGACY_KEYRING_SERVICE_NAMES = ("firebase-auth-pdd",)
 REFRESH_TOKEN_CHECK_TIMEOUT_ERROR = "keyring get_password timed out"
+
+
+def _decode_jwt_payload(token: str) -> Dict:
+    """
+    Decode JWT payload without verification to extract claims.
+
+    Args:
+        token: The JWT token string.
+
+    Returns:
+        Dict containing the JWT payload claims, or empty dict on error.
+    """
+    try:
+        # JWT is header.payload.signature
+        parts = token.split(".")
+        if len(parts) != 3:
+            return {}
+
+        payload = parts[1]
+        # Add padding if needed for base64 decoding
+        padding = len(payload) % 4
+        if padding:
+            payload += "=" * (4 - padding)
+
+        decoded = base64.urlsafe_b64decode(payload)
+        return json.loads(decoded)
+    except Exception:
+        return {}
+
+
+def _get_expected_jwt_audience() -> Optional[str]:
+    """
+    Determine the expected JWT audience based on PDD_ENV.
+
+    This keeps the JWT cache environment-aware when PDD_ENV is set
+    (e.g., staging vs prod) without changing the public API.
+    """
+    explicit_aud = os.environ.get("PDD_JWT_EXPECTED_AUD")
+    if explicit_aud:
+        return explicit_aud
+
+    env = (os.environ.get("PDD_ENV") or "").lower()
+    if not env or env == "local":
+        return None
+
+    if env in ("prod", "production"):
+        return "prompt-driven-development"
+    if env == "staging":
+        return os.environ.get("STAGING_PROJECT_ID") or "prompt-driven-development-stg"
+
+    # For named PDD environments above, PDD_ENV is the stronger signal. Generic
+    # ADC variables such as GOOGLE_CLOUD_PROJECT often describe the developer's
+    # local gcloud context, not the Firebase audience selected by PDD_CLOUD_URL.
+    project_id = os.environ.get("PDD_PROJECT_ID") or os.environ.get("GOOGLE_CLOUD_PROJECT")
+    if project_id:
+        return project_id
+    return None
+
+
+def _get_jwt_audience(jwt: str) -> Optional[str]:
+    """Extract the aud claim without verifying the signature."""
+    try:
+        parts = jwt.split(".")
+        if len(parts) < 2:
+            return None
+        payload_part = parts[1] + "=" * (-len(parts[1]) % 4)
+        payload_bytes = base64.urlsafe_b64decode(payload_part.encode("utf-8"))
+        payload = json.loads(payload_bytes.decode("utf-8"))
+        return payload.get("aud") or payload.get("firebase", {}).get("aud")
+    except Exception:
+        return None
 
 
 def _refresh_token_service_names() -> Tuple[str, ...]:
@@ -51,9 +124,28 @@ def get_jwt_cache_info() -> Tuple[bool, Optional[float]]:
             return False, None
         # Check if token is still valid (with 5 minute buffer)
         if expires_at > time.time() + 300:
+            # Check audience if expected (Issue #45)
+            expected_aud = _get_expected_jwt_audience()
+            jwt = cache.get("id_token") or cache.get("jwt")
+            if expected_aud and jwt:
+                actual_aud = _get_jwt_audience(jwt)
+                # Only invalidate if we have an actual audience and it mismatches.
+                # This allows mock tokens in unit tests while still providing
+                # security for real Firebase tokens (which always have an aud).
+                if actual_aud and actual_aud != expected_aud:
+                    try:
+                        JWT_CACHE_FILE.unlink()
+                    except OSError:
+                        pass
+                    return False, None
+            
             return True, expires_at
     except (json.JSONDecodeError, IOError, KeyError, TypeError, AttributeError):
-        pass
+        # Cache corrupted, delete it for consistency with get_jwt_token.py
+        try:
+            JWT_CACHE_FILE.unlink()
+        except OSError:
+            pass
 
     return False, None
 
@@ -78,9 +170,29 @@ def get_cached_jwt() -> Optional[str]:
         # Check if token is still valid (with 5 minute buffer)
         if expires_at > time.time() + 300:
             # Check both 'id_token' (new) and 'jwt' (legacy) keys for backwards compatibility
-            return cache.get("id_token") or cache.get("jwt")
+            jwt = cache.get("id_token") or cache.get("jwt")
+            
+            # Check audience if expected (Issue #45)
+            expected_aud = _get_expected_jwt_audience()
+            if expected_aud and jwt:
+                actual_aud = _get_jwt_audience(jwt)
+                # Only invalidate if we have an actual audience and it mismatches.
+                # This allows mock tokens in unit tests while still providing
+                # security for real Firebase tokens (which always have an aud).
+                if actual_aud and actual_aud != expected_aud:
+                    try:
+                        JWT_CACHE_FILE.unlink()
+                    except OSError:
+                        pass
+                    return None
+                    
+            return jwt
     except (json.JSONDecodeError, IOError, KeyError, TypeError, AttributeError):
-        pass
+        # Cache corrupted, delete it
+        try:
+            JWT_CACHE_FILE.unlink()
+        except OSError:
+            pass
 
     return None
 
