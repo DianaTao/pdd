@@ -1,0 +1,50 @@
+"""Smoke tests for the checkup gate demo example and fixtures."""
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from examples.checkup_gate_demo.manifests import write_demo_manifest
+from pdd.evidence_store import sha256_file
+from pdd.gate_main import run_gate_policy
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+FIXTURE_ROOT = REPO_ROOT / "examples" / "checkup_gate_demo"
+EXAMPLE_SCRIPT = REPO_ROOT / "examples" / "checkup_gate_example.py"
+
+
+def test_fixture_tree_exists() -> None:
+    assert (FIXTURE_ROOT / "src" / "refund.py").is_file()
+    assert (FIXTURE_ROOT / "agent.prompt").is_file()
+    assert (FIXTURE_ROOT / ".pdd" / "policy-permissive.yml").is_file()
+
+
+def test_demo_manifest_writer_roundtrip(tmp_path: Path) -> None:
+    code = tmp_path / "src" / "refund.py"
+    code.parent.mkdir(parents=True)
+    code.write_text("def refund():\n    return 1\n", encoding="utf-8")
+    manifest = tmp_path / ".pdd" / "evidence" / "devunits" / "refund.latest.json"
+    write_demo_manifest(
+        manifest,
+        basename="refund",
+        output_rel="src/refund.py",
+        output_hash=sha256_file(code),
+        validation={"detect_stories": "pass", "verify": "pass", "unit_tests": "pass"},
+    )
+    result = run_gate_policy(tmp_path, target="refund")
+    assert result.passed
+
+
+def test_checkup_gate_example_script_runs() -> None:
+    completed = subprocess.run(
+        [sys.executable, str(EXAMPLE_SCRIPT)],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr or completed.stdout
+    assert "All offline scenarios passed." in completed.stdout

@@ -1,0 +1,15 @@
+# Permissive policy for demonstrating allow.skipped_* overrides in gate demos.
+require:
+  stories_pass: false
+  verify_pass: true
+  unit_tests_pass: true
+  generated_outputs_fresh: true
+  no_unchecked_critical_rules: false
+allow:
+  waivers: true
+  story_only_rules: true
+  skipped_verify: true
+  skipped_tests: true
+limits:
+  max_cost_usd: 20.0
+  max_nondeterministic_context_items: 0

@@ -25,6 +25,12 @@ source ~/.zshrc  # or source ~/.bashrc / fish equivalent
 
 ## Available Examples
 
+### Checkup gate (evidence policy)
+Branch `demo/checkup-gate-showcase` (or `feat/issue-825-gate` / PR #1260) adds `pdd checkup gate`.
+Run the offline walkthrough with `python examples/checkup_gate_example.py`, then use
+`examples/checkup_gate_demo/agent.prompt` as the coding-agent task prompt.
+See [docs/checkup_gate_demo.md](../docs/checkup_gate_demo.md).
+
 ### Agentic Fallback
 The agentic fallback example demonstrates using agentic fallback to resolve cross-file dependencies during automated debugging.  
 The example has two files — `src/main.py` and `src/utils.py` — where `main.py` fails without reading `utils.py`.  

@@ -1,0 +1,114 @@
+# Agent task: showcase `pdd checkup gate` (issue #833 / PR #1260)
+
+You are demonstrating the **evidence policy gate** for Prompt-Driven Development.
+This is **not** the PR review-loop deterministic gates (`checkup_gates.py`).
+
+## Branch and safety
+
+- Work on branch `demo/checkup-gate-showcase` (based on PR #1260 gate work).
+- Do **not** checkout or modify other agents' branches (e.g. `feat/issue-831-drift`).
+- Do **not** force-push or amend commits you did not create.
+- Prefer read-only inspection unless the user asked you to fix gate code.
+
+## Prerequisites
+
+```bash
+git checkout demo/checkup-gate-showcase
+pip install -e ".[dev]"
+export PDD_FORCE=1   # skip interactive upgrade prompts in CI/demo shells
+```
+
+Confirm the command exists and is checkup-scoped:
+
+```bash
+pdd checkup gate --help
+pdd --help | grep -w gate    # must print nothing (no top-level gate)
+```
+
+## Demo assets in this repo
+
+- Fixture tree: `examples/checkup_gate_demo/`
+- Runnable walkthrough: `python examples/checkup_gate_example.py`
+- Docs: `docs/checkup_gate_demo.md`
+
+## Scenarios to run and explain
+
+Run from the **repository root** unless noted.
+
+### 1. Empty project → `no_manifests`
+
+```bash
+mktemp -d /tmp/pdd-gate-empty.XXXX
+cd /tmp/pdd-gate-empty.XXXX
+pdd checkup gate
+```
+
+**Expect:** exit code 1, message about no manifests under `.pdd/evidence/devunits/`,
+**not** parent `checkup` Usage help.
+
+### 2. Generate-only evidence → `*_not_available`
+
+After `pdd generate … --evidence` (or a manifest with `not_available` validation),
+run:
+
+```bash
+pdd checkup gate <devunit> --json
+```
+
+**Expect:** `passed: false`, failure codes like `detect_stories_not_available`,
+`verify_not_available`, `unit_tests_not_available`.
+
+### 3. Fresh full validation → pass
+
+Use `examples/checkup_gate_demo/` or run `python examples/checkup_gate_example.py`
+(which builds a passing manifest with matching output hashes).
+
+```bash
+cd examples/checkup_gate_demo
+pdd checkup gate refund --json
+```
+
+**Expect:** `"passed": true`, `"manifests_checked": 1`.
+
+### 4. Stale generated output → `stale_output`
+
+Edit `src/refund.py` after a passing manifest was written, then:
+
+```bash
+pdd checkup gate refund --json
+```
+
+**Expect:** `stale_output` with a fix command suggesting `pdd --evidence sync`.
+
+### 5. Custom policy → allow skip-shaped statuses
+
+```bash
+pdd checkup gate refund --policy examples/checkup_gate_demo/.pdd/policy-permissive.yml --json
+```
+
+Use a manifest where `validation.verify` / `unit_tests` are `not_applicable`
+(from sync with `--skip-verify` / `--skip-tests`). Default policy fails;
+permissive policy passes when hashes are fresh.
+
+### 6. All manifests mode
+
+```bash
+pdd checkup gate --json
+```
+
+**Expect:** evaluates every `*.latest.json` under `.pdd/evidence/devunits/`.
+
+## Narrative for reviewers (issue #833)
+
+Explain that PDD's durable source set is prompts + contracts + stories + tests +
+evidence; generated code is compiled output. `pdd checkup gate` is the **merge gate**
+that reads `.pdd/evidence/devunits/*.latest.json` and fails closed when evidence is
+missing, incomplete, stale, or policy-violating. Pair with:
+
+- `pdd checkup contract check` (contract syntax)
+- `pdd checkup coverage` (rule ↔ story/test matrix)
+
+## Deliverable
+
+Produce a short report listing each scenario, exact commands, exit codes, and the
+`failures[].code` values from `--json` output. Do not commit unless the user asks.

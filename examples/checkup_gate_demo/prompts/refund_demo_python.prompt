@@ -1,0 +1,5 @@
+% You are implementing a minimal refund helper for gate demos only.
+% Generated output: src/refund.py
+
+Implement `refund(amount: float) -> float` that rejects negative amounts and
+returns the amount unchanged.
