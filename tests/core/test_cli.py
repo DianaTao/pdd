@@ -31,7 +31,10 @@ def setup_cli_environment():
     from pdd.commands import register_commands
     register_commands(cli_command)
 
-    with patch('pdd.core.cli.get_local_pdd_path'):
+    with (
+        patch.dict(os.environ, {"PDD_AUTO_UPDATE": "true"}, clear=False),
+        patch('pdd.core.cli.get_local_pdd_path')
+    ):
         # Save original commands
         original_commands = cli_command.commands.copy()
         

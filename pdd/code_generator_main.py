@@ -6,7 +6,6 @@ import os
 import re
 import json
 import pathlib
-import shlex
 import subprocess
 import requests
 import tempfile
@@ -19,7 +18,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 # Relative imports for PDD package structure
-from . import DEFAULT_STRENGTH, DEFAULT_TIME, EXTRACTION_STRENGTH # Assuming these are in __init__.py
+from . import DEFAULT_STRENGTH, DEFAULT_TIME # Assuming these are in __init__.py
 from .construct_paths import construct_paths
 from .preprocess import preprocess as pdd_preprocess
 from .code_generator import code_generator as local_code_generator_func

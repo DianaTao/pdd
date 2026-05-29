@@ -20,7 +20,7 @@ import ReactFlow, {
   Viewport,
   useViewport,
 } from 'reactflow';
-import dagre from 'dagre';
+import * as dagre from 'dagre';
 import 'reactflow/dist/style.css';
 
 import { ArchitectureModule, PromptInfo } from '../api';
@@ -157,7 +157,7 @@ export const getLayoutedElements = (
   edges: Edge[],
   direction: 'TB' | 'LR' = 'TB',
   layoutOnlyEdges: { source: string; target: string }[] = []
-) => {
+): { nodes: Node<ModuleNodeData | GroupNodeData>[]; edges: Edge[] } => {
   const g = new dagre.graphlib.Graph();
   g.setGraph({ rankdir: direction, nodesep: 80, ranksep: 150, edgesep: 20 });
   g.setDefaultEdgeLabel(() => ({}));
@@ -187,10 +187,10 @@ export const getLayoutedElements = (
     return {
       ...node,
       position: {
-        x: nodeWithPosition.x - w / 2,
-        y: nodeWithPosition.y - h / 2,
+        x: (nodeWithPosition?.x ?? 0) - w / 2,
+        y: (nodeWithPosition?.y ?? 0) - h / 2,
       },
-    };
+    } as Node<ModuleNodeData | GroupNodeData>;
   });
 
   const layoutedEdges = edges.map((edge) => {
@@ -516,13 +516,16 @@ const DependencyViewer: React.FC<DependencyViewerProps> = ({
       );
       positionedTopLevelNodes = layouted.nodes.map((node) => {
         const savedPos = savedPositions.get(node.id);
-        return savedPos ? { ...node, position: savedPos } : node;
+        return (savedPos ? { ...node, position: savedPos } : node) as Node<ModuleNodeData | GroupNodeData>;
       });
     } else {
       positionedTopLevelNodes = layouted.nodes;
     }
 
-    return { initialNodes: [...positionedTopLevelNodes, ...childNodes], initialEdges: layouted.edges };
+    return {
+      initialNodes: [...positionedTopLevelNodes, ...childNodes] as Node<ModuleNodeData | GroupNodeData>[],
+      initialEdges: layouted.edges
+    };
   }, [
     architecture, existingPrompts, promptInfoMap, onModuleClick, onRunSync,
     editMode, onModuleEdit, onModuleDelete, highlightedModules, batches,

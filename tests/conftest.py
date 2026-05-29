@@ -110,6 +110,13 @@ _E2E_FIX_ATTRS_TO_RESTORE = (
 
 
 @pytest.fixture(autouse=True)
+def _isolate_pdd_auto_update_env():
+    """Ensure PDD_AUTO_UPDATE=true for all tests unless overridden."""
+    with mock.patch.dict(os.environ, {"PDD_AUTO_UPDATE": "true"}, clear=False):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def _enforce_isolated_home(monkeypatch):
     """Per-test re-assertion of HOME/CODEX_HOME isolation.
 

@@ -1,8 +1,7 @@
 import fnmatch
 import re
 import subprocess
-import sys
-from collections import Counter, defaultdict
+from collections import defaultdict
 from typing import Tuple, Optional, List, Dict, Any, Set
 import click
 from rich import print as rprint

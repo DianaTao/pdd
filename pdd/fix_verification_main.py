@@ -1,11 +1,10 @@
-import sys
 import os
 import subprocess
 import click
 import logging
 import json
 from pathlib import Path
-from typing import Optional, Tuple, List, Dict, Any
+from typing import Optional, Tuple, List, Dict
 
 import requests
 
@@ -13,7 +12,6 @@ import requests
 from rich import print as rich_print
 from rich.panel import Panel
 from rich.syntax import Syntax
-from rich.text import Text
 from rich.console import Console
 
 # Internal imports using relative paths

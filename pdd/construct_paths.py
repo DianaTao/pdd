@@ -1,17 +1,16 @@
 # pdd/construct_paths.py
 from __future__ import annotations
 
-import sys
 import os
 import glob
 from pathlib import Path
-from typing import Dict, Tuple, Any, Optional, List, Callable
+from typing import Dict, Tuple, Any, Optional, Callable
 import fnmatch
-import logging
 import warnings
 
 import click
 import yaml
+import csv
 from rich.console import Console
 from rich.theme import Theme
 
@@ -48,9 +47,6 @@ def _default_examples_project_root(pddrc_path: Optional[Path]) -> Path:
     return pddrc_path.parent if pddrc_path else Path.cwd()
 
 # Assume generate_output_paths raises ValueError on unknown command
-
-# Add csv import for the new helper function
-import csv
 
 console = Console(theme=Theme({"info": "cyan", "warning": "yellow", "error": "bold red"}))
 

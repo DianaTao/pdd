@@ -1,9 +1,7 @@
-import json
 import os
 import shutil
 import subprocess
 import datetime
-import sys
 from pathlib import Path
 from typing import Dict, Tuple, Any, Optional
 from xml.sax.saxutils import escape

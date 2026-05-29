@@ -6,7 +6,7 @@ import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Any, Union
+from typing import Dict, List, Optional, Any, Union
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, status
 from rich.console import Console
@@ -375,6 +375,7 @@ async def emit_job_output(job_id: str, stream: str, text: str):
     msg_type = "stdout" if stream == "stdout" else "stderr"
     
     # Create specific message model
+    msg: Union[StdoutMessage, StderrMessage]
     if stream == "stdout":
         msg = StdoutMessage(
             data=clean_ansi(text),
@@ -399,6 +400,7 @@ async def emit_job_progress(job_id: str, current: int, total: int, message: str)
         current=current,
         total=total,
         message=message,
+        data=None,
         timestamp=datetime.now(timezone.utc)
     )
     await manager.broadcast_job_message(job_id, msg)
@@ -445,7 +447,7 @@ async def emit_spawned_job_complete(job_id: str, command: str, success: bool, ex
 # App Integration
 # ============================================================================
 
-def create_websocket_routes(app, connection_manager: ConnectionManager, job_manager: JobManager = None):
+def create_websocket_routes(app, connection_manager: ConnectionManager, job_manager: Optional[JobManager] = None):
     """
     Register WebSocket routes with the FastAPI application.
 

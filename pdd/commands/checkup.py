@@ -16,6 +16,7 @@ from ..core.utils import echo_model_line
 from .checkup_simplify import checkup_simplify
 from .contracts import contracts_check, contracts_cli
 from .coverage import coverage_cmd
+from .gate import gate_cmd
 from .prompt import prompt_lint
 
 
@@ -352,8 +353,6 @@ def checkup(  # pylint: disable=too-many-arguments,too-many-positional-arguments
              ref. Step 8 (create PR) is skipped — no second PR is opened.
     Local mode: pass --validate-arch-includes (no TARGET) to cross-validate
     architecture.json entries against module prompt <include> tags.
-    Contract checks:
-      pdd checkup contract check TARGET [OPTIONS]
     Simplify (Claude Code /simplify, requires --apply):
       pdd checkup simplify [PATH] [OPTIONS]
     Prompt lint:
@@ -362,10 +361,19 @@ def checkup(  # pylint: disable=too-many-arguments,too-many-positional-arguments
       pdd checkup contract check TARGET [OPTIONS]  (alias: ``pdd checkup contracts check``)
     Contract coverage:
       pdd checkup coverage [OPTIONS] TARGET
+    Evidence gate:
+      pdd checkup gate [TARGET] [OPTIONS]  →  enforce evidence policy checks.
     """
     ctx.ensure_object(dict)
 
-    if show_help and target not in {"lint", "contract", "contracts", "coverage", "simplify"}:
+    if show_help and target not in {
+        "lint",
+        "contract",
+        "contracts",
+        "coverage",
+        "gate",
+        "simplify",
+    }:
         click.echo(ctx.command.get_help(ctx))
         return None
 
@@ -467,6 +475,23 @@ def checkup(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         if exit_code:
             raise click.exceptions.Exit(exit_code)
         return None
+    if target == "gate":
+        gate_args = list(ctx.args)
+        if show_help and not gate_args:
+            click.echo(
+                gate_cmd.get_help(click.Context(gate_cmd, info_name="pdd checkup gate"))
+            )
+            return None
+        exit_code = gate_cmd.main(
+            args=gate_args,
+            prog_name="pdd checkup gate",
+            standalone_mode=False,
+            obj=ctx.obj,
+        )
+        if exit_code:
+            raise click.exceptions.Exit(exit_code)
+        return None
+
     if ctx.args:
         raise click.UsageError(f"Got unexpected extra arguments ({' '.join(ctx.args)})")
 

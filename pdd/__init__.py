@@ -1,10 +1,113 @@
 """PDD - Prompt Driven Development"""
 
+from __future__ import annotations
+
 from importlib.metadata import PackageNotFoundError, version as _metadata_version
 import os
 import subprocess
 from pathlib import Path
 
+# --- Constants & Public API Exports ---
+
+# Strength parameter used for LLM extraction across the codebase
+# Used in postprocessing, XML tagging, code generation, and other extraction
+# operations. The module should have a large context window and be affordable.
+EXTRACTION_STRENGTH = 0.5
+
+DEFAULT_STRENGTH = float(os.getenv("PDD_STRENGTH_DEFAULT", "1.0"))
+
+DEFAULT_TEMPERATURE = 0.0
+
+DEFAULT_TIME = 0.25
+
+# Public OAuth credentials for cloud mode
+# These are safe to embed as they are public client identifiers:
+# - Firebase API keys are designed to be public (client-side)
+# - GitHub OAuth Client IDs are public (the secret stays server-side)
+# Users still need to authenticate via GitHub OAuth to use cloud features.
+_DEFAULT_FIREBASE_API_KEY = "AIzaSyC0w2jwRR82ZFgQs_YXJoEBqnnTH71X6BE"
+_DEFAULT_GITHUB_CLIENT_ID = "Ov23liJ4eSm0y5W1L20u"
+
+# --- Imports (noqa: E402 used to avoid circular imports while allowing constants at top) ---
+
+from .agentic_common import (  # noqa: E402
+    get_agent_provider_preference,
+    get_job_deadline,
+    Pricing,
+    get_available_agents,
+    run_agentic_task,
+    github_save_state,
+    github_load_state,
+    github_clear_state,
+    validate_cached_state,
+    load_workflow_state,
+    save_workflow_state,
+    clear_workflow_state,
+    post_step_comment,
+    substitute_template_variables,
+    post_pr_comment,
+    post_final_comment,
+    _extract_step_report,
+    _sanitize_comment_body
+)
+from .agentic_test_orchestrator import run_agentic_test_orchestrator  # noqa: E402
+from .architecture_sync_helper import filepath_to_prompt_filename  # noqa: E402
+from .agentic_e2e_fix_orchestrator import run_agentic_e2e_fix_orchestrator  # noqa: E402
+from .ci_validation import detect_ci_system, post_ci_failure_comment, run_ci_validation_loop  # noqa: E402
+from .agentic_e2e_fix import run_agentic_e2e_fix  # noqa: E402
+from .agentic_bug_orchestrator import run_agentic_bug_orchestrator  # noqa: E402
+from .agentic_update import run_agentic_update  # noqa: E402
+from .update_main import (  # noqa: E402
+    resolve_prompt_code_pair,
+    find_and_resolve_all_pairs,
+    get_git_changed_files,
+    derive_basename_and_language,
+    is_code_changed,
+    update_file_pair,
+    update_main
+)
+from .ci_drift_heal import DriftInfo, HealResult, detect_drift, heal_module, commit_and_push, main as ci_drift_heal_main  # noqa: E402
+from .agentic_change_orchestrator import run_agentic_change_orchestrator  # noqa: E402
+from .agentic_common_worktree import (  # noqa: E402
+    get_git_root,
+    worktree_exists,
+    branch_exists,
+    remove_worktree,
+    delete_branch,
+    resolve_main_ref,
+    setup_worktree,
+    get_modified_and_untracked,
+    check_target_file_unchanged,
+    revert_out_of_scope_changes_with_dirs,
+    extract_block_marker
+)
+from .get_lint_commands import LintCommand, get_lint_commands  # noqa: E402
+from .split_main import split_main  # noqa: E402
+from .split_validation import ValidationFailure, ValidationResult, validate_extraction  # noqa: E402
+from .agentic_split_orchestrator import (  # noqa: E402
+    run_agentic_split_orchestrator,
+    Diagnosis,
+    ModuleInvestigation,
+    TestOwnership,
+    PromptMetadata,
+    Child,
+    ParentChanges,
+    SplitPlan,
+    SplitOption,
+    OptionsConsidered,
+    QualitativeAssessment
+)
+from .agentic_split import run_agentic_split  # noqa: E402
+from .ci_detect_changed_modules import main as ci_detect_changed_modules_main  # noqa: E402
+from .agentic_architecture_orchestrator import (  # noqa: E402
+    load_workflow_state as arch_load_workflow_state,
+    save_workflow_state as arch_save_workflow_state,
+    clear_workflow_state as arch_clear_workflow_state,
+    run_agentic_architecture_orchestrator
+)
+
+
+# --- Helper functions ---
 
 def _derive_git_aligned_version() -> str | None:
     """Return tag-aligned development version for the current git checkout."""
@@ -64,36 +167,8 @@ def get_version() -> str:
     return _load_package_version()
 
 
-# Strength parameter used for LLM extraction across the codebase
-# Used in postprocessing, XML tagging, code generation, and other extraction
-# operations. The module should have a large context window and be affordable.
-EXTRACTION_STRENGTH = 0.5
-
-DEFAULT_STRENGTH = float(os.getenv("PDD_STRENGTH_DEFAULT", "1.0"))
-
-DEFAULT_TEMPERATURE = 0.0
-
-DEFAULT_TIME = 0.25
-
-# Public OAuth credentials for cloud mode
-# These are safe to embed as they are public client identifiers:
-# - Firebase API keys are designed to be public (client-side)
-# - GitHub OAuth Client IDs are public (the secret stays server-side)
-# Users still need to authenticate via GitHub OAuth to use cloud features.
-_DEFAULT_FIREBASE_API_KEY = "AIzaSyC0w2jwRR82ZFgQs_YXJoEBqnnTH71X6BE"
-_DEFAULT_GITHUB_CLIENT_ID = "Ov23liJ4eSm0y5W1L20u"
-
-
 def _setup_cloud_defaults() -> None:
-    """Set up default cloud credentials if not already set.
-
-    Only sets defaults when:
-    1. Not running inside cloud environment (K_SERVICE or FUNCTIONS_EMULATOR)
-    2. Environment variables are not already set
-
-    This prevents infinite loops when cloud endpoints call CLI internally,
-    while providing a seamless experience for local users.
-    """
+    """Set up default cloud credentials if not already set."""
     # Skip if running in cloud environment to prevent infinite loops
     if os.environ.get("K_SERVICE") or os.environ.get("FUNCTIONS_EMULATOR"):
         return
@@ -109,22 +184,3 @@ def _setup_cloud_defaults() -> None:
 
 # Initialize cloud defaults on package import
 _setup_cloud_defaults()
-from .agentic_common import get_agent_provider_preference, get_job_deadline, Pricing, get_available_agents, run_agentic_task, github_save_state, github_load_state, github_clear_state, validate_cached_state, load_workflow_state, save_workflow_state, clear_workflow_state, post_step_comment, substitute_template_variables, post_pr_comment, post_final_comment, _extract_step_report, _sanitize_comment_body
-from .agentic_test_orchestrator import run_agentic_test_orchestrator
-from .architecture_sync_helper import filepath_to_prompt_filename
-from .agentic_e2e_fix_orchestrator import run_agentic_e2e_fix_orchestrator
-from .ci_validation import detect_ci_system, post_ci_failure_comment, run_ci_validation_loop
-from .agentic_e2e_fix import run_agentic_e2e_fix
-from .agentic_bug_orchestrator import run_agentic_bug_orchestrator
-from .agentic_update import run_agentic_update
-from .update_main import resolve_prompt_code_pair, find_and_resolve_all_pairs, get_git_changed_files, derive_basename_and_language, is_code_changed, update_file_pair, update_main
-from .ci_drift_heal import DriftInfo, HealResult, detect_drift, heal_module, commit_and_push, main
-from .agentic_change_orchestrator import run_agentic_change_orchestrator
-from .agentic_common_worktree import get_git_root, worktree_exists, branch_exists, remove_worktree, delete_branch, resolve_main_ref, setup_worktree, get_modified_and_untracked, check_target_file_unchanged, revert_out_of_scope_changes_with_dirs, extract_block_marker
-from .get_lint_commands import LintCommand, get_lint_commands
-from .split_main import split_main
-from .split_validation import ValidationFailure, ValidationResult, validate_extraction
-from .agentic_split_orchestrator import run_agentic_split_orchestrator, Diagnosis, ModuleInvestigation, TestOwnership, PromptMetadata, Child, ParentChanges, SplitPlan, SplitOption, OptionsConsidered, QualitativeAssessment
-from .agentic_split import run_agentic_split
-from .ci_detect_changed_modules import main
-from .agentic_architecture_orchestrator import load_workflow_state, save_workflow_state, clear_workflow_state, run_agentic_architecture_orchestrator

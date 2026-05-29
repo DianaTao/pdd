@@ -10,7 +10,6 @@ from textual.screen import ModalScreen
 from textual.widgets import Static, RichLog, Button, Label, Input, ProgressBar
 from textual.containers import Vertical, Container, Horizontal
 from textual.binding import Binding
-from textual.worker import Worker
 from textual import work
 
 from rich.console import Console
@@ -21,7 +20,7 @@ import time
 import re
 
 # Reuse existing animation logic
-from .sync_animation import AnimationState, _render_animation_frame, DEEP_NAVY, ELECTRIC_CYAN
+from .sync_animation import AnimationState, _render_animation_frame
 from . import logo_animation
 from rich.style import Style
 

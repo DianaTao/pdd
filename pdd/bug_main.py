@@ -1,6 +1,5 @@
 import json
 import os
-import sys
 from typing import Tuple, Optional
 
 import click

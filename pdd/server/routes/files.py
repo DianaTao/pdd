@@ -371,7 +371,6 @@ def load_pddrc(project_root: Path) -> dict:
 
     Returns parsed YAML config or empty dict.
     """
-    import fnmatch
     pddrc_path = project_root / ".pddrc"
     if not pddrc_path.exists():
         return {}

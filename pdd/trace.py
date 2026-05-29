@@ -1,5 +1,4 @@
 from typing import Tuple, Optional, List
-from rich import print
 from rich.console import Console
 from pydantic import BaseModel, Field
 import difflib

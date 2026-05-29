@@ -1,0 +1,932 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.0.3, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+rootdir: /tmp/pdd_job_ZsO2CuA2KP7qlMtdNJl4_l5ufrcuc/.pdd/worktrees/checkup-issue-28
+configfile: pytest.ini (WARNING: ignoring pytest config in pyproject.toml!)
+plugins: xdist-3.8.0, timeout-2.4.0, mock-3.15.1, cov-7.1.0, asyncio-1.4.0, anyio-4.13.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+collecting ... collected 369 items
+
+tests/test_agentic_common.py::test_z3_pricing_properties PASSED          [  0%]
+tests/test_agentic_common.py::test_default_timeout_sufficient_for_complex_tasks PASSED [  0%]
+tests/test_agentic_common.py::test_get_available_agents_none PASSED      [  0%]
+tests/test_agentic_common.py::test_get_available_agents_cli_only_no_key PASSED [  1%]
+tests/test_agentic_common.py::test_get_available_agents_all_available PASSED [  1%]
+tests/test_agentic_common.py::test_get_available_agents_mixed PASSED     [  1%]
+tests/test_agentic_common.py::test_get_available_agents_includes_openai_with_codex_auth_file PASSED [  1%]
+tests/test_agentic_common.py::test_get_available_agents_excludes_openai_without_any_codex_auth PASSED [  2%]
+tests/test_agentic_common.py::test_run_agentic_task_validation PASSED    [  2%]
+tests/test_agentic_common.py::test_run_agentic_task_no_agents PASSED     [  2%]
+tests/test_agentic_common.py::test_run_agentic_task_anthropic_success PASSED [  2%]
+tests/test_agentic_common.py::test_run_agentic_task_anthropic_result_key PASSED [  3%]
+tests/test_agentic_common.py::test_anthropic_provider_pipes_prompt_via_stdin PASSED [  3%]
+tests/test_agentic_common.py::test_google_provider_delivers_prompt_via_positional_arg PASSED [  3%]
+tests/test_agentic_common.py::test_run_agentic_task_gemini_success PASSED [  4%]
+tests/test_agentic_common.py::test_run_agentic_task_codex_success PASSED [  4%]
+tests/test_agentic_common.py::test_run_agentic_task_fallback PASSED      [  4%]
+tests/test_agentic_common.py::test_run_agentic_task_all_fail PASSED      [  4%]
+tests/test_agentic_common.py::test_run_agentic_task_timeout PASSED       [  5%]
+tests/test_agentic_common.py::test_environment_sanitization PASSED       [  5%]
+tests/test_agentic_common.py::test_anthropic_api_key_preserved_when_explicitly_set PASSED [  5%]
+tests/test_agentic_common.py::test_gemini_cached_cost_logic PASSED       [  5%]
+tests/test_agentic_common.py::test_codex_cached_cost_logic PASSED        [  6%]
+tests/test_agentic_common.py::test_run_agentic_task_accepts_timeout_parameter PASSED [  6%]
+tests/test_agentic_common.py::test_run_with_provider_includes_stdout_when_stderr_empty PASSED [  6%]
+tests/test_agentic_common.py::test_run_with_provider_accepts_timeout_parameter PASSED [  7%]
+tests/test_agentic_common.py::test_step_timeouts_dictionary_exists PASSED [  7%]
+tests/test_agentic_common.py::test_timeout_priority_explicit_over_default PASSED [  7%]
+tests/test_agentic_common.py::test_zero_cost_minimal_output_detected_as_failure PASSED [  7%]
+tests/test_agentic_common.py::test_get_available_agents_anthropic_cli_only PASSED [  8%]
+tests/test_agentic_common.py::test_get_available_agents_google_needs_key_or_cli_oauth PASSED [  8%]
+tests/test_agentic_common.py::test_get_available_agents_google_gemini_cli_oauth PASSED [  8%]
+tests/test_agentic_common.py::test_get_available_agents_google_vertex_ai_auth PASSED [  8%]
+tests/test_agentic_common.py::test_get_available_agents_google_vertex_ai_adc_auth PASSED [  9%]
+tests/test_agentic_common.py::test_get_available_agents_preference_order PASSED [  9%]
+tests/test_agentic_common.py::test_calculate_gemini_cost_flash PASSED    [  9%]
+tests/test_agentic_common.py::test_calculate_gemini_cost_cached PASSED   [ 10%]
+tests/test_agentic_common.py::test_calculate_codex_cost PASSED           [ 10%]
+tests/test_agentic_common.py::test_anthropic_cost_cache_creation_not_double_counted PASSED [ 10%]
+tests/test_agentic_common.py::test_anthropic_cost_no_cache PASSED        [ 10%]
+tests/test_agentic_common.py::test_anthropic_cost_cache_read_only PASSED [ 11%]
+tests/test_agentic_common.py::test_anthropic_cost_costusd_shortcut PASSED [ 11%]
+tests/test_agentic_common.py::test_anthropic_cost_opus_pricing PASSED    [ 11%]
+tests/test_agentic_common.py::test_anthropic_cost_all_tokens_cached PASSED [ 11%]
+tests/test_agentic_common.py::test_run_agentic_task_anthropic_success_env_check FAILED [ 12%]
+tests/test_agentic_common.py::test_run_agentic_task_gemini_success_2 PASSED [ 12%]
+tests/test_agentic_common.py::test_run_agentic_task_false_positive PASSED [ 12%]
+tests/test_agentic_common.py::test_run_agentic_task_temp_file_cleanup FAILED [ 13%]
+tests/test_agentic_common.py::test_suspicious_file_detection FAILED      [ 13%]
+tests/test_agentic_common.py::test_run_agentic_task_timeout_override FAILED [ 13%]
+tests/test_agentic_common.py::test_run_agentic_task_retries_on_failure PASSED [ 13%]
+tests/test_agentic_common.py::test_run_agentic_task_retry_backoff PASSED [ 14%]
+tests/test_agentic_common.py::test_run_agentic_task_moves_to_next_after_max_retries PASSED [ 14%]
+tests/test_agentic_common.py::test_run_agentic_task_no_retries_by_default PASSED [ 14%]
+tests/test_agentic_common.py::test_empty_output_with_nonzero_cost_detected_as_false_positive PASSED [ 14%]
+tests/test_agentic_common.py::test_whitespace_only_output_detected_as_false_positive PASSED [ 15%]
+tests/test_agentic_common.py::TestCliDiscoveryBug::test_find_cli_binary_detects_claude_in_local_bin_when_not_in_path PASSED [ 15%]
+tests/test_agentic_common.py::TestCliDiscoveryBug::test_find_cli_binary_detects_claude_in_nvm_path PASSED [ 15%]
+tests/test_agentic_common.py::TestCliDiscoveryBug::test_get_available_agents_finds_claude_in_common_paths PASSED [ 15%]
+tests/test_agentic_common.py::TestCliDiscoveryBug::test_get_available_agents_finds_gemini_in_npm_global_with_oauth PASSED [ 16%]
+tests/test_agentic_common.py::TestCliDiscovery::test_find_cli_binary_exists_in_agentic_common PASSED [ 16%]
+tests/test_agentic_common.py::TestCliDiscovery::test_find_cli_binary_via_shutil_which PASSED [ 16%]
+tests/test_agentic_common.py::TestCliDiscovery::test_find_cli_binary_fallback_to_common_paths PASSED [ 17%]
+tests/test_agentic_common.py::TestCliDiscovery::test_find_cli_binary_pddrc_override PASSED [ 17%]
+tests/test_agentic_common.py::TestCliDiscovery::test_find_cli_binary_returns_none_when_not_found PASSED [ 17%]
+tests/test_agentic_common.py::TestCliDiscovery::test_find_cli_binary_nvm_multiple_versions PASSED [ 17%]
+tests/test_agentic_common.py::TestCliDiscovery::test_get_cli_diagnostic_info_provides_helpful_message PASSED [ 18%]
+tests/test_agentic_common.py::TestCliDiscovery::test_find_cli_binary_invalid_pddrc_path_falls_back PASSED [ 18%]
+tests/test_agentic_common.py::TestAgenticDebugLogging::test_agentic_log_dir_constant_exists PASSED [ 18%]
+tests/test_agentic_common.py::TestAgenticDebugLogging::test_log_agentic_interaction_creates_log_directory PASSED [ 18%]
+tests/test_agentic_common.py::TestAgenticDebugLogging::test_log_agentic_interaction_writes_jsonl PASSED [ 19%]
+tests/test_agentic_common.py::TestAgenticDebugLogging::test_log_agentic_interaction_appends_to_same_session PASSED [ 19%]
+tests/test_agentic_common.py::TestAgenticDebugLogging::test_log_agentic_interaction_records_failures PASSED [ 19%]
+tests/test_agentic_common.py::TestAgenticDebugLogging::test_log_agentic_interaction_handles_write_errors_gracefully PASSED [ 20%]
+tests/test_agentic_common.py::TestAgenticDebugLogging::test_run_agentic_task_logs_on_success_verbose PASSED [ 20%]
+tests/test_agentic_common.py::TestAgenticDebugLogging::test_run_agentic_task_logs_on_failure_verbose PASSED [ 20%]
+tests/test_agentic_common.py::TestAgenticDebugLogging::test_run_agentic_task_logs_summary_on_success_without_verbose PASSED [ 20%]
+tests/test_agentic_common.py::TestAgenticDebugLogging::test_log_agentic_interaction_omits_bodies_when_include_bodies_false PASSED [ 21%]
+tests/test_agentic_common.py::TestAgenticDebugLogging::test_log_agentic_interaction_records_false_positive PASSED [ 21%]
+tests/test_agentic_common.py::TestAgenticDebugLogging::test_run_agentic_task_records_model_from_env_var PASSED [ 21%]
+tests/test_agentic_common.py::TestAgenticDebugLogging::test_run_agentic_task_logs_full_bodies_on_verbose_success PASSED [ 21%]
+tests/test_agentic_common.py::TestAgenticDebugLogging::test_run_agentic_task_no_duplicate_when_attempt_skipped_by_budget PASSED [ 22%]
+tests/test_agentic_common.py::TestAgenticDebugLogging::test_run_agentic_task_logs_each_failed_attempt_in_retry_loop PASSED [ 22%]
+tests/test_agentic_common.py::TestAgenticDebugLogging::test_run_agentic_task_false_positive_emits_exactly_one_record_per_attempt PASSED [ 22%]
+tests/test_agentic_common.py::TestAgenticDebugLogging::test_run_agentic_task_logs_false_positive_record PASSED [ 23%]
+tests/test_agentic_common.py::TestAgenticDebugLogging::test_session_id_format PASSED [ 23%]
+tests/test_agentic_common.py::test_claude_model_env_var_passed_to_cli PASSED [ 23%]
+tests/test_agentic_common.py::test_claude_no_model_env_var_omits_model_flag PASSED [ 23%]
+tests/test_agentic_common.py::test_gemini_model_env_var_passed_to_cli PASSED [ 24%]
+tests/test_agentic_common.py::test_gemini_no_model_env_var_omits_model_flag PASSED [ 24%]
+tests/test_agentic_common.py::test_codex_model_env_var_passed_to_cli PASSED [ 24%]
+tests/test_agentic_common.py::test_codex_no_model_env_var_omits_model_flag PASSED [ 24%]
+tests/test_agentic_common.py::test_pdd_user_feedback_injected_into_prompt PASSED [ 25%]
+tests/test_agentic_common.py::test_pdd_user_feedback_not_injected_when_absent PASSED [ 25%]
+tests/test_agentic_common.py::TestFindStateCommentPagination::test_find_state_comment_includes_paginate_flag PASSED [ 25%]
+tests/test_agentic_common.py::TestFindStateCommentPagination::test_find_state_comment_finds_state_beyond_30_comments PASSED [ 26%]
+tests/test_agentic_common.py::TestFindStateCommentPagination::test_find_state_comment_flattens_slurped_pages PASSED [ 26%]
+tests/test_agentic_common.py::TestFindStateCommentPagination::test_find_state_comment_returns_highest_id_match PASSED [ 26%]
+tests/test_agentic_common.py::TestFindStateCommentPagination::test_find_state_comment_no_state_comment PASSED [ 26%]
+tests/test_agentic_common.py::TestFindStateCommentPagination::test_find_state_comment_empty_issue PASSED [ 27%]
+tests/test_agentic_common.py::TestFindStateCommentPagination::test_find_state_comment_gh_not_installed PASSED [ 27%]
+tests/test_agentic_common.py::TestFindStateCommentPagination::test_find_state_comment_api_failure PASSED [ 27%]
+tests/test_agentic_common.py::TestFindStateCommentPagination::test_load_workflow_state_github_fallback_with_pagination PASSED [ 27%]
+tests/test_agentic_common.py::TestSecondaryPaginationCallSites::test_agentic_bug_fetch_comments_includes_paginate PASSED [ 28%]
+tests/test_agentic_common.py::TestSecondaryPaginationCallSites::test_agentic_test_fetch_comments_includes_paginate PASSED [ 28%]
+tests/test_agentic_common.py::test_provider_error_details_preserved PASSED [ 28%]
+tests/test_agentic_common.py::test_provider_error_not_truncated_at_200_chars PASSED [ 28%]
+tests/test_agentic_common.py::test_invalid_json_output_not_truncated_at_200_chars PASSED [ 29%]
+tests/test_agentic_common.py::test_post_step_comment_posts_to_github PASSED [ 29%]
+tests/test_agentic_common.py::test_post_step_comment_no_gh_cli PASSED    [ 29%]
+tests/test_agentic_common.py::test_post_pr_comment_posts_to_github PASSED [ 30%]
+tests/test_agentic_common.py::test_post_pr_comment_no_gh_cli PASSED      [ 30%]
+tests/test_agentic_common.py::test_get_agent_provider_preference_default PASSED [ 30%]
+tests/test_agentic_common.py::test_get_agent_provider_preference_single PASSED [ 30%]
+tests/test_agentic_common.py::test_get_agent_provider_preference_reordered PASSED [ 31%]
+tests/test_agentic_common.py::test_get_agent_provider_preference_with_spaces PASSED [ 31%]
+tests/test_agentic_common.py::test_get_agent_provider_preference_empty_string PASSED [ 31%]
+tests/test_agentic_common.py::test_get_job_deadline_returns_float_from_env PASSED [ 31%]
+tests/test_agentic_common.py::test_get_job_deadline_returns_none_when_unset PASSED [ 32%]
+tests/test_agentic_common.py::test_get_job_deadline_returns_none_for_invalid PASSED [ 32%]
+tests/test_agentic_common.py::test_deadline_skips_attempt_when_insufficient_time PASSED [ 32%]
+tests/test_agentic_common.py::test_deadline_caps_per_attempt_timeout FAILED [ 33%]
+tests/test_agentic_common.py::test_no_deadline_preserves_default_timeout FAILED [ 33%]
+tests/test_agentic_common.py::test_deadline_from_env_used_when_param_not_passed PASSED [ 33%]
+tests/test_agentic_common.py::test_issue557_ndjson_modern_item_completed_parsing PASSED [ 33%]
+tests/test_agentic_common.py::test_codex_provider_pipes_prompt_via_stdin PASSED [ 34%]
+tests/test_agentic_common.py::test_issue557_ndjson_multiple_item_completed_picks_agent_message PASSED [ 34%]
+tests/test_agentic_common.py::test_issue557_session_end_usage_for_cost PASSED [ 34%]
+tests/test_agentic_common.py::test_issue557_single_line_json_no_ndjson PASSED [ 34%]
+tests/test_agentic_common.py::test_issue557_parse_provider_json_modern_codex_schema PASSED [ 35%]
+tests/test_agentic_common.py::test_issue557_parse_provider_json_legacy_codex_schema PASSED [ 35%]
+tests/test_agentic_common.py::test_issue557_full_chain_modern_codex_false_positive PASSED [ 35%]
+tests/test_agentic_common.py::test_codex_turn_completed_usage_parsed_for_cost PASSED [ 36%]
+tests/test_agentic_common.py::test_playwright_mode_anthropic_uses_allowed_tools PASSED [ 36%]
+tests/test_agentic_common.py::test_playwright_mode_false_uses_skip_permissions PASSED [ 36%]
+tests/test_agentic_common.py::test_playwright_mode_google_unchanged PASSED [ 36%]
+tests/test_agentic_common.py::test_validate_cached_state_all_ok PASSED   [ 37%]
+tests/test_agentic_common.py::test_validate_cached_state_failed_step_corrects PASSED [ 37%]
+tests/test_agentic_common.py::test_validate_cached_state_first_step_failed PASSED [ 37%]
+tests/test_agentic_common.py::test_validate_cached_state_empty_outputs PASSED [ 37%]
+tests/test_agentic_common.py::test_validate_cached_state_with_explicit_order PASSED [ 38%]
+tests/test_agentic_common.py::test_validate_cached_state_no_correction_needed PASSED [ 38%]
+tests/test_agentic_common.py::test_anthropic_cost_from_total_cost_usd PASSED [ 38%]
+tests/test_agentic_common.py::test_anthropic_cost_from_model_usage_costUSD PASSED [ 39%]
+tests/test_agentic_common.py::test_anthropic_cost_token_based_fallback PASSED [ 39%]
+tests/test_agentic_common.py::test_anthropic_cost_opus_model_detection PASSED [ 39%]
+tests/test_agentic_common.py::test_anthropic_cost_no_usage PASSED        [ 39%]
+tests/test_agentic_common.py::test_should_use_github_state_default PASSED [ 40%]
+tests/test_agentic_common.py::test_should_use_github_state_param_false PASSED [ 40%]
+tests/test_agentic_common.py::test_should_use_github_state_env_override PASSED [ 40%]
+tests/test_agentic_common.py::test_save_workflow_state_creates_local_file PASSED [ 40%]
+tests/test_agentic_common.py::test_clear_workflow_state_removes_local_file PASSED [ 41%]
+tests/test_agentic_common.py::test_build_state_marker_format PASSED      [ 41%]
+tests/test_agentic_common.py::test_serialize_and_parse_state_roundtrip PASSED [ 41%]
+tests/test_agentic_common.py::test_parse_state_wrong_workflow_returns_none PASSED [ 42%]
+tests/test_agentic_common.py::test_parse_state_wrong_issue_returns_none PASSED [ 42%]
+tests/test_agentic_common.py::test_pdd_output_cost_path_stripped_from_subprocess_env PASSED [ 42%]
+tests/test_agentic_common.py::TestExtractJsonFromOutput::test_clean_json PASSED [ 42%]
+tests/test_agentic_common.py::TestExtractJsonFromOutput::test_json_preceded_by_npm_warnings PASSED [ 43%]
+tests/test_agentic_common.py::TestExtractJsonFromOutput::test_json_followed_by_extra_text PASSED [ 43%]
+tests/test_agentic_common.py::TestExtractJsonFromOutput::test_json_surrounded_by_noise PASSED [ 43%]
+tests/test_agentic_common.py::TestExtractJsonFromOutput::test_multiline_json_via_brace_fallback PASSED [ 43%]
+tests/test_agentic_common.py::TestExtractJsonFromOutput::test_no_json_raises_error PASSED [ 44%]
+tests/test_agentic_common.py::TestExtractJsonFromOutput::test_empty_string_raises_error PASSED [ 44%]
+tests/test_agentic_common.py::TestIssue830SubprocessProcessGroup::test_subprocess_run_uses_start_new_session PASSED [ 44%]
+tests/test_agentic_common.py::TestIssue830SubprocessProcessGroup::test_subprocess_run_uses_start_new_session_google PASSED [ 44%]
+tests/test_agentic_common.py::TestIssue830SubprocessProcessGroup::test_subprocess_run_uses_start_new_session_codex PASSED [ 45%]
+tests/test_agentic_common.py::TestIssue830SaveWorkflowStateDivergence::test_returns_none_when_github_save_fails PASSED [ 45%]
+tests/test_agentic_common.py::TestIssue830SaveWorkflowStateDivergence::test_returns_new_id_when_github_save_succeeds PASSED [ 45%]
+tests/test_agentic_common.py::TestIssue830SaveWorkflowStateDivergence::test_local_state_persists_even_when_github_fails PASSED [ 46%]
+tests/test_agentic_common.py::TestIssue830SaveWorkflowStateDivergence::test_github_save_failure_logs_warning PASSED [ 46%]
+tests/test_agentic_common.py::test_git_work_tree_set_to_cwd_in_subprocess_env PASSED [ 46%]
+tests/test_agentic_common.py::test_git_work_tree_overrides_inherited_value PASSED [ 46%]
+tests/test_agentic_common.py::test_git_work_tree_matches_subprocess_cwd PASSED [ 47%]
+tests/test_agentic_common.py::TestRevertOutOfScopeChanges::test_reverts_deleted_files PASSED [ 47%]
+tests/test_agentic_common.py::TestRevertOutOfScopeChanges::test_preserves_allowed_changes PASSED [ 47%]
+tests/test_agentic_common.py::TestRevertOutOfScopeChanges::test_reverts_modifications_outside_scope PASSED [ 47%]
+tests/test_agentic_common.py::TestRevertOutOfScopeChanges::test_noop_when_not_in_git_repo PASSED [ 48%]
+tests/test_agentic_common.py::TestRevertOutOfScopeChanges::test_noop_when_allowed_paths_not_under_cwd PASSED [ 48%]
+tests/test_agentic_common.py::TestIsPermanentErrorClaudeOAuth::test_authentication_error_with_underscore PASSED [ 48%]
+tests/test_agentic_common.py::TestIsPermanentErrorClaudeOAuth::test_failed_to_authenticate_reversed_word_order PASSED [ 49%]
+tests/test_agentic_common.py::TestIsPermanentErrorClaudeOAuth::test_invalid_bearer_token PASSED [ 49%]
+tests/test_agentic_common.py::TestIsPermanentErrorClaudeOAuth::test_full_claude_cli_oauth_error_verbatim PASSED [ 49%]
+tests/test_agentic_common.py::TestIsPermanentErrorClaudeOAuth::test_existing_permanent_patterns_still_work PASSED [ 49%]
+tests/test_agentic_common.py::TestIsPermanentErrorClaudeOAuth::test_transient_errors_still_return_false PASSED [ 50%]
+tests/test_agentic_common.py::TestIsPermanentErrorClaudeOAuth::test_401_status_code_detected_as_permanent PASSED [ 50%]
+tests/test_agentic_common.py::TestIsPermanentErrorClaudeOAuth::test_temperature_pattern_narrow PASSED [ 50%]
+tests/test_agentic_common.py::TestIssue1072PermanentErrors::test_is_permanent_error_recognizes_terminal_quota_error PASSED [ 50%]
+tests/test_agentic_common.py::TestIssue1072PermanentErrors::test_is_permanent_error_recognizes_quota_exhausted PASSED [ 51%]
+tests/test_agentic_common.py::TestIssue1072PermanentErrors::test_is_permanent_error_recognizes_daily_quota_variants PASSED [ 51%]
+tests/test_agentic_common.py::TestIssue1072PermanentErrors::test_existing_permanent_patterns_unaffected_by_quota_addition PASSED [ 51%]
+tests/test_agentic_common.py::TestIssue1072PermanentErrors::test_transient_errors_still_not_permanent PASSED [ 52%]
+tests/test_agentic_common.py::TestCredentialLimitClassification::test_classify_credential_limit_from_claude_subscription_429 PASSED [ 52%]
+tests/test_agentic_common.py::TestCredentialLimitClassification::test_credential_limit_is_permanent PASSED [ 52%]
+tests/test_agentic_common.py::TestCredentialLimitClassification::test_generic_429_still_transient PASSED [ 52%]
+tests/test_agentic_common.py::TestCredentialLimitClassification::test_credential_limit_phrase_alone_does_not_false_positive PASSED [ 53%]
+tests/test_agentic_common.py::TestCredentialLimitClassification::test_credential_limit_does_not_match_prose_with_substrings_apart PASSED [ 53%]
+tests/test_agentic_common.py::TestCredentialLimitClassification::test_credential_limit_matches_subscription_envelope_with_full_date PASSED [ 53%]
+tests/test_agentic_common.py::TestCredentialLimitClassification::test_credential_limit_matches_subscription_envelope_with_time_only PASSED [ 53%]
+tests/test_agentic_common.py::TestIssue1072FailureLogging::test_provider_failure_logged_when_not_verbose FAILED [ 54%]
+tests/test_agentic_common.py::TestIssue1072FailureLogging::test_success_logs_summary_without_verbose PASSED [ 54%]
+tests/test_agentic_common.py::test_is_error_true_returns_failure PASSED  [ 54%]
+tests/test_agentic_common.py::test_false_positive_retries_in_single_provider_config PASSED [ 55%]
+tests/test_agentic_common.py::test_false_positive_falls_through_in_multi_provider_config PASSED [ 55%]
+tests/test_agentic_common.py::test_codex_injects_reasoning_effort_before_exec[low] PASSED [ 55%]
+tests/test_agentic_common.py::test_codex_injects_reasoning_effort_before_exec[medium] PASSED [ 55%]
+tests/test_agentic_common.py::test_codex_injects_reasoning_effort_before_exec[high] PASSED [ 56%]
+tests/test_agentic_common.py::test_codex_without_effort_env_unchanged PASSED [ 56%]
+tests/test_agentic_common.py::test_codex_invalid_effort_value_ignored PASSED [ 56%]
+tests/test_agentic_common.py::test_anthropic_with_effort_does_not_modify_argv PASSED [ 56%]
+tests/test_agentic_common.py::test_google_with_effort_does_not_modify_argv PASSED [ 57%]
+tests/test_agentic_common.py::test_codex_effort_env_is_case_and_whitespace_tolerant[  High  ] PASSED [ 57%]
+tests/test_agentic_common.py::test_codex_effort_env_is_case_and_whitespace_tolerant[HIGH] PASSED [ 57%]
+tests/test_agentic_common.py::test_codex_effort_env_is_case_and_whitespace_tolerant[High] PASSED [ 57%]
+tests/test_agentic_common.py::test_codex_effort_env_is_case_and_whitespace_tolerant[high\n] PASSED [ 58%]
+tests/test_agentic_common.py::test_claude_always_prints_effort_notice_when_not_quiet PASSED [ 58%]
+tests/test_agentic_common.py::test_claude_suppresses_effort_notice_when_quiet PASSED [ 58%]
+tests/test_agentic_common.py::test_codex_injects_reasoning_effort_from_time_kwarg[0.2-low] PASSED [ 59%]
+tests/test_agentic_common.py::test_codex_injects_reasoning_effort_from_time_kwarg[0.5-medium] PASSED [ 59%]
+tests/test_agentic_common.py::test_codex_injects_reasoning_effort_from_time_kwarg[0.85-high] PASSED [ 59%]
+tests/test_agentic_common.py::test_codex_injects_reasoning_effort_from_time_kwarg[0.0-low] PASSED [ 59%]
+tests/test_agentic_common.py::test_codex_injects_reasoning_effort_from_time_kwarg[1.0-high] PASSED [ 60%]
+tests/test_agentic_common.py::test_reasoning_time_kwarg_overrides_env_var PASSED [ 60%]
+tests/test_agentic_common.py::test_run_agentic_task_forwards_reasoning_time_to_provider PASSED [ 60%]
+tests/test_agentic_common.py::test_codex_reasoning_effort_env_accepts_xhigh_for_gpt54[low] PASSED [ 60%]
+tests/test_agentic_common.py::test_codex_reasoning_effort_env_accepts_xhigh_for_gpt54[medium] PASSED [ 61%]
+tests/test_agentic_common.py::test_codex_reasoning_effort_env_accepts_xhigh_for_gpt54[high] PASSED [ 61%]
+tests/test_agentic_common.py::test_codex_reasoning_effort_env_accepts_xhigh_for_gpt54[xhigh] PASSED [ 61%]
+tests/test_agentic_common.py::test_codex_env_takes_precedence_over_pdd_env PASSED [ 62%]
+tests/test_agentic_common.py::test_codex_env_takes_precedence_over_kwarg PASSED [ 62%]
+tests/test_agentic_common.py::test_codex_invalid_codex_env_falls_through_to_generic PASSED [ 62%]
+tests/test_agentic_common.py::test_codex_invalid_codex_env_with_no_fallback_yields_no_flag PASSED [ 62%]
+tests/test_agentic_common.py::TestDetectControlTokenLineEndings::test_crlf_input_breaks_tier3_semantic_detection PASSED [ 63%]
+tests/test_agentic_common.py::TestDetectControlTokenLineEndings::test_crlf_trailing_newline_off_by_one_tail_boundary PASSED [ 63%]
+tests/test_agentic_common.py::TestDetectControlTokenLineEndings::test_mixed_line_endings_semantic_detection PASSED [ 63%]
+tests/test_agentic_common.py::TestDetectControlTokenLineEndings::test_lone_cr_line_endings_bypass_tail_restriction PASSED [ 63%]
+tests/test_agentic_common.py::test_issue1232_substantive_output_with_error_substring_not_demoted PASSED [ 64%]
+tests/test_agentic_common.py::test_issue1232_multi_provider_does_not_fall_through_for_substantive_openai_output PASSED [ 64%]
+tests/test_agentic_common.py::test_issue1232_long_output_with_error_substring_still_passes PASSED [ 64%]
+tests/test_agentic_common.py::test_issue1232_empty_output_branch_still_detects_false_positive PASSED [ 65%]
+tests/test_agentic_common.py::test_issue1232_zero_cost_short_output_branch_still_detects_false_positive PASSED [ 65%]
+tests/test_agentic_common.py::test_issue1232_leading_error_prefix_response_still_detects_false_positive PASSED [ 65%]
+tests/test_agentic_common.py::test_issue1232_substantive_finding_starting_with_error_prefix_not_demoted PASSED [ 65%]
+tests/test_agentic_common.py::test_codex_stale_chatgpt_token_returns_actionable_message PASSED [ 66%]
+tests/test_agentic_common.py::test_codex_stale_auth_message_is_permanent PASSED [ 66%]
+tests/test_agentic_common.py::TestIssue1232NotLoggedInPermanent::test_not_logged_in_message_is_permanent PASSED [ 66%]
+tests/test_agentic_common.py::TestIssue1232NotLoggedInPermanent::test_anthropic_cli_full_login_error_is_permanent PASSED [ 66%]
+tests/test_agentic_common.py::TestIssue1232NotLoggedInPermanent::test_please_run_login_alone_is_permanent PASSED [ 67%]
+tests/test_agentic_common.py::TestIssue1232NotLoggedInPermanent::test_logged_in_substring_does_not_match PASSED [ 67%]
+tests/test_agentic_common.py::TestIssue1232NotLoggedInPermanent::test_login_unrelated_words_do_not_match PASSED [ 67%]
+tests/test_agentic_common.py::TestIssue1376IncidentReplay::test_google_fallback_success_after_anthropic_400_is_logged PASSED [ 68%]
+tests/test_agentic_common.py::TestIssue1376IncidentReplay::test_google_fallback_records_actual_model_from_response_json PASSED [ 68%]
+tests/test_agentic_common.py::TestIssue1376IncidentReplay::test_codex_modern_ndjson_preserves_model_from_session_end PASSED [ 68%]
+tests/test_agentic_common.py::TestIssue1376IncidentReplay::test_anthropic_records_actual_model_from_modelUsage PASSED [ 68%]
+tests/test_agentic_common.py::TestIssue1376IncidentReplay::test_google_fallback_records_model_when_env_var_set PASSED [ 69%]
+tests/test_agentic_common.py::TestIsRateLimited::test_429_status_code_detected PASSED [ 69%]
+tests/test_agentic_common.py::TestIsRateLimited::test_rate_limit_phrase_detected PASSED [ 69%]
+tests/test_agentic_common.py::TestIsRateLimited::test_too_many_requests_phrase_detected PASSED [ 69%]
+tests/test_agentic_common.py::TestIsRateLimited::test_requests_per_minute_phrase_detected PASSED [ 70%]
+tests/test_agentic_common.py::TestIsRateLimited::test_unrelated_errors_not_flagged PASSED [ 70%]
+tests/test_agentic_common.py::TestIsRateLimited::test_quota_not_misclassified_as_rate_limit PASSED [ 70%]
+tests/test_agentic_common.py::TestRateLimitBackoffFloor::test_floor_constant_is_60 PASSED [ 71%]
+tests/test_agentic_common.py::TestRateLimitBackoffFloor::test_floor_caps_lower_backoff PASSED [ 71%]
+tests/test_agentic_common.py::TestRateLimitBackoffFloor::test_floor_does_not_clip_higher_backoff PASSED [ 71%]
+tests/test_agentic_common.py::TestIssue814BillingErrorsPermanent::test_credit_balance_is_too_low_is_permanent PASSED [ 71%]
+tests/test_agentic_common.py::TestIssue814BillingErrorsPermanent::test_plans_and_billing_phrase_is_permanent PASSED [ 72%]
+tests/test_agentic_common.py::TestIssue814BillingErrorsPermanent::test_insufficient_credit_is_permanent PASSED [ 72%]
+tests/test_agentic_common.py::TestIssue814BillingErrorsPermanent::test_insufficient_balance_is_permanent PASSED [ 72%]
+tests/test_agentic_common.py::TestIssue814BillingErrorsPermanent::test_insufficient_funds_is_permanent PASSED [ 72%]
+tests/test_agentic_common.py::TestIssue814BillingErrorsPermanent::test_billing_error_is_case_insensitive PASSED [ 73%]
+tests/test_agentic_common.py::TestIssue814BillingErrorsPermanent::test_unrelated_billing_word_does_not_match PASSED [ 73%]
+tests/test_agentic_common.py::TestIssue814BillingErrorsPermanent::test_rate_limited_429_with_billing_hint_is_not_permanent PASSED [ 73%]
+tests/test_agentic_common.py::TestIssue814BillingErrorsPermanent::test_auth_or_config_with_rate_limit_text_stays_permanent PASSED [ 73%]
+tests/test_agentic_common.py::TestIssue814BillingErrorsPermanent::test_parse_provider_json_preserves_api_error_status_for_classifier PASSED [ 74%]
+tests/test_agentic_common.py::TestIssue814BillingErrorsPermanent::test_quota_exhaustion_with_429_stays_permanent PASSED [ 74%]
+tests/test_agentic_common.py::TestIssue814BillingErrorsPermanent::test_classify_permanent_error_returns_stable_classification PASSED [ 74%]
+tests/test_agentic_common.py::TestIssue814BillingErrorsPermanent::test_credit_balance_error_skips_retries_and_falls_back PASSED [ 75%]
+tests/test_agentic_common.py::TestIssue814BillingErrorsPermanent::test_permanent_error_emits_default_mode_diagnostic PASSED [ 75%]
+tests/test_agentic_common.py::TestIssue814BillingErrorsPermanent::test_permanent_error_diagnostic_suppressed_under_quiet PASSED [ 75%]
+tests/test_agentic_common.py::TestIssue814BillingErrorsPermanent::test_permanent_error_diagnostic_does_not_echo_untrusted_stderr PASSED [ 75%]
+tests/test_agentic_common.py::TestIssue814BillingErrorsPermanent::test_anthropic_is_error_json_envelope_skips_retries PASSED [ 76%]
+tests/test_agentic_common.py::TestRevertOutOfScopeChangesRename1080::test_reverts_out_of_scope_staged_rename PASSED [ 76%]
+tests/test_agentic_common.py::TestExtractStepReport::test_returns_inner_block_trimmed PASSED [ 76%]
+tests/test_agentic_common.py::TestExtractStepReport::test_returns_none_when_block_missing PASSED [ 76%]
+tests/test_agentic_common.py::TestExtractStepReport::test_returns_none_on_empty_or_none PASSED [ 77%]
+tests/test_agentic_common.py::TestExtractStepReport::test_returns_last_block_when_multiple PASSED [ 77%]
+tests/test_agentic_common.py::TestExtractStepReport::test_case_insensitive PASSED [ 77%]
+tests/test_agentic_common.py::TestExtractStepReport::test_multiline_dotall PASSED [ 78%]
+tests/test_agentic_common.py::TestNormalizeStepCommentsState::test_none_returns_empty_set PASSED [ 78%]
+tests/test_agentic_common.py::TestNormalizeStepCommentsState::test_list_of_ints_returns_set PASSED [ 78%]
+tests/test_agentic_common.py::TestNormalizeStepCommentsState::test_tuple_of_ints_returns_set PASSED [ 78%]
+tests/test_agentic_common.py::TestNormalizeStepCommentsState::test_set_returns_set_copy PASSED [ 79%]
+tests/test_agentic_common.py::TestNormalizeStepCommentsState::test_list_of_int_strings_coerces PASSED [ 79%]
+tests/test_agentic_common.py::TestNormalizeStepCommentsState::test_legacy_dict_with_posted_flag_returns_set_of_int_keys PASSED [ 79%]
+tests/test_agentic_common.py::TestNormalizeStepCommentsState::test_legacy_dict_with_true_value PASSED [ 79%]
+tests/test_agentic_common.py::TestNormalizeStepCommentsState::test_malformed_entries_are_skipped PASSED [ 80%]
+tests/test_agentic_common.py::TestNormalizeStepCommentsState::test_empty_collections PASSED [ 80%]
+tests/test_agentic_common.py::TestNormalizeStepCommentsState::test_garbage_input_returns_empty_set PASSED [ 80%]
+tests/test_agentic_common.py::TestNormalizeStepCommentsState::test_frozenset_input PASSED [ 81%]
+tests/test_agentic_common.py::TestPostStepCommentOnce::test_idempotent_skip_when_already_posted PASSED [ 81%]
+tests/test_agentic_common.py::TestPostStepCommentOnce::test_posts_via_gh_and_mutates_set_on_success PASSED [ 81%]
+tests/test_agentic_common.py::TestPostStepCommentOnce::test_returns_false_and_does_not_mutate_on_gh_failure PASSED [ 81%]
+tests/test_agentic_common.py::TestPostStepCommentOnce::test_returns_false_when_gh_missing PASSED [ 82%]
+tests/test_agentic_common.py::TestPostStepCommentOnce::test_redacts_known_secret_formats PASSED [ 82%]
+tests/test_agentic_common.py::TestPostStepCommentOnce::test_truncates_oversized_body PASSED [ 82%]
+tests/test_agentic_common.py::TestPostStepCommentOnce::test_exception_does_not_raise PASSED [ 82%]
+tests/test_agentic_common.py::TestDuplicateStateCommentHandling::test_find_all_returns_every_matching_marker_id PASSED [ 83%]
+tests/test_agentic_common.py::TestDuplicateStateCommentHandling::test_find_all_flattens_slurped_pages PASSED [ 83%]
+tests/test_agentic_common.py::TestDuplicateStateCommentHandling::test_github_clear_state_deletes_all_matching_markers PASSED [ 83%]
+tests/test_agentic_common.py::TestDuplicateStateCommentHandling::test_github_save_state_dedupe_adopts_newest_and_deletes_rest PASSED [ 84%]
+tests/test_agentic_common.py::TestDuplicateStateCommentHandling::test_github_save_state_dedupe_false_skips_find_all PASSED [ 84%]
+tests/test_agentic_common.py::TestDuplicateStateCommentHandling::test_github_save_state_dedupe_logs_warning_on_delete_failure PASSED [ 84%]
+tests/core/test_cli.py::test_cli_list_contexts PASSED                    [ 84%]
+tests/core/test_cli.py::test_cli_list_contexts_early_exit_no_auto_update PASSED [ 85%]
+tests/core/test_cli.py::test_cli_list_contexts_malformed_pddrc_shows_usage_error PASSED [ 85%]
+tests/core/test_cli.py::test_cli_context_known_passed_to_subcommand PASSED [ 85%]
+tests/core/test_cli.py::test_cli_context_unknown_raises_usage_error PASSED [ 85%]
+tests/core/test_cli.py::test_cli_context_unknown_without_pddrc PASSED    [ 86%]
+tests/core/test_cli.py::test_cli_version PASSED                          [ 86%]
+tests/core/test_cli.py::test_cli_help PASSED                             [ 86%]
+tests/core/test_cli.py::test_cli_help_shows_core_dump_flag PASSED        [ 86%]
+tests/core/test_cli.py::test_cli_help_shows_current_strength_default PASSED [ 87%]
+tests/core/test_cli.py::test_cli_command_help PASSED                     [ 87%]
+tests/core/test_cli.py::test_cli_global_options_defaults FAILED          [ 87%]
+tests/core/test_cli.py::test_cli_global_options_explicit FAILED          [ 88%]
+tests/core/test_cli.py::test_cli_global_options_quiet_overrides_verbose FAILED [ 88%]
+tests/core/test_cli.py::test_cli_auto_update_called_by_default FAILED    [ 88%]
+tests/core/test_cli.py::test_cli_auto_update_not_called_when_disabled PASSED [ 88%]
+tests/core/test_cli.py::test_cli_auto_update_handles_exception FAILED    [ 89%]
+tests/core/test_cli.py::test_cli_chaining_cost_aggregation PASSED        [ 89%]
+tests/core/test_cli.py::test_cli_chaining_with_no_cost_command PASSED    [ 89%]
+tests/core/test_cli.py::test_cli_result_callback_single_tuple_normalization PASSED [ 89%]
+tests/core/test_cli.py::test_cli_summary_suppresses_blank_or_placeholder_model[] PASSED [ 90%]
+tests/core/test_cli.py::test_cli_summary_suppresses_blank_or_placeholder_model[unknown] PASSED [ 90%]
+tests/core/test_cli.py::test_cli_summary_suppresses_blank_or_placeholder_model[Unknown] PASSED [ 90%]
+tests/core/test_cli.py::test_cli_summary_suppresses_blank_or_placeholder_model[N/A] PASSED [ 91%]
+tests/core/test_cli.py::test_cli_summary_suppresses_blank_or_placeholder_model[n/a] PASSED [ 91%]
+tests/core/test_cli.py::test_cli_summary_suppresses_blank_or_placeholder_model[none] PASSED [ 91%]
+tests/core/test_cli.py::test_cli_summary_suppresses_blank_or_placeholder_model[skipped] PASSED [ 91%]
+tests/core/test_cli.py::test_cli_summary_renders_real_model_name PASSED  [ 92%]
+tests/core/test_cli.py::test_cli_result_callback_non_tuple_result_warning PASSED [ 92%]
+tests/core/test_cli.py::test_user_cancellation_does_not_show_error_message_issue_186 PASSED [ 92%]
+tests/core/test_cli.py::test_bug_cli_default_strength_shadows_pddrc PASSED [ 92%]
+tests/core/test_cli.py::test_bug_cli_default_temperature_shadows_pddrc PASSED [ 93%]
+tests/core/test_cli.py::test_cli_explicit_strength_overrides_pddrc PASSED [ 93%]
+tests/core/test_cli.py::test_ctx_obj_get_returns_default_when_strength_not_passed PASSED [ 93%]
+tests/core/test_cli.py::test_ctx_obj_get_returns_default_when_temperature_not_passed PASSED [ 94%]
+tests/core/test_cli.py::test_strip_ansi_codes_removes_colors PASSED      [ 94%]
+tests/core/test_cli.py::test_strip_ansi_codes_removes_complex_sequences PASSED [ 94%]
+tests/core/test_cli.py::test_strip_ansi_codes_removes_osc_sequences PASSED [ 94%]
+tests/core/test_cli.py::test_strip_ansi_codes_removes_cursor_sequences PASSED [ 95%]
+tests/core/test_cli.py::test_strip_ansi_codes_leaves_plain_text PASSED   [ 95%]
+tests/core/test_cli.py::test_output_capture_writes_to_both PASSED        [ 95%]
+tests/core/test_cli.py::test_output_capture_delegates_methods PASSED     [ 95%]
+tests/core/test_cli.py::test_output_capture_flush PASSED                 [ 96%]
+tests/core/test_cli.py::test_output_capture_resilience PASSED            [ 96%]
+tests/core/test_cli.py::test_pddcli_format_help_includes_suite PASSED    [ 96%]
+tests/core/test_cli.py::test_pddcli_invoke_handles_exception PASSED      [ 97%]
+tests/core/test_cli.py::test_pddcli_invoke_handles_system_exit_error PASSED [ 97%]
+tests/core/test_cli.py::test_pddcli_invoke_re_raises_click_exit_without_handle_error PASSED [ 97%]
+tests/core/test_cli.py::test_pddcli_invoke_captures_output_for_dump PASSED [ 97%]
+tests/core/test_cli.py::test_cli_initialization_calls PASSED             [ 98%]
+tests/core/test_cli.py::test_cli_core_dump_enables_capture PASSED        [ 98%]
+tests/core/test_cli.py::test_cli_time_default PASSED                     [ 98%]
+tests/core/test_cli.py::test_cli_onboarding_reminder PASSED              [ 98%]
+tests/core/test_cli.py::test_process_commands_examples_used PASSED       [ 99%]
+tests/core/test_cli.py::test_process_commands_preprocess_local PASSED    [ 99%]
+tests/core/test_cli.py::test_process_commands_install_completion_success PASSED [ 99%]
+tests/core/test_cli.py::test_process_commands_fatal_exception PASSED     [100%]
+
+=================================== FAILURES ===================================
+______________ test_run_agentic_task_anthropic_success_env_check _______________
+
+mock_shutil_which = <MagicMock name='_find_cli_binary' id='139729494508368'>
+mock_subprocess_run = <MagicMock name='_subprocess_run' id='139729494835472'>
+mock_console = <MagicMock name='console' id='139729494842240'>
+tmp_path = PosixPath('/tmp/pytest-of-ubuntu/pytest-53/test_run_agentic_task_anthropi2')
+
+    def test_run_agentic_task_anthropic_success_env_check(mock_shutil_which, mock_subprocess_run, mock_console, tmp_path):
+        """Test successful execution with Anthropic."""
+        # Setup availability
+        mock_shutil_which.side_effect = lambda cmd: "/bin/claude" if cmd == "claude" else None
+    
+        # Setup subprocess response
+        mock_subprocess_run.return_value.returncode = 0
+        mock_subprocess_run.return_value.stdout = json.dumps({
+            "result": "Task completed.",
+            "total_cost_usd": 0.15
+        })
+    
+        success, msg, cost, provider = run_agentic_task("Do work", tmp_path, verbose=True)
+    
+>       assert success
+E       assert False
+
+tests/test_agentic_common.py:1327: AssertionError
+---------------------------- Captured stderr setup -----------------------------
+2026-05-29 01:52:20,920 - pdd.llm_invoke - INFO - Loaded model data from package default
+INFO: Loaded model data from package default
+------------------------------ Captured log setup ------------------------------
+INFO     pdd.llm_invoke:llm_invoke.py:2252 Loaded model data from package default
+___________________ test_run_agentic_task_temp_file_cleanup ____________________
+
+mock_shutil_which = <MagicMock name='_find_cli_binary' id='139729494847712'>
+mock_subprocess_run = <MagicMock name='_subprocess_run' id='139729494462048'>
+tmp_path = PosixPath('/tmp/pytest-of-ubuntu/pytest-53/test_run_agentic_task_temp_fil0')
+
+    def test_run_agentic_task_temp_file_cleanup(mock_shutil_which, mock_subprocess_run, tmp_path):
+        """Test that the temp prompt file is created and then cleaned up."""
+        mock_shutil_which.return_value = "/bin/claude"
+        mock_subprocess_run.return_value.returncode = 0
+        mock_subprocess_run.return_value.stdout = json.dumps({"result": "ok", "total_cost_usd": 0.1})
+    
+        # We need to intercept the file creation to verify it exists during execution
+        # Since run_agentic_task does everything in one go, we can check the instruction passed to CLI
+    
+        success, _, _, _ = run_agentic_task("Instruction", tmp_path)
+    
+>       assert success
+E       assert False
+
+tests/test_agentic_common.py:1421: AssertionError
+---------------------------- Captured stderr setup -----------------------------
+2026-05-29 01:52:21,272 - pdd.llm_invoke - INFO - Loaded model data from package default
+INFO: Loaded model data from package default
+------------------------------ Captured log setup ------------------------------
+INFO     pdd.llm_invoke:llm_invoke.py:2252 Loaded model data from package default
+----------------------------- Captured stdout call -----------------------------
+No agent providers are available (check CLI installation and API keys)
+----------------------------- Captured stderr call -----------------------------
+2026-05-29 01:52:21,279 - pdd.llm_invoke - INFO - Loaded model data from package default
+INFO: Loaded model data from package default
+------------------------------ Captured log call -------------------------------
+INFO     pdd.llm_invoke:llm_invoke.py:2252 Loaded model data from package default
+________________________ test_suspicious_file_detection ________________________
+
+mock_shutil_which = <MagicMock name='_find_cli_binary' id='139729495055904'>
+mock_subprocess_run = <MagicMock name='_subprocess_run' id='139729495054464'>
+mock_console = <MagicMock name='console' id='139729477592864'>
+tmp_path = PosixPath('/tmp/pytest-of-ubuntu/pytest-53/test_suspicious_file_detection0')
+
+    def test_suspicious_file_detection(mock_shutil_which, mock_subprocess_run, mock_console, tmp_path):
+        """Test that suspicious files (C, E, T) are detected and logged."""
+        mock_shutil_which.return_value = "/bin/claude"
+        mock_subprocess_run.return_value.returncode = 0
+        mock_subprocess_run.return_value.stdout = json.dumps({"result": "ok", "total_cost_usd": 0.1})
+    
+        # Create suspicious files
+        (tmp_path / "C").touch()
+        (tmp_path / "E").touch()
+    
+        run_agentic_task("Instruction", tmp_path)
+    
+        # Check console output for warning
+        # We need to inspect the calls to console.print
+        printed_messages = [call_args[0][0] for call_args in mock_console.print.call_args_list]
+        combined_output = "\n".join(str(m) for m in printed_messages)
+    
+>       assert "SUSPICIOUS FILES DETECTED" in combined_output
+E       AssertionError: assert 'SUSPICIOUS FILES DETECTED' in '[bold red]No agent providers are available (check CLI installation and API keys)[/bold red]'
+
+tests/test_agentic_common.py:1452: AssertionError
+---------------------------- Captured stderr setup -----------------------------
+2026-05-29 01:52:21,385 - pdd.llm_invoke - INFO - Loaded model data from package default
+INFO: Loaded model data from package default
+------------------------------ Captured log setup ------------------------------
+INFO     pdd.llm_invoke:llm_invoke.py:2252 Loaded model data from package default
+----------------------------- Captured stderr call -----------------------------
+2026-05-29 01:52:21,393 - pdd.llm_invoke - INFO - Loaded model data from package default
+INFO: Loaded model data from package default
+------------------------------ Captured log call -------------------------------
+INFO     pdd.llm_invoke:llm_invoke.py:2252 Loaded model data from package default
+____________________ test_run_agentic_task_timeout_override ____________________
+
+mock_shutil_which = <MagicMock name='_find_cli_binary' id='139729477967488'>
+mock_subprocess_run = <MagicMock name='_subprocess_run' id='139729477973200'>
+tmp_path = PosixPath('/tmp/pytest-of-ubuntu/pytest-53/test_run_agentic_task_timeout_0')
+
+    def test_run_agentic_task_timeout_override(mock_shutil_which, mock_subprocess_run, tmp_path):
+        """Test that explicit timeout overrides default."""
+        mock_shutil_which.return_value = "/bin/claude"
+        mock_subprocess_run.return_value.returncode = 0
+        mock_subprocess_run.return_value.stdout = json.dumps({"result": "ok"})
+    
+        run_agentic_task("Instruction", tmp_path, timeout=999.0)
+    
+>       kwargs = mock_subprocess_run.call_args[1]
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: 'NoneType' object is not subscriptable
+
+tests/test_agentic_common.py:1464: TypeError
+---------------------------- Captured stderr setup -----------------------------
+2026-05-29 01:52:21,495 - pdd.llm_invoke - INFO - Loaded model data from package default
+INFO: Loaded model data from package default
+------------------------------ Captured log setup ------------------------------
+INFO     pdd.llm_invoke:llm_invoke.py:2252 Loaded model data from package default
+----------------------------- Captured stdout call -----------------------------
+No agent providers are available (check CLI installation and API keys)
+----------------------------- Captured stderr call -----------------------------
+2026-05-29 01:52:21,503 - pdd.llm_invoke - INFO - Loaded model data from package default
+INFO: Loaded model data from package default
+------------------------------ Captured log call -------------------------------
+INFO     pdd.llm_invoke:llm_invoke.py:2252 Loaded model data from package default
+____________________ test_deadline_caps_per_attempt_timeout ____________________
+
+tmp_path = PosixPath('/tmp/pytest-of-ubuntu/pytest-53/test_deadline_caps_per_attempt0')
+
+    def test_deadline_caps_per_attempt_timeout(tmp_path):
+        """Per-attempt timeout is capped to remaining budget minus margin."""
+        deadline = time.time() + 300  # 300s left; after 120s margin → 180s available
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "k"}, clear=False), \
+             patch("pdd.agentic_common._find_cli_binary", return_value="/usr/bin/claude"), \
+             patch("pdd.agentic_common._subprocess_run") as mock_run, \
+             patch("time.sleep"):
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout=json.dumps({"result": "ok", "total_cost_usd": 0.01}),
+                stderr=""
+            )
+            success, output, cost, provider = run_agentic_task(
+                instruction="test",
+                cwd=tmp_path,
+                max_retries=1,
+                deadline=deadline,
+            )
+>       assert success is True
+E       assert False is True
+
+tests/test_agentic_common.py:3528: AssertionError
+---------------------------- Captured stderr setup -----------------------------
+2026-05-29 01:52:22,780 - pdd.llm_invoke - INFO - Loaded model data from package default
+INFO: Loaded model data from package default
+------------------------------ Captured log setup ------------------------------
+INFO     pdd.llm_invoke:llm_invoke.py:2252 Loaded model data from package default
+----------------------------- Captured stdout call -----------------------------
+No agent providers are available (check CLI installation and API keys)
+----------------------------- Captured stderr call -----------------------------
+2026-05-29 01:52:22,788 - pdd.llm_invoke - INFO - Loaded model data from package default
+INFO: Loaded model data from package default
+------------------------------ Captured log call -------------------------------
+INFO     pdd.llm_invoke:llm_invoke.py:2252 Loaded model data from package default
+__________________ test_no_deadline_preserves_default_timeout __________________
+
+tmp_path = PosixPath('/tmp/pytest-of-ubuntu/pytest-53/test_no_deadline_preserves_def0')
+
+    def test_no_deadline_preserves_default_timeout(tmp_path):
+        """Without deadline, default timeout is used."""
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "k"}, clear=False), \
+             patch("pdd.agentic_common._find_cli_binary", return_value="/usr/bin/claude"), \
+             patch("pdd.agentic_common._subprocess_run") as mock_run, \
+             patch("time.sleep"):
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout=json.dumps({"result": "ok", "total_cost_usd": 0.01}),
+                stderr=""
+            )
+            success, output, cost, provider = run_agentic_task(
+                instruction="test",
+                cwd=tmp_path,
+                max_retries=1,
+            )
+>       assert success is True
+E       assert False is True
+
+tests/test_agentic_common.py:3552: AssertionError
+---------------------------- Captured stderr setup -----------------------------
+2026-05-29 01:52:22,891 - pdd.llm_invoke - INFO - Loaded model data from package default
+INFO: Loaded model data from package default
+------------------------------ Captured log setup ------------------------------
+INFO     pdd.llm_invoke:llm_invoke.py:2252 Loaded model data from package default
+----------------------------- Captured stdout call -----------------------------
+No agent providers are available (check CLI installation and API keys)
+----------------------------- Captured stderr call -----------------------------
+2026-05-29 01:52:22,899 - pdd.llm_invoke - INFO - Loaded model data from package default
+INFO: Loaded model data from package default
+------------------------------ Captured log call -------------------------------
+INFO     pdd.llm_invoke:llm_invoke.py:2252 Loaded model data from package default
+__ TestIssue1072FailureLogging.test_provider_failure_logged_when_not_verbose ___
+
+self = <tests.test_agentic_common.TestIssue1072FailureLogging object at 0x7f154f194bf0>
+mock_shutil_which = <MagicMock name='_find_cli_binary' id='139729484675840'>
+mock_subprocess_run = <MagicMock name='_subprocess_run' id='139729494955536'>
+tmp_path = PosixPath('/tmp/pytest-of-ubuntu/pytest-53/test_provider_failure_logged_w0')
+
+    def test_provider_failure_logged_when_not_verbose(
+        self, mock_shutil_which, mock_subprocess_run, tmp_path
+    ):
+        """Provider failures must be logged to JSONL even with verbose=False.
+    
+        Before the fix, _log_agentic_interaction at agentic_common.py:929 is only
+        called inside `if verbose:` (line 928). Batch sync runs non-verbose, so no
+        provider failure logs are ever written — failures are completely invisible.
+    
+        This test directly contradicts the existing test
+        test_run_agentic_task_no_log_when_not_verbose (which validates the bug).
+        After the fix, that test should be updated to expect failure logs ARE written.
+        """
+        import pdd.agentic_common
+    
+        # Reset session ID
+        pdd.agentic_common._AGENTIC_SESSION_ID = None
+    
+        # Only anthropic available, and it fails all retries
+        mock_shutil_which.return_value = "/bin/claude"
+        mock_subprocess_run.return_value.returncode = 1
+        mock_subprocess_run.return_value.stdout = ""
+        mock_subprocess_run.return_value.stderr = "Exit code 1: rate limited"
+    
+        success, msg, cost, provider = run_agentic_task(
+            "Generate tests for calculator",
+            tmp_path,
+            verbose=False,  # NOT verbose — batch sync mode
+            label="test-generate",
+            max_retries=1,  # Single retry to keep test fast
+        )
+    
+        assert not success
+    
+        # The fix: failure logs MUST be written even without verbose mode
+        log_dir = tmp_path / AGENTIC_LOG_DIR
+>       assert log_dir.exists(), (
+            f"No agentic-logs directory created at {log_dir} — "
+            "_log_agentic_interaction is gated behind `if verbose:` "
+            "at agentic_common.py:928, so batch sync never logs provider failures"
+        )
+E       AssertionError: No agentic-logs directory created at /tmp/pytest-of-ubuntu/pytest-53/test_provider_failure_logged_w0/.pdd/agentic-logs — _log_agentic_interaction is gated behind `if verbose:` at agentic_common.py:928, so batch sync never logs provider failures
+E       assert False
+E        +  where False = exists()
+E        +    where exists = PosixPath('/tmp/pytest-of-ubuntu/pytest-53/test_provider_failure_logged_w0/.pdd/agentic-logs').exists
+
+tests/test_agentic_common.py:5154: AssertionError
+---------------------------- Captured stderr setup -----------------------------
+2026-05-29 01:52:23,699 - pdd.llm_invoke - INFO - Loaded model data from package default
+INFO: Loaded model data from package default
+------------------------------ Captured log setup ------------------------------
+INFO     pdd.llm_invoke:llm_invoke.py:2252 Loaded model data from package default
+----------------------------- Captured stdout call -----------------------------
+No agent providers are available (check CLI installation and API keys)
+----------------------------- Captured stderr call -----------------------------
+2026-05-29 01:52:23,707 - pdd.llm_invoke - INFO - Loaded model data from package default
+INFO: Loaded model data from package default
+------------------------------ Captured log call -------------------------------
+INFO     pdd.llm_invoke:llm_invoke.py:2252 Loaded model data from package default
+_______________________ test_cli_global_options_defaults _______________________
+
+self = <MagicMock name='auto_update' id='139729477967152'>, args = ()
+kwargs = {}, msg = "Expected 'auto_update' to be called once. Called 0 times."
+
+    def assert_called_once_with(self, /, *args, **kwargs):
+        """assert that the mock was called exactly once and that that call was
+        with the specified arguments."""
+        if not self.call_count == 1:
+            msg = ("Expected '%s' to be called once. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+>           raise AssertionError(msg)
+E           AssertionError: Expected 'auto_update' to be called once. Called 0 times.
+
+/usr/lib/python3.12/unittest/mock.py:955: AssertionError
+
+During handling of the above exception, another exception occurred:
+
+mock_construct = <MagicMock name='construct_paths' id='139729494884720'>
+mock_main = <MagicMock name='code_generator_main' id='139729484666000'>
+mock_auto_update = <MagicMock name='auto_update' id='139729477967152'>
+runner = <click.testing.CliRunner object at 0x7f154ee861b0>
+create_dummy_files = <function create_dummy_files.<locals>._create_files at 0x7f154ec9b600>
+
+    @patch('pdd.core.cli.auto_update')
+    @patch('pdd.commands.generate.code_generator_main')
+    @patch('pdd.cli.construct_paths')
+    def test_cli_global_options_defaults(mock_construct, mock_main, mock_auto_update, runner, create_dummy_files):
+        """Test default global options are passed in context."""
+        files = create_dummy_files("test.prompt")
+        mock_main.return_value = ('code', False, 0.0, 'model')
+    
+        @cli_command.command()
+        @click.argument('prompt_file')
+        @click.pass_context
+        def generate(ctx, prompt_file):
+            mock_main(ctx=ctx)
+    
+        result = runner.invoke(cli_command, ["generate", str(files["test.prompt"])])
+        assert result.exit_code == 0
+        mock_main.assert_called_once()
+        ctx = mock_main.call_args.kwargs.get('ctx')
+        assert ctx.obj['force'] is False
+        assert 'strength' not in ctx.obj
+        assert 'temperature' not in ctx.obj
+        assert ctx.obj['verbose'] is False
+        assert ctx.obj['quiet'] is False
+        assert ctx.obj['output_cost'] is None
+        assert ctx.obj['local'] is False
+        assert ctx.obj['review_examples'] is False
+        assert ctx.obj['time'] == DEFAULT_TIME
+>       mock_auto_update.assert_called_once_with()
+E       AssertionError: Expected 'auto_update' to be called once. Called 0 times.
+
+tests/core/test_cli.py:235: AssertionError
+---------------------------- Captured stderr setup -----------------------------
+2026-05-29 01:52:25,219 - pdd.llm_invoke - INFO - Loaded model data from package default
+INFO: Loaded model data from package default
+------------------------------ Captured log setup ------------------------------
+INFO     pdd.llm_invoke:llm_invoke.py:2252 Loaded model data from package default
+_______________________ test_cli_global_options_explicit _______________________
+
+self = <MagicMock name='auto_update' id='139729484584656'>, args = ()
+kwargs = {}, msg = "Expected 'auto_update' to be called once. Called 0 times."
+
+    def assert_called_once_with(self, /, *args, **kwargs):
+        """assert that the mock was called exactly once and that that call was
+        with the specified arguments."""
+        if not self.call_count == 1:
+            msg = ("Expected '%s' to be called once. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+>           raise AssertionError(msg)
+E           AssertionError: Expected 'auto_update' to be called once. Called 0 times.
+
+/usr/lib/python3.12/unittest/mock.py:955: AssertionError
+
+During handling of the above exception, another exception occurred:
+
+mock_construct = <MagicMock name='construct_paths' id='139729484584320'>
+mock_main = <MagicMock name='code_generator_main' id='139729484588256'>
+mock_auto_update = <MagicMock name='auto_update' id='139729484584656'>
+runner = <click.testing.CliRunner object at 0x7f154e4b0f50>
+create_dummy_files = <function create_dummy_files.<locals>._create_files at 0x7f154ec4c0e0>
+
+    @patch('pdd.core.cli.auto_update')
+    @patch('pdd.commands.generate.code_generator_main')
+    @patch('pdd.cli.construct_paths')
+    def test_cli_global_options_explicit(mock_construct, mock_main, mock_auto_update, runner, create_dummy_files):
+        """Test explicit global options override defaults."""
+        files = create_dummy_files("test.prompt")
+        mock_main.return_value = ('code', False, 0.0, 'model')
+    
+        @cli_command.command()
+        @click.argument('prompt_file')
+        @click.pass_context
+        def generate(ctx, prompt_file):
+            mock_main(ctx=ctx)
+    
+        result = runner.invoke(cli_command, [
+            "--force",
+            "--strength", f"{DEFAULT_STRENGTH}",
+            "--temperature", "0.5",
+            "--verbose",
+            "--output-cost", "./output/costs.csv",
+            "--local",
+            "--review-examples",
+            "--time", "0.7",
+            "generate", str(files["test.prompt"])
+        ])
+        assert result.exit_code == 0
+        mock_main.assert_called_once()
+        ctx = mock_main.call_args.kwargs.get('ctx')
+        assert ctx.obj['force'] is True
+        assert ctx.obj['strength'] == DEFAULT_STRENGTH
+        assert ctx.obj['temperature'] == 0.5
+        assert ctx.obj['verbose'] is True
+        assert ctx.obj['quiet'] is False
+        assert ctx.obj['output_cost'] == "./output/costs.csv"
+        assert ctx.obj['local'] is True
+        assert ctx.obj['review_examples'] is True
+        assert ctx.obj['time'] == 0.7
+>       mock_auto_update.assert_called_once_with()
+E       AssertionError: Expected 'auto_update' to be called once. Called 0 times.
+
+tests/core/test_cli.py:274: AssertionError
+---------------------------- Captured stderr setup -----------------------------
+2026-05-29 01:52:25,289 - pdd.llm_invoke - INFO - Loaded model data from package default
+INFO: Loaded model data from package default
+------------------------------ Captured log setup ------------------------------
+INFO     pdd.llm_invoke:llm_invoke.py:2252 Loaded model data from package default
+_______________ test_cli_global_options_quiet_overrides_verbose ________________
+
+self = <MagicMock name='auto_update' id='139729484404720'>, args = ()
+kwargs = {}, msg = "Expected 'auto_update' to be called once. Called 0 times."
+
+    def assert_called_once_with(self, /, *args, **kwargs):
+        """assert that the mock was called exactly once and that that call was
+        with the specified arguments."""
+        if not self.call_count == 1:
+            msg = ("Expected '%s' to be called once. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+>           raise AssertionError(msg)
+E           AssertionError: Expected 'auto_update' to be called once. Called 0 times.
+
+/usr/lib/python3.12/unittest/mock.py:955: AssertionError
+
+During handling of the above exception, another exception occurred:
+
+mock_construct = <MagicMock name='construct_paths' id='139729484403472'>
+mock_main = <MagicMock name='code_generator_main' id='139729484411584'>
+mock_auto_update = <MagicMock name='auto_update' id='139729484404720'>
+runner = <click.testing.CliRunner object at 0x7f154e4850d0>
+create_dummy_files = <function create_dummy_files.<locals>._create_files at 0x7f154ec4c540>
+
+    @patch('pdd.core.cli.auto_update')
+    @patch('pdd.commands.generate.code_generator_main')
+    @patch('pdd.cli.construct_paths')
+    def test_cli_global_options_quiet_overrides_verbose(mock_construct, mock_main, mock_auto_update, runner, create_dummy_files):
+        """Test --quiet overrides --verbose."""
+        files = create_dummy_files("test.prompt")
+        mock_main.return_value = ('code', False, 0.0, 'model')
+    
+        @cli_command.command()
+        @click.argument('prompt_file')
+        @click.pass_context
+        def generate(ctx, prompt_file):
+            mock_main(ctx=ctx)
+    
+        result = runner.invoke(cli_command, ["--verbose", "--quiet", "generate", str(files["test.prompt"])])
+        assert result.exit_code == 0
+        ctx = mock_main.call_args.kwargs.get('ctx')
+        assert ctx.obj['verbose'] is False
+        assert ctx.obj['quiet'] is True
+>       mock_auto_update.assert_called_once_with()
+E       AssertionError: Expected 'auto_update' to be called once. Called 0 times.
+
+tests/core/test_cli.py:295: AssertionError
+---------------------------- Captured stderr setup -----------------------------
+2026-05-29 01:52:25,361 - pdd.llm_invoke - INFO - Loaded model data from package default
+INFO: Loaded model data from package default
+------------------------------ Captured log setup ------------------------------
+INFO     pdd.llm_invoke:llm_invoke.py:2252 Loaded model data from package default
+____________________ test_cli_auto_update_called_by_default ____________________
+
+self = <MagicMock name='auto_update' id='139729484664032'>, args = ()
+kwargs = {}, msg = "Expected 'auto_update' to be called once. Called 0 times."
+
+    def assert_called_once_with(self, /, *args, **kwargs):
+        """assert that the mock was called exactly once and that that call was
+        with the specified arguments."""
+        if not self.call_count == 1:
+            msg = ("Expected '%s' to be called once. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+>           raise AssertionError(msg)
+E           AssertionError: Expected 'auto_update' to be called once. Called 0 times.
+
+/usr/lib/python3.12/unittest/mock.py:955: AssertionError
+
+During handling of the above exception, another exception occurred:
+
+mock_construct = <MagicMock name='construct_paths' id='139729485145984'>
+mock_main = <MagicMock name='code_generator_main' id='139729485145024'>
+mock_auto_update = <MagicMock name='auto_update' id='139729484664032'>
+runner = <click.testing.CliRunner object at 0x7f154e53b170>
+create_dummy_files = <function create_dummy_files.<locals>._create_files at 0x7f154ec4c2c0>
+
+    @patch('pdd.core.cli.auto_update')
+    @patch('pdd.commands.generate.code_generator_main')
+    @patch('pdd.cli.construct_paths')
+    def test_cli_auto_update_called_by_default(mock_construct, mock_main, mock_auto_update, runner, create_dummy_files):
+        """Test auto_update is called by default."""
+        files = create_dummy_files("test.prompt")
+        mock_main.return_value = ('code', False, 0.0, 'model')
+    
+        @cli_command.command()
+        @click.argument('prompt_file')
+        @click.pass_context
+        def generate(ctx, prompt_file):
+            mock_main(ctx=ctx)
+    
+        runner.invoke(cli_command, ["generate", str(files["test.prompt"])])
+>       mock_auto_update.assert_called_once_with()
+E       AssertionError: Expected 'auto_update' to be called once. Called 0 times.
+
+tests/core/test_cli.py:312: AssertionError
+____________________ test_cli_auto_update_handles_exception ____________________
+
+mock_construct = <MagicMock name='construct_paths' id='139729485408608'>
+mock_main = <MagicMock name='code_generator_main' id='139729485836272'>
+mock_auto_update = <MagicMock name='auto_update' id='139729485835936'>
+runner = <click.testing.CliRunner object at 0x7f154e57aab0>
+create_dummy_files = <function create_dummy_files.<locals>._create_files at 0x7f154ec4cfe0>
+
+    @patch('pdd.core.cli.auto_update', side_effect=Exception("Network error"))
+    @patch('pdd.commands.generate.code_generator_main')
+    @patch('pdd.cli.construct_paths')
+    def test_cli_auto_update_handles_exception(mock_construct, mock_main, mock_auto_update, runner, create_dummy_files):
+        """Test auto_update exceptions are handled gracefully."""
+        files = create_dummy_files("test.prompt")
+        mock_main.return_value = ('code', False, 0.0, 'model')
+    
+        @cli_command.command()
+        @click.argument('prompt_file')
+        @click.pass_context
+        def generate(ctx, prompt_file):
+            mock_main(ctx=ctx)
+    
+        result = runner.invoke(cli_command, ["generate", str(files["test.prompt"])])
+        assert result.exit_code == 0
+>       assert "Auto-update check failed" in result.output
+E       AssertionError: assert 'Auto-update check failed' in '\n--- Command Execution Summary ---\n-------------------------------------\n📦 Debug snapshot saved to \n/tmp/pdd_job_ZsO2CuA2KP7qlMtdNJl4_l5ufrcuc/.pdd/worktrees/checkup-issue-28/.pdd/\ncore_dumps/pdd-core-20260529T015225Z.json (attach when reporting bugs)\n'
+E        +  where '\n--- Command Execution Summary ---\n-------------------------------------\n📦 Debug snapshot saved to \n/tmp/pdd_job_ZsO2CuA2KP7qlMtdNJl4_l5ufrcuc/.pdd/worktrees/checkup-issue-28/.pdd/\ncore_dumps/pdd-core-20260529T015225Z.json (attach when reporting bugs)\n' = <Result okay>.output
+
+tests/core/test_cli.py:348: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_agentic_common.py::test_run_agentic_task_anthropic_success_env_check - assert False
+FAILED tests/test_agentic_common.py::test_run_agentic_task_temp_file_cleanup - assert False
+FAILED tests/test_agentic_common.py::test_suspicious_file_detection - AssertionError: assert 'SUSPICIOUS FILES DETECTED' in '[bold red]No agent providers are available (check CLI installation and API keys)[/bold red]'
+FAILED tests/test_agentic_common.py::test_run_agentic_task_timeout_override - TypeError: 'NoneType' object is not subscriptable
+FAILED tests/test_agentic_common.py::test_deadline_caps_per_attempt_timeout - assert False is True
+FAILED tests/test_agentic_common.py::test_no_deadline_preserves_default_timeout - assert False is True
+FAILED tests/test_agentic_common.py::TestIssue1072FailureLogging::test_provider_failure_logged_when_not_verbose - AssertionError: No agentic-logs directory created at /tmp/pytest-of-ubuntu/pytest-53/test_provider_failure_logged_w0/.pdd/agentic-logs — _log_agentic_interaction is gated behind `if verbose:` at agentic_common.py:928, so batch sync never logs provider failures
+assert False
+ +  where False = exists()
+ +    where exists = PosixPath('/tmp/pytest-of-ubuntu/pytest-53/test_provider_failure_logged_w0/.pdd/agentic-logs').exists
+FAILED tests/core/test_cli.py::test_cli_global_options_defaults - AssertionError: Expected 'auto_update' to be called once. Called 0 times.
+FAILED tests/core/test_cli.py::test_cli_global_options_explicit - AssertionError: Expected 'auto_update' to be called once. Called 0 times.
+FAILED tests/core/test_cli.py::test_cli_global_options_quiet_overrides_verbose - AssertionError: Expected 'auto_update' to be called once. Called 0 times.
+FAILED tests/core/test_cli.py::test_cli_auto_update_called_by_default - AssertionError: Expected 'auto_update' to be called once. Called 0 times.
+FAILED tests/core/test_cli.py::test_cli_auto_update_handles_exception - AssertionError: assert 'Auto-update check failed' in '\n--- Command Execution Summary ---\n-------------------------------------\n📦 Debug snapshot saved to \n/tmp/pdd_job_ZsO2CuA2KP7qlMtdNJl4_l5ufrcuc/.pdd/worktrees/checkup-issue-28/.pdd/\ncore_dumps/pdd-core-20260529T015225Z.json (attach when reporting bugs)\n'
+ +  where '\n--- Command Execution Summary ---\n-------------------------------------\n📦 Debug snapshot saved to \n/tmp/pdd_job_ZsO2CuA2KP7qlMtdNJl4_l5ufrcuc/.pdd/worktrees/checkup-issue-28/.pdd/\ncore_dumps/pdd-core-20260529T015225Z.json (attach when reporting bugs)\n' = <Result okay>.output
+======================== 12 failed, 357 passed in 6.94s ========================

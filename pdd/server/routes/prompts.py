@@ -9,20 +9,21 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 try:
-    from rich.console import Console
-    console = Console()
+    from rich.console import Console as RichConsole
+    Console = RichConsole
 except ImportError:
-    class Console:
-        def print(self, *args, **kwargs):
+    class DummyConsole: # type: ignore
+        def print(self, *args: Any, **kwargs: Any) -> None:
             import builtins
             builtins.print(*args)
-    console = Console()
+    Console = DummyConsole # type: ignore
+console = Console()
 
 from ..security import PathValidator, SecurityError
 from ..token_counter import get_context_limit, get_token_metrics
@@ -407,6 +408,10 @@ async def get_sync_status(
                 # No fingerprint - never synced
                 return SyncStatusResponse(
                     status="never_synced",
+                    last_sync_timestamp=None,
+                    last_sync_command=None,
+                    prompt_modified=False,
+                    code_modified=False,
                     fingerprint_exists=False,
                     prompt_exists=prompt_exists,
                     code_exists=code_exists,
@@ -897,17 +902,22 @@ async def analyze_diff(request: DiffAnalysisRequest):
             undocumentedFeatures=stats_data.get('undocumentedFeatures', 0),
             promptToCodeCoverage=stats_data.get('promptToCodeCoverage', 0.0),
             codeToPromptCoverage=stats_data.get('codeToPromptCoverage', 0.0),
+            hiddenKnowledgeCount=stats_data.get('hiddenKnowledgeCount', 0),
+            criticalGaps=stats_data.get('criticalGaps', 0),
         )
 
         # Build response with bidirectional scores
         response = DiffAnalysisResponse(
             result=DiffAnalysisResult(
                 overallScore=llm_result.get('overallScore', 0),
+                canRegenerate=llm_result.get('canRegenerate', False),
+                regenerationRisk=llm_result.get('regenerationRisk', 'high'),
                 promptToCodeScore=llm_result.get('promptToCodeScore', 0),
                 codeToPromptScore=llm_result.get('codeToPromptScore', 0),
                 summary=llm_result.get('summary', ''),
                 sections=sections,
                 codeSections=code_sections,
+                hiddenKnowledge=[],
                 lineMappings=line_mappings,
                 stats=stats,
                 missing=llm_result.get('missing', []),

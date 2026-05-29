@@ -287,14 +287,14 @@ def test_get_available_agents_excludes_openai_without_any_codex_auth(
         agents = get_available_agents()
     assert "openai" not in agents
 
-def test_run_agentic_task_validation(mock_cwd, mock_shutil_which):
+def test_run_agentic_task_validation(mock_env, mock_cwd, mock_shutil_which):
     """Test behavior with empty instruction (validation removed in refactored code)."""
     mock_shutil_which.return_value = None  # No agents available
     success, msg, cost, provider = run_agentic_task("", mock_cwd)
     assert not success
     assert "No agent providers are available" in msg
 
-def test_run_agentic_task_no_agents(mock_cwd, mock_load_model_data, mock_shutil_which):
+def test_run_agentic_task_no_agents(mock_env, mock_cwd, mock_load_model_data, mock_shutil_which):
     """Test behavior when no agents are available."""
     mock_shutil_which.return_value = None
     success, msg, cost, provider = run_agentic_task("instruction", mock_cwd)
@@ -1310,7 +1310,7 @@ def test_anthropic_cost_all_tokens_cached():
 
 # --- Tests for run_agentic_task ---
 
-def test_run_agentic_task_anthropic_success_env_check(mock_shutil_which, mock_subprocess_run, mock_console, tmp_path):
+def test_run_agentic_task_anthropic_success_env_check(mock_env, mock_shutil_which, mock_subprocess_run, mock_console, tmp_path):
     """Test successful execution with Anthropic."""
     # Setup availability
     mock_shutil_which.side_effect = lambda cmd: "/bin/claude" if cmd == "claude" else None
@@ -1407,7 +1407,7 @@ def test_run_agentic_task_false_positive(mock_shutil_which, mock_subprocess_run,
     # Cost should include the 0.0 from the first attempt + the cost from the second
     assert cost > 0.0
 
-def test_run_agentic_task_temp_file_cleanup(mock_shutil_which, mock_subprocess_run, tmp_path):
+def test_run_agentic_task_temp_file_cleanup(mock_env, mock_shutil_which, mock_subprocess_run, tmp_path):
     """Test that the temp prompt file is created and then cleaned up."""
     mock_shutil_which.return_value = "/bin/claude"
     mock_subprocess_run.return_value.returncode = 0
@@ -1432,7 +1432,7 @@ def test_run_agentic_task_temp_file_cleanup(mock_shutil_which, mock_subprocess_r
     temp_files = list(tmp_path.glob(".agentic_prompt_*.txt"))
     assert len(temp_files) == 0
 
-def test_suspicious_file_detection(mock_shutil_which, mock_subprocess_run, mock_console, tmp_path):
+def test_suspicious_file_detection(mock_env, mock_shutil_which, mock_subprocess_run, mock_console, tmp_path):
     """Test that suspicious files (C, E, T) are detected and logged."""
     mock_shutil_which.return_value = "/bin/claude"
     mock_subprocess_run.return_value.returncode = 0
@@ -1453,7 +1453,7 @@ def test_suspicious_file_detection(mock_shutil_which, mock_subprocess_run, mock_
     assert "- C" in combined_output
     assert "- E" in combined_output
 
-def test_run_agentic_task_timeout_override(mock_shutil_which, mock_subprocess_run, tmp_path):
+def test_run_agentic_task_timeout_override(mock_env, mock_shutil_which, mock_subprocess_run, tmp_path):
     """Test that explicit timeout overrides default."""
     mock_shutil_which.return_value = "/bin/claude"
     mock_subprocess_run.return_value.returncode = 0
@@ -3489,7 +3489,7 @@ import time
 def test_deadline_skips_attempt_when_insufficient_time(tmp_path):
     """When remaining time is less than margin + min attempt, skip all attempts."""
     deadline = time.time() + 30  # Only 30s left — less than margin(120) + min(60)
-    with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "k"}, clear=False), \
+    with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "k"}, clear=True), \
          patch("pdd.agentic_common._find_cli_binary", return_value="/usr/bin/claude"), \
          patch("pdd.agentic_common._subprocess_run") as mock_run, \
          patch("time.sleep"):
@@ -3510,7 +3510,7 @@ def test_deadline_skips_attempt_when_insufficient_time(tmp_path):
 def test_deadline_caps_per_attempt_timeout(tmp_path):
     """Per-attempt timeout is capped to remaining budget minus margin."""
     deadline = time.time() + 300  # 300s left; after 120s margin → 180s available
-    with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "k"}, clear=False), \
+    with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "k"}, clear=True), \
          patch("pdd.agentic_common._find_cli_binary", return_value="/usr/bin/claude"), \
          patch("pdd.agentic_common._subprocess_run") as mock_run, \
          patch("time.sleep"):
@@ -3535,7 +3535,7 @@ def test_deadline_caps_per_attempt_timeout(tmp_path):
 
 def test_no_deadline_preserves_default_timeout(tmp_path):
     """Without deadline, default timeout is used."""
-    with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "k"}, clear=False), \
+    with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "k"}, clear=True), \
          patch("pdd.agentic_common._find_cli_binary", return_value="/usr/bin/claude"), \
          patch("pdd.agentic_common._subprocess_run") as mock_run, \
          patch("time.sleep"):
@@ -5116,7 +5116,7 @@ class TestIssue1072FailureLogging:
     """
 
     def test_provider_failure_logged_when_not_verbose(
-        self, mock_shutil_which, mock_subprocess_run, tmp_path
+        self, mock_env, mock_shutil_which, mock_subprocess_run, tmp_path
     ):
         """Provider failures must be logged to JSONL even with verbose=False.
 

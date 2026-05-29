@@ -12,7 +12,6 @@ import os
 import sys
 import shutil
 from pathlib import Path
-from typing import Optional
 
 
 def detect_host_python_executable() -> str:

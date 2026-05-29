@@ -1,12 +1,11 @@
 from __future__ import annotations
-import json
 import os
 import shutil
 import subprocess
 import sys
 import threading
 from pathlib import Path
-from typing import Tuple, Optional, Union, List
+from typing import Tuple, Optional
 
 import requests
 

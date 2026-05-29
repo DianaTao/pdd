@@ -1,11 +1,9 @@
 from __future__ import annotations
 import ast
 import asyncio
-import json
 import os
-import sys
 from pathlib import Path
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple
 import click
 import httpx
 from rich.console import Console

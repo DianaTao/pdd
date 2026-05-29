@@ -1,0 +1,156 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.0.3, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+rootdir: /tmp/pdd_job_ZsO2CuA2KP7qlMtdNJl4_l5ufrcuc/.pdd/worktrees/checkup-issue-28
+configfile: pytest.ini (WARNING: ignoring pytest config in pyproject.toml!)
+plugins: xdist-3.8.0, timeout-2.4.0, mock-3.15.1, cov-7.1.0, asyncio-1.4.0, anyio-4.13.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+collecting ... collected 31 items
+
+tests/test_commands_maintenance.py::test_sync_has_track_cost_decorator PASSED [  3%]
+tests/test_commands_maintenance.py::test_auto_deps_has_track_cost_decorator PASSED [  6%]
+tests/test_commands_maintenance.py::test_sync_returns_tuple_on_success PASSED [  9%]
+tests/test_commands_maintenance.py::test_sync_without_basename_dispatches_global_sync PASSED [ 12%]
+tests/test_commands_maintenance.py::test_sync_without_basename_forwards_global_local_flag PASSED [ 16%]
+tests/test_commands_maintenance.py::test_sync_without_basename_uses_default_budget_without_pddrc PASSED [ 19%]
+tests/test_commands_maintenance.py::test_sync_without_basename_uses_pddrc_default_budget PASSED [ 22%]
+tests/test_commands_maintenance.py::test_sync_without_basename_uses_pddrc_default_target_coverage PASSED [ 25%]
+tests/test_commands_maintenance.py::test_sync_without_basename_target_coverage_cli_overrides_pddrc PASSED [ 29%]
+tests/test_commands_maintenance.py::test_sync_without_basename_exits_on_global_sync_failure PASSED [ 32%]
+tests/test_commands_maintenance.py::test_sync_with_basename_keeps_single_module_dispatch PASSED [ 35%]
+tests/test_commands_maintenance.py::test_sync_with_github_issue_url_keeps_agentic_dispatch PASSED [ 38%]
+tests/test_commands_maintenance.py::test_sync_with_github_issue_url_forwards_dry_run PASSED [ 41%]
+tests/test_commands_maintenance.py::test_sync_with_architecture_json_keeps_single_module_dispatch PASSED [ 45%]
+tests/test_commands_maintenance.py::test_sync_with_architecture_json_subpath_keeps_single_module_dispatch PASSED [ 48%]
+tests/test_commands_maintenance.py::test_sync_with_unrelated_json_falls_through_to_single_module PASSED [ 51%]
+tests/test_commands_maintenance.py::test_sync_with_missing_architecture_json_falls_through PASSED [ 54%]
+tests/test_commands_maintenance.py::test_sync_returns_none_on_error PASSED [ 58%]
+tests/test_commands_maintenance.py::test_sync_reraises_click_abort PASSED [ 61%]
+tests/test_commands_maintenance.py::test_sync_calls_handle_error_on_exception PASSED [ 64%]
+tests/test_commands_maintenance.py::test_sync_deprecated_log_flag_warns_and_sets_dry_run PASSED [ 67%]
+tests/test_commands_maintenance.py::test_setup_handles_none_ctx_obj PASSED [ 70%]
+tests/test_commands_maintenance.py::test_cli_auto_deps_strips_quotes FAILED [ 74%]
+tests/test_commands_maintenance.py::test_cli_setup_command FAILED        [ 77%]
+tests/test_commands_maintenance.py::test_sync_with_no_target_coverage_does_not_raise_typeerror PASSED [ 80%]
+tests/test_commands_maintenance.py::test_target_coverage_cli_option_converts_string_to_float PASSED [ 83%]
+tests/test_commands_maintenance.py::test_sync_architecture_reports_summary_and_success PASSED [ 87%]
+tests/test_commands_maintenance.py::test_sync_architecture_passes_filenames_and_dry_run PASSED [ 90%]
+tests/test_commands_maintenance.py::test_sync_architecture_exits_nonzero_on_validation_failure PASSED [ 93%]
+tests/test_commands_maintenance.py::test_sync_architecture_calls_handle_error_on_exception PASSED [ 96%]
+tests/test_commands_maintenance.py::test_sync_architecture_uses_nearest_cwd_project PASSED [100%]
+
+=================================== FAILURES ===================================
+_______________________ test_cli_auto_deps_strips_quotes _______________________
+
+self = <MagicMock name='auto_update' id='140453130813712'>, args = ()
+kwargs = {}, msg = "Expected 'auto_update' to be called once. Called 0 times."
+
+    def assert_called_once_with(self, /, *args, **kwargs):
+        """assert that the mock was called exactly once and that that call was
+        with the specified arguments."""
+        if not self.call_count == 1:
+            msg = ("Expected '%s' to be called once. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+>           raise AssertionError(msg)
+E           AssertionError: Expected 'auto_update' to be called once. Called 0 times.
+
+/usr/lib/python3.12/unittest/mock.py:955: AssertionError
+
+During handling of the above exception, another exception occurred:
+
+mock_main = <MagicMock name='auto_deps_main' id='140453130808320'>
+mock_construct = <MagicMock name='construct_paths' id='140453130810912'>
+mock_auto_update = <MagicMock name='auto_update' id='140453130813712'>
+runner = <click.testing.CliRunner object at 0x7fbdcaf81730>
+create_dummy_files = <function create_dummy_files.<locals>._create_files at 0x7fbdcaf24360>
+tmp_path = PosixPath('/tmp/pytest-of-ubuntu/pytest-55/test_cli_auto_deps_strips_quot0')
+
+    @patch('pdd.core.cli.auto_update') # Patch auto_update
+    @patch('pdd.cli.construct_paths') # Now this patch should work
+    @patch('pdd.commands.maintenance.auto_deps_main')
+    def test_cli_auto_deps_strips_quotes(mock_main, mock_construct, mock_auto_update, runner, create_dummy_files, tmp_path):
+        """Test that auto-deps strips quotes from directory_path."""
+        files = create_dummy_files("dep.prompt")
+        dep_dir_path = tmp_path / "deps"
+        dep_dir_path.mkdir()
+        quoted_path = f'"{dep_dir_path}/*"' # Path with quotes
+    
+        # construct_paths is NOT called by auto_deps command wrapper, only potentially inside auto_deps_main
+        mock_main.return_value = ('modified prompt', 0.1, 'model-deps')
+    
+        result = runner.invoke(cli.cli, ["auto-deps", str(files["dep.prompt"]), quoted_path])
+    
+        if result.exit_code != 0:
+            print(f"Unexpected exit code: {result.exit_code}")
+            print(f"Output:\n{result.output}")
+            if result.exception:
+                print(f"Exception:\n{result.exception}")
+                raise result.exception
+    
+        assert result.exit_code == 0
+        mock_main.assert_called_once()
+        # Check that the path passed to auto_deps_main has quotes stripped
+        call_args = mock_main.call_args.kwargs
+        assert call_args['directory_path'] == f'{dep_dir_path}/*' # No quotes
+        mock_construct.assert_not_called() # auto_deps command wrapper does not call construct_paths
+>       mock_auto_update.assert_called_once_with()
+E       AssertionError: Expected 'auto_update' to be called once. Called 0 times.
+
+tests/test_commands_maintenance.py:522: AssertionError
+---------------------------- Captured stderr setup -----------------------------
+2026-05-29 01:53:40,035 - pdd.llm_invoke - INFO - Loaded model data from package default
+INFO: Loaded model data from package default
+------------------------------ Captured log setup ------------------------------
+INFO     pdd.llm_invoke:llm_invoke.py:2252 Loaded model data from package default
+____________________________ test_cli_setup_command ____________________________
+
+self = <MagicMock name='auto_update' id='140453130801456'>, args = ()
+kwargs = {}, msg = "Expected 'auto_update' to be called once. Called 0 times."
+
+    def assert_called_once_with(self, /, *args, **kwargs):
+        """assert that the mock was called exactly once and that that call was
+        with the specified arguments."""
+        if not self.call_count == 1:
+            msg = ("Expected '%s' to be called once. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+>           raise AssertionError(msg)
+E           AssertionError: Expected 'auto_update' to be called once. Called 0 times.
+
+/usr/lib/python3.12/unittest/mock.py:955: AssertionError
+
+During handling of the above exception, another exception occurred:
+
+mock_auto_update = <MagicMock name='auto_update' id='140453130801456'>
+mock_install = <MagicMock name='install_completion' id='140453130799440'>
+mock_run = <MagicMock name='run' id='140453130764064'>
+_mock_reminder = <MagicMock name='_should_show_onboarding_reminder' id='140453130758928'>
+runner = <click.testing.CliRunner object at 0x7fbdcaf81eb0>
+
+    @patch('pdd.core.utils._should_show_onboarding_reminder', return_value=False)
+    @patch('pdd.core.utils.subprocess.run')
+    @patch('pdd.cli.install_completion')  # Patch the actual function, not cli_module
+    @patch('pdd.core.cli.auto_update')
+    def test_cli_setup_command(mock_auto_update, mock_install, mock_run, _mock_reminder, runner):
+        """`pdd setup` should install completions and run the setup utility."""
+        mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+    
+        result = runner.invoke(cli.cli, ["setup"])
+    
+        assert result.exit_code == 0
+>       mock_auto_update.assert_called_once_with()
+E       AssertionError: Expected 'auto_update' to be called once. Called 0 times.
+
+tests/test_commands_maintenance.py:538: AssertionError
+---------------------------- Captured stderr setup -----------------------------
+2026-05-29 01:53:40,344 - pdd.llm_invoke - INFO - Loaded model data from package default
+INFO: Loaded model data from package default
+------------------------------ Captured log setup ------------------------------
+INFO     pdd.llm_invoke:llm_invoke.py:2252 Loaded model data from package default
+=========================== short test summary info ============================
+FAILED tests/test_commands_maintenance.py::test_cli_auto_deps_strips_quotes - AssertionError: Expected 'auto_update' to be called once. Called 0 times.
+FAILED tests/test_commands_maintenance.py::test_cli_setup_command - AssertionError: Expected 'auto_update' to be called once. Called 0 times.
+========================= 2 failed, 29 passed in 1.61s =========================

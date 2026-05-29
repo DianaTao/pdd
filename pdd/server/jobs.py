@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import signal
 import subprocess
 import sys
 import re
@@ -18,27 +17,32 @@ from uuid import uuid4
 
 # Robust import for rich console
 try:
-    from rich.console import Console
-    console = Console()
+    from rich.console import Console as RichConsole
+    Console = RichConsole
 except ImportError:
-    class Console:
-        def print(self, *args, **kwargs):
+    class DummyConsole: # type: ignore
+        def print(self, *args: Any, **kwargs: Any) -> None:
             import builtins
             builtins.print(*args)
-    console = Console()
+    Console = DummyConsole # type: ignore
+console = Console()
 
 # Robust import for internal dependencies
 try:
-    from .click_executor import ClickCommandExecutor, get_pdd_command
+    from .click_executor import ClickCommandExecutor as ActualClickCommandExecutor, get_pdd_command as actual_get_pdd_command
+    ClickCommandExecutor = ActualClickCommandExecutor
+    get_pdd_command = actual_get_pdd_command
 except ImportError:
-    class ClickCommandExecutor:
-        def __init__(self, base_context_obj=None, output_callback=None):
+    class DummyClickCommandExecutor: # type: ignore
+        def __init__(self, base_context_obj: Any = None, output_callback: Any = None) -> None:
             pass
-        def execute(self, *args, **kwargs):
+        def execute(self, *args: Any, **kwargs: Any) -> Any:
             raise NotImplementedError("ClickCommandExecutor not available")
+    ClickCommandExecutor = DummyClickCommandExecutor # type: ignore
 
-    def get_pdd_command(name):
+    def dummy_get_pdd_command(name: str) -> Any: # type: ignore
         return None
+    get_pdd_command = dummy_get_pdd_command # type: ignore
 
 from .models import JobStatus
 
@@ -447,8 +451,8 @@ class JobManager:
     async def submit(
         self,
         command: str,
-        args: Dict[str, Any] = None,
-        options: Dict[str, Any] = None,
+        args: Optional[Dict[str, Any]] = None,
+        options: Optional[Dict[str, Any]] = None,
     ) -> Job:
         job = Job(
             command=command,

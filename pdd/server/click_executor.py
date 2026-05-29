@@ -13,8 +13,8 @@ from __future__ import annotations
 import io
 import os
 import sys
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Optional
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional
 from unittest.mock import MagicMock
 
 import click

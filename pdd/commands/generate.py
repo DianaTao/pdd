@@ -5,7 +5,7 @@ import re
 import sys
 import click
 from pathlib import Path
-from typing import Optional, Tuple, Dict, Any, List, Union
+from typing import Optional, Tuple, Dict, Any
 from rich.console import Console
 
 # Relative imports for internal modules
