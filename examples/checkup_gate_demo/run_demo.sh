@@ -33,8 +33,19 @@ pdd checkup coverage prompts/
 
 echo ""
 echo "==> 4/4  pdd checkup gate refund --json"
+set +e
 pdd checkup gate refund --json
+GATE_RC=$?
+set -e
 
 echo ""
 echo "Demo complete. Generated artifacts:"
 ls -la src/ tests/ examples/ user_stories/ .pdd/evidence/devunits/refund.latest.json 2>/dev/null || true
+
+if [[ "$GATE_RC" -ne 0 ]]; then
+  echo ""
+  echo "Gate exited $GATE_RC (expected when sync failed or stories/verify/tests"
+  echo "are not all recorded as pass on refund.latest.json)."
+  echo "Offline failure-code demo: ./demo_failed_sync_gate.py"
+  echo "Manual test plan: ./MANUAL_TESTS.md"
+fi

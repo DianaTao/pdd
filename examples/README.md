@@ -29,6 +29,7 @@ source ~/.zshrc  # or source ~/.bashrc / fish equivalent
 Branch `demo/checkup-gate-showcase` (or `feat/issue-825-gate` / PR #1260) adds `pdd checkup gate`.
 From `examples/checkup_gate_demo/`, only `prompts/refund_python.prompt` is hand-crafted;
 run `./run_demo.sh` to `pdd sync refund --evidence` then checkup contract/coverage/gate.
+Offline (no API): `./run_offline_checks.sh`, `./run_cli_smoke.sh`, `MANUAL_TESTS.md`.
 Offline policy demo: `python examples/checkup_gate_example.py`.
 See [docs/checkup_gate_demo.md](../docs/checkup_gate_demo.md).
 

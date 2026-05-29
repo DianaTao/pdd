@@ -47,11 +47,22 @@ Or: `./run_demo.sh`
 - `user_stories/story__*.md`
 - `.pdd/evidence/devunits/refund.latest.json`
 
-### Alternative explicit generate path (if not using sync)
+### Offline verification (no API)
+
+```bash
+./run_cli_smoke.sh
+./run_offline_checks.sh
+python demo_failed_sync_gate.py
+```
+
+See `MANUAL_TESTS.md` for the full human checklist.
+
+## Alternative explicit generate path (if not using sync)
 
 ```bash
 pdd generate prompts/refund_python.prompt --output src/refund.py --evidence
 pdd test --manual prompts/refund_python.prompt src/refund.py --evidence
+# Writes stories.latest.json only — does not update refund.latest.json
 pdd detect --stories --evidence
 pdd sync refund --evidence
 pdd checkup contract check prompts/

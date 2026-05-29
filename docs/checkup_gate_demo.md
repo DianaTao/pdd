@@ -36,6 +36,7 @@ If you prefer separate steps before gate:
 ```bash
 pdd generate prompts/refund_python.prompt --output src/refund.py --evidence
 pdd test --manual prompts/refund_python.prompt src/refund.py --evidence
+# detect --stories writes stories.latest.json (not refund); see MANUAL_TESTS.md
 pdd detect --stories --evidence
 pdd sync refund --evidence
 pdd checkup contract check prompts/
@@ -50,6 +51,15 @@ pdd checkup gate refund --json
 ## Offline tests
 
 ```bash
+cd examples/checkup_gate_demo
+./run_offline_checks.sh
+```
+
+Or from repo root:
+
+```bash
 pytest -vv tests/test_checkup_gate_demo.py tests/test_gate_main.py
 python examples/checkup_gate_example.py
 ```
+
+Human checklist: `examples/checkup_gate_demo/MANUAL_TESTS.md`.

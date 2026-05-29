@@ -43,6 +43,20 @@ pdd checkup coverage prompts/
 pdd checkup gate refund --json
 ```
 
+## Human-runnable tests (no API)
+
+```bash
+./run_cli_smoke.sh          # --evidence on sync; gate under checkup; cwd layout
+./run_offline_checks.sh     # pytest + offline scenarios + failed-sync gate demo
+python demo_failed_sync_gate.py   # same failure codes as a failed sync run
+```
+
+Full checklist: [MANUAL_TESTS.md](MANUAL_TESTS.md).
+
+**Note:** `pdd detect --stories --evidence` writes `stories.latest.json`, not
+`refund.latest.json`, so it does not satisfy `stories_pass` on
+`pdd checkup gate refund` until sync records stories on the refund manifest.
+
 ## Agent prompt
 
 `agent.prompt` — copy-paste instructions for coding agents.
@@ -52,7 +66,8 @@ pdd checkup gate refund --json
 Does not run sync; exercises policy logic only:
 
 ```bash
-python ../../examples/checkup_gate_example.py
+./run_offline_checks.sh
+# or: python ../../examples/checkup_gate_example.py
 ```
 
 See [docs/checkup_gate_demo.md](../../docs/checkup_gate_demo.md).
