@@ -7110,8 +7110,8 @@
           },
           {
             "name": "verify_auth",
-            "signature": "() -> bool",
-            "returns": "bool",
+            "signature": "async def verify_auth() -> Dict[str, Any]",
+            "returns": "Dict[str, Any]",
             "sideEffects": [
               "None"
             ]

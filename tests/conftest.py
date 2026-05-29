@@ -203,6 +203,24 @@ def isolate_cloud_only_overrides(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_pdd_env(monkeypatch):
+    """Clear all PDD_* and cloud detection environment variables before each test.
+    
+    This ensures that developer-specific settings (like PDD_CLOUD_URL, 
+    PDD_AGENTIC_PROVIDER, etc.) and environment signals (like K_SERVICE for
+    Cloud Run) don't leak into tests and cause non-deterministic
+    failures or incorrect branching behavior.
+    """
+    # Keep PDD_RUN_ALL_TESTS as it's driven by --run-all flag in conftest
+    # Keep PDD_PATH as it has its own preserve_pdd_path fixture
+    exempt = {"PDD_RUN_ALL_TESTS", "PDD_PATH"}
+    
+    for key in list(os.environ.keys()):
+        if (key.startswith("PDD_") and key not in exempt) or key == "K_SERVICE":
+            monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_provider_env(monkeypatch):
     """Clear every provider credential env var the OpenCode code path consults.
 

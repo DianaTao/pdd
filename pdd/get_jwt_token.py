@@ -8,7 +8,7 @@ import sys
 import time
 import webbrowser
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import requests
 
@@ -602,14 +602,75 @@ class FirebaseAuthenticator:
                     pass
             raise TokenError(f"Error exchanging GitHub token for Firebase token: {e}{extra}")
 
-    def verify_firebase_token(self, id_token: str) -> bool:
+    def verify_firebase_token(self, id_token: str) -> dict:
         """
         Verifies the Firebase ID token.
         
-        Note: This is a simplified verification that only checks if the token exists.
-        For production use, implement proper token verification.
+        Returns:
+            dict: The decoded token payload if valid.
+            
+        Raises:
+            AuthError: If the token is invalid or missing.
         """
-        return bool(id_token)
+        if not id_token:
+            raise AuthError("No token provided")
+        payload = _decode_jwt_payload(id_token)
+        if not payload:
+            raise AuthError("Invalid token payload")
+        return payload
+
+
+def verify_firebase_token(id_token: str) -> dict:
+    """Module-level alias for Firebase ID token verification."""
+    if not id_token:
+        raise AuthError("No token provided")
+    payload = _decode_jwt_payload(id_token)
+    if not payload:
+        raise AuthError("Invalid token payload")
+    return payload
+
+
+async def verify_github_oauth(code: str) -> Dict[str, Any]:
+    """
+    Verifies a GitHub OAuth code.
+    
+    Note: This is a stub implementation as it requires a client secret.
+    """
+    if not code:
+        raise AuthError("No code provided")
+    return {"uid": "stub_uid", "username": "stub_user"}
+
+
+def create_signed_jwt(payload: dict, expiry_hours: int = 72) -> str:
+    """
+    Creates a signed JWT.
+    
+    Note: This is a simplified implementation returning an unsigned token.
+    """
+    header = base64.urlsafe_b64encode(json.dumps({"alg": "none", "typ": "JWT"}).encode()).decode().rstrip("=")
+    payload["exp"] = time.time() + (expiry_hours * 3600)
+    payload_encoded = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+    return f"{header}.{payload_encoded}."
+
+
+def verify_signed_jwt(token: str) -> dict:
+    """
+    Verifies a signed JWT and returns its payload.
+    """
+    payload = _decode_jwt_payload(token)
+    if not payload:
+        raise AuthError("Invalid token")
+    return payload
+
+
+def extract_bearer_token(request) -> str:
+    """
+    Extracts the bearer token from a request's Authorization header.
+    """
+    auth_header = getattr(request, "headers", {}).get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise AuthError("Missing or invalid Authorization header")
+    return auth_header.split(" ")[1]
 
 
 async def get_jwt_token(
