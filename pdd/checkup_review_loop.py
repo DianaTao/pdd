@@ -43,13 +43,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from rich.console import Console
 
 from .agentic_change import _run_gh_command
-from .agentic_checkup_orchestrator import (
-    _get_git_root,
-    _refresh_pr_base_ref,
-    _setup_pr_worktree,
-)
 from .agentic_common import DEFAULT_MAX_RETRIES, run_agentic_task
-from .agentic_e2e_fix_orchestrator import push_with_retry
 from .architecture_registry import extract_modules
 
 logger = logging.getLogger(__name__)
@@ -815,6 +809,11 @@ def run_checkup_review_loop(
     All reviewer/fixer/verifier roles run with the loop-owned worktree as their
     ``cwd`` — the user's primary checkout is never touched.
     """
+    from .agentic_checkup_orchestrator import (
+        _refresh_pr_base_ref,
+        _setup_pr_worktree,
+    )
+
     reviewer, fixer, role_error = _resolve_roles(config)
     roles = [reviewer] if config.review_only or fixer == reviewer else [reviewer, fixer]
     if role_error:
@@ -5407,6 +5406,7 @@ def _commit_and_push_if_changed(
     rather than creating a redundant PDD-Bot commit on top — preserving
     the original author/message (e.g., ``Codex Local Autoheal``).
     """
+    from .agentic_e2e_fix_orchestrator import push_with_retry
     changed = _git_changed_files(worktree)
     current_head = _git_rev_parse_head(worktree)
     # Codex review finding F2: compute HEAD-movement INDEPENDENTLY of
@@ -6705,6 +6705,7 @@ def _is_untracked_pdd_meta_artifact(path: str) -> bool:
 
 
 def _artifacts_dir(cwd: Path, issue_number: int, pr_number: int) -> Path:
+    from .agentic_checkup_orchestrator import _get_git_root
     root = _get_git_root(cwd) or cwd
     return (
         root / ".pdd" / "checkup-review-loop" / f"issue-{issue_number}-pr-{pr_number}"

@@ -1,3 +1,23 @@
+<pdd-reason>Update architecture.json dependencies after auto-deps inserts new module <include> tags.</pdd-reason>
+
+<pdd-interface>
+{
+  "type": "module",
+  "module": {
+    "functions": [
+      {"name": "extract_include_paths_from_prompt_text", "signature": "(text: str)", "returns": "Set[str]"},
+      {"name": "merge_auto_deps_includes_into_architecture", "signature": "(project_root: Path, written_prompt_path: Path, old_prompt_text: str, new_prompt_text: str, *, dry_run: bool = False)", "returns": "Dict[str, Any]"},
+      {"name": "merge_auto_deps_includes_from_cwd", "signature": "(written_prompt_path: Path, old_prompt_text: str, new_prompt_text: str, *, dry_run: bool = False)", "returns": "Dict[str, Any]"}
+    ]
+  }
+}
+</pdd-interface>
+
+<pdd-dependency>architecture_include_validation_python.prompt</pdd-dependency>
+<pdd-dependency>architecture_registry_python.prompt</pdd-dependency>
+<pdd-dependency>sync_order_python.prompt</pdd-dependency>
+<pdd-dependency>architecture_sync_python.prompt</pdd-dependency>
+
 % Module: auto_deps_architecture_sync
 % Purpose: Update architecture.json dependencies after auto-deps inserts new module <include> tags.
 

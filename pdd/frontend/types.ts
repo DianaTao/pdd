@@ -11,6 +11,7 @@ export enum CommandType {
   VERIFY = 'verify',
   SUBMIT_EXAMPLE = 'submit-example',
   // Advanced operations
+  CHECKUP = 'checkup',
   SPLIT = 'split',
   CHANGE = 'change',
   DETECT = 'detect',

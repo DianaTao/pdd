@@ -12,26 +12,16 @@ from typing import Optional, Tuple, Dict, Any, List
 
 import click
 
-# Import Rich for pretty printing
-from rich import print as rprint
-from rich.panel import Panel
-
 # Use relative imports for internal modules
 from .config_resolution import resolve_effective_config
 from .construct_paths import construct_paths
 from .change import change as change_func
 from .process_csv_change import process_csv_change
 from .get_extension import get_extension
-from .user_story_tests import run_user_story_tests, discover_prompt_files
 from .validate_prompt_includes import sanitize_prompt_output
 
 # Set up logging
 logger = logging.getLogger(__name__)
-# Ensure logger propagates messages to the root logger configured in the main CLI entry point
-# If not configured elsewhere, uncomment the following lines:
-# logging.basicConfig(level=logging.INFO,
-#                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-# logger.setLevel(logging.DEBUG)
 
 
 def change_main(
@@ -48,7 +38,7 @@ def change_main(
 
     Modifies an input prompt file based on instructions in a change prompt,
     using the corresponding code file as context. Supports single file changes
-    and batch changes via CSV.
+    and batch processing via CSV mode.
 
     Args:
         ctx: The Click context object.
@@ -65,6 +55,12 @@ def change_main(
         - float: Total cost of the operation.
         - str: Name of the model used.
     """
+    # Lazy imports for Rich
+    from rich import print as rprint
+    from rich.panel import Panel
+
+    from .user_story_tests import run_user_story_tests, discover_prompt_files
+
     logger.debug("Starting change_main with use_csv=%s", use_csv)
     logger.debug("  change_prompt_file: %s", change_prompt_file)
     logger.debug("  input_code: %s", input_code)
