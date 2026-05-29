@@ -1,0 +1,10 @@
+<!-- A0: hand-crafted informal prompt (human baseline before formalization) -->
+
+Write a small Python dev unit named refund_payment.
+
+Requirements:
+- Put the main function in refund_demo/refund_payment.py as refund_payment(amount: int) -> int.
+- Use a helper module refund_demo/helper.py with adjust(amount) that returns amount plus one.
+- refund_payment should return adjust(amount).
+
+Keep the public API as a single function: refund_payment.

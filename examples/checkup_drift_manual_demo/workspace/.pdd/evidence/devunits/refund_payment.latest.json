@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "prompt": {
+    "path": "prompts/refund_payment_python.prompt"
+  },
+  "outputs": [
+    {
+      "path": "refund_demo/refund_payment.py",
+      "sha256": "2ffbc6dfeb9f5b840acdc25f1c59911ad576a5aaf2ffce75c6042a0327106125"
+    }
+  ],
+  "validation": {
+    "detect_stories": "not_available",
+    "verify": "not_available",
+    "unit_tests": "pass"
+  }
+}

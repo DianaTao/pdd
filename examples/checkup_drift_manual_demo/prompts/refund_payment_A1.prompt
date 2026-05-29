@@ -1,0 +1,29 @@
+<!-- A1: PDD-formalized prompt (structured; used as generation input after A0→A1) -->
+
+<pdd-reason>
+Manual drift demo dev unit: refund_payment with a sibling helper import for overlay pytest checks.
+</pdd-reason>
+
+<pdd-interface>
+{
+  "type": "module",
+  "module": {
+    "functions": [
+      {
+        "name": "refund_payment",
+        "signature": "(amount: int) -> int",
+        "returns": "int",
+        "doc": "Return amount adjusted by the local helper."
+      }
+    ]
+  }
+}
+</pdd-interface>
+
+Implement ``refund_payment`` in ``refund_demo/refund_payment.py``.
+
+- Import ``adjust`` from ``refund_demo.helper``.
+- Return ``adjust(amount)``.
+- Do not change the public API name or signature.
+
+The helper ``refund_demo/helper.py`` already defines ``adjust(amount: int) -> int`` as ``amount + 1``.
