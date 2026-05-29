@@ -16,7 +16,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from lxml import etree
+from lxml import etree  # type: ignore
 
 from .architecture_registry import (
     extract_modules,
@@ -193,7 +193,7 @@ def parse_prompt_tags(prompt_content: str) -> Dict[str, Any]:
         >>> result['dependencies']
         ['path_resolution_python.prompt']
     """
-    result = {
+    result: Dict[str, Any] = {
         'reason': None,
         'interface': None,
         'dependencies': [],
@@ -216,7 +216,7 @@ def parse_prompt_tags(prompt_content: str) -> Dict[str, Any]:
         # If ordinary prose appears before any tag-ish header content, treat the
         # file as having no metadata header so example tags in the body are
         # ignored.
-        header_lines = []
+        header_lines: List[str] = []
         started_header = False
         in_erb_comment = False
         in_xml_comment = False
@@ -586,9 +586,9 @@ def register_untracked_prompts(
     existing_filenames = {m.get('filename') for m in arch_data}
     max_priority = max((m.get('priority', 0) for m in arch_data), default=0)
 
-    registered = []
-    skipped = []
-    errors = []
+    registered: List[str] = []
+    skipped: List[str] = []
+    errors: List[str] = []
 
     for prompt_file in sorted(prompts_dir.rglob('*.prompt')):
         try:
@@ -635,6 +635,7 @@ def register_untracked_prompts(
         registered.append(filename)
 
     if registered and not dry_run:
+        write_data: Any
         if isinstance(raw_arch, dict) and isinstance(raw_arch.get("modules"), list):
             raw_arch["modules"] = arch_data
             write_data = raw_arch
@@ -805,6 +806,8 @@ def _merge_function_signature(
             f"Used new signature for function '{function_name}' because neither signature could be parsed for merge."
         ]
 
+    assert old_info is not None
+    assert new_info is not None
     old_params = old_info['parameters']
     new_params = new_info['parameters']
 
@@ -985,6 +988,7 @@ def update_architecture_from_prompt(
                         mod['filepath'] = f'prompts/{new_filename}'
                     mod['filename'] = new_filename
                     if not dry_run:
+                        rename_write: Any
                         if isinstance(raw_rename, dict) and isinstance(raw_rename.get("modules"), list):
                             raw_rename["modules"] = arch_data_for_rename
                             rename_write = raw_rename
@@ -1089,8 +1093,10 @@ def update_architecture_from_prompt(
 
         # 6. Write back to architecture.json (if updated and not dry run)
         if updated and not dry_run:
+            assert module_index is not None
             arch_data[module_index] = module_entry
             raw_on_disk = json.loads(architecture_path.read_text(encoding='utf-8'))
+            write_data: Any
             if isinstance(raw_on_disk, dict) and isinstance(raw_on_disk.get("modules"), list):
                 raw_on_disk["modules"] = arch_data
                 write_data = raw_on_disk

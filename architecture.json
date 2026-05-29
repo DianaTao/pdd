@@ -8469,6 +8469,40 @@
     }
   },
   {
+    "reason": "Regeneration stability checks for PDD dev units (pdd checkup drift).",
+    "description": "Orchestrates regeneration stability checks to detect drift in code/behavior/API. Supports multiple runs, cost tracking, and policy gate evaluation.",
+    "dependencies": [
+      "evidence_store_python.prompt",
+      "evidence_manifest_python.prompt",
+      "gate_main_python.prompt",
+      "user_story_tests_python.prompt"
+    ],
+    "priority": 75,
+    "filename": "drift_main_python.prompt",
+    "filepath": "pdd/drift_main.py",
+    "tags": [
+      "backend",
+      "checkup",
+      "drift-detection"
+    ],
+    "interface": {
+      "type": "module",
+      "module": {
+        "functions": [
+          {
+            "name": "run_drift",
+            "signature": "(devunit: str, project_root: Path, runs: int = 1, model: Optional[str] = None, from_evidence: Optional[Path] = None, code_file: Optional[Path] = None, dry_run: bool = False, max_cost_usd: Optional[float] = None)",
+            "returns": "DriftReport"
+          }
+        ]
+      }
+    },
+    "position": {
+      "x": 14100,
+      "y": 2000
+    }
+  },
+  {
     "reason": "Standalone CI script for detecting and auto-healing prompt/example drift with budget-capped execution.",
     "description": "CI script that detects prompt/example drift across PDD modules using sync_determine_operation, optionally reclassifies auto-deps/generate drift against a git diff base, skips existing review-only example rewrites in PR auto-heal, heals drifted modules via pdd update/sync/example subprocesses, tracks LLM costs against a budget cap, and commits/pushes checkpointed changes automatically.",
     "dependencies": [

@@ -2000,6 +2000,32 @@ def test_multiline_interface_json():
     assert len(funcs[0]['sideEffects']) == 3
 
 
+def test_merge_function_signature_basic():
+    """Verify that _merge_function_signature correctly merges parameters (Issue #1152)."""
+    from pdd.architecture_sync import _merge_function_signature
+    old_sig = "def test(a: int, b: str = 'default') -> None"
+    new_sig = "def test(a: int, c: bool) -> None"
+    # Merged should have a, b (from old), and c (from new)
+    merged, warnings = _merge_function_signature(old_sig, new_sig, "test")
+    assert "a: int" in merged
+    assert "b: str = 'default'" in merged
+    assert "c: bool" in merged
+    assert "-> None" in merged
+    assert len(warnings) > 0
+    assert "Preserved existing parameter 'b'" in warnings[0]
+
+
+def test_merge_function_signature_incompatible_rejected():
+    """Verify that incompatible signatures are rejected to prevent cross-class contamination."""
+    from pdd.architecture_sync import _merge_function_signature
+    old_sig = "def save(self, data: dict)"
+    new_sig = "def render(self, template: str)"
+    # These share no non-trivial params, so old_sig should be kept
+    merged, warnings = _merge_function_signature(old_sig, new_sig, "save")
+    assert merged == old_sig
+    assert any("Rejected incompatible signature" in w for w in warnings)
+
+
 def test_concurrent_updates_different_modules():
     """Test that updating different modules doesn't interfere."""
     with tempfile.TemporaryDirectory() as tmpdir:

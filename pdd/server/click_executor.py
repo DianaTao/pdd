@@ -256,7 +256,7 @@ def _convert_option_type(key: str, value: Any) -> Any:
     return value
 
 
-def _get_command_positional_args(command: click.Command) -> List[str]:
+def _get_command_positional_args(command: click.Command) -> list[str]:
     """Extract positional argument names from Click command in order."""
     positionals = []
     for param in command.params:

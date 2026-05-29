@@ -8,7 +8,7 @@ import stat
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Set, Optional, Dict, List, Tuple, Deque
+from typing import Set, Optional, Dict, List, Tuple, Deque, Iterator
 from collections import deque, defaultdict
 
 from rich.console import Console
@@ -356,7 +356,7 @@ def compute_sccs(graph: Dict[str, List[str]]) -> List[List[str]]:
         if start in index_of:
             continue
         # Push initial frame.
-        work_stack: List[Tuple[str, "iter", Optional[str]]] = []
+        work_stack: List[Tuple[str, Iterator[str], Optional[str]]] = []
         index_of[start] = next_index
         lowlink[start] = next_index
         next_index += 1

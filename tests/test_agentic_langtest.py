@@ -126,3 +126,14 @@ def test_missing_tool_hints_returns_none_when_no_cmd():
     """missing_tool_hints returns None when verify_cmd is None."""
     hint = missing_tool_hints("java", None, Path("."))
     assert hint is None
+
+
+def test_default_verify_cmd_for_python_uses_sys_executable():
+    """Verify that the Python test command uses the current sys.executable (Issue #1152)."""
+    import sys
+    from unittest.mock import patch
+    # Mock CSV lookup to return nothing so it falls back to hardcoded Python
+    with patch("pdd.agentic_langtest._load_language_format_by_name", return_value={}):
+        cmd = default_verify_cmd_for("python", "test.py")
+    assert cmd is not None
+    assert cmd.startswith(sys.executable)
