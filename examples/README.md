@@ -25,6 +25,24 @@ source ~/.zshrc  # or source ~/.bashrc / fish equivalent
 
 ## Available Examples
 
+### Contract-rule test generation (Issue #821)
+The [`contract_rule_test_demo`](contract_rule_test_demo/) directory is a **manual test plan** for PR #1283 (`feat/issue-821-contract-rule-tests`). It walks through individual terminal commands (`pdd test`, pytest, preprocess checks) and explains what each step validates.
+
+```bash
+export PDD_PATH="$PWD/pdd"
+export REPO_ROOT="$PWD"
+# Follow numbered tests in:
+cat examples/contract_rule_test_demo/README.md
+```
+
+Primary live command:
+
+```bash
+cd examples/contract_rule_test_demo/workspace   # after Test 4 setup
+pdd --local test --manual refund_policy_python.prompt src/refund_policy.py \
+  --existing-tests tests/test_refund_policy.py --merge
+```
+
 ### Agentic Fallback
 The agentic fallback example demonstrates using agentic fallback to resolve cross-file dependencies during automated debugging.  
 The example has two files — `src/main.py` and `src/utils.py` — where `main.py` fails without reading `utils.py`.  
