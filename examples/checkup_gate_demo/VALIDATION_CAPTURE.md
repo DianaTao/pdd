@@ -111,3 +111,13 @@ CLEAN=1 ./run_demo.sh    # continues through gate after sync fix
 # or manually after sync:
 pdd checkup gate refund --json
 ```
+
+## Debug notes: can gate pass after failed sync?
+
+| Scenario | Gate `passed` under default policy? | Status |
+|----------|-------------------------------------|--------|
+| Normal failed sync writes fresh manifest (`unit_tests: failed`, etc.) | **false** | Working as designed (this capture) |
+| Stale `refund.latest.json` from an older successful run, new sync throws before `--evidence` write | **true** (bug) | Fixed: sync `--evidence` now refreshes manifest on exception |
+| Inconsistent `overall_success: true` with `success: false` in language results | could mark tests **passed** (bug) | Fixed: `validation_from_sync` prefers per-language outcomes |
+
+Regression tests: `tests/test_gate_failed_sync.py`.
