@@ -32,11 +32,20 @@ fi
 
 echo ""
 echo "==> 2/4  pdd checkup contract check prompts/"
+set +e
 pdd checkup contract check prompts/
+CONTRACT_RC=$?
+set -e
 
 echo ""
 echo "==> 3/4  pdd checkup coverage prompts/"
+set +e
 pdd checkup coverage prompts/
+COV_RC=$?
+set -e
+if [[ "$COV_RC" -ne 0 ]]; then
+  echo "Coverage exited $COV_RC (continuing; test-only rules are advisory)."
+fi
 
 echo ""
 echo "==> 4/4  pdd checkup gate refund --json"

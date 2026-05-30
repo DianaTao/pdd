@@ -3,19 +3,19 @@
 Auditable output for PR [#1260](https://github.com/promptdriven/pdd/pull/1260) /
 evidence [#1256](https://github.com/promptdriven/pdd/pull/1256).
 
-**Branch:** `demo/checkup-gate-showcase`  
-**Captured:** 2026-05-30 (isolated worktree, no changes to other feature branches)  
-**Environment:** macOS, Python 3.13, `pdd` 0.0.255.dev0 (editable install), `CI=1`, `PDD_SKIP_UPDATE_CHECK=1`
+**Branch:** `demo/checkup-gate-showcase` (`15cc1eaab` + rerun fixes)  
+**Captured:** 2026-05-30 (isolated worktree `/tmp/pdd-gate-demo`)  
+**Environment:** macOS, Python 3.13, `pdd` 0.0.255.dev0 (editable), `CI=1`, `PDD_SKIP_UPDATE_CHECK=1`
 
-## Commands and exit codes
+## Commands and exit codes (re-run with fixes)
 
 | Step | Command | Exit code | Notes |
 |------|---------|-----------|-------|
-| Offline | `./run_offline_checks.sh` | **0** | 24 pytest passed; offline gate scenarios OK |
-| Live (partial script) | `CLEAN=1 ./run_demo.sh` | **1** | Stopped after step 3 because `set -e` + failed sync (see fix in `run_demo.sh`) |
+| Offline | `./run_offline_checks.sh` | **0** | 31 pytest passed (incl. `test_gate_failed_sync.py`) |
+| Live full | `CLEAN=1 ./run_demo.sh` | **0** | All 4 steps complete (see below) |
 | Live sync | `pdd sync refund --evidence` | **1** | Failed: coverage 0.0% below target 90.0% |
 | Live contract | `pdd checkup contract check prompts/` | **0** | 0 errors |
-| Live coverage | `pdd checkup coverage prompts/` | **0** | 2/3 rules checked |
+| Live coverage | `pdd checkup coverage prompts/` | **1** | 2/3 checked; exits 1 for test-only R3 (advisory) |
 | Live gate | `pdd checkup gate refund --json` | **1** | `passed: false` (see JSON below) |
 
 ## Live sync summary (step 1)
@@ -23,7 +23,7 @@ evidence [#1256](https://github.com/promptdriven/pdd/pull/1256).
 ```
 Overall status: Failed
 Details: Sync failed: Coverage 0.0% below target 90.0% after 2 test_extend attempts
-Total time: 197.18s | Total cost: $0.6464
+Total time: 68.06s | Total cost: $0.6464
 Evidence manifest: .pdd/evidence/devunits/refund.latest.json
 ```
 
@@ -40,6 +40,23 @@ Manifest validation recorded:
 ## Live gate JSON (`pdd checkup gate refund --json`)
 
 **Exit code: 1**
+
+```json
+{
+  "passed": false,
+  "exit_code": 1,
+  "manifests_checked": 1,
+  "failures": [
+    {"code": "stories_pass"},
+    {"code": "verify_not_available"},
+    {"code": "unit_tests_pass"}
+  ]
+}
+```
+
+**`failures[].code`:** `stories_pass`, `verify_not_available`, `unit_tests_pass`
+
+Full JSON (same as prior capture):
 
 ```json
 {
@@ -86,16 +103,21 @@ Manifest validation recorded:
 }
 ```
 
-**`failures[].code`:** `stories_pass`, `verify_not_available`, `unit_tests_pass`
+## Fixes applied before this re-run
 
-## Interpretation (gate working as designed)
+1. **`validation_from_sync`** — prefer per-language `success` over stale top-level `overall_success`.
+2. **`pdd sync --evidence`** — write failure manifest when `sync_main` raises (prevents stale pass manifest).
+3. **`run_demo.sh`** — continue through coverage exit 1 and failed sync to always reach gate step.
 
-- Sync failed on test coverage → manifest honestly records `unit_tests: failed`.
-- Verify step did not complete in sync → `verify: not_available`.
-- Story detection is not part of sync → `detect_stories: not_applicable`.
-- Default policy is fail-closed → gate returns `passed: false` with stable failure codes.
+Regression: `tests/test_gate_failed_sync.py` (7 tests).
 
-This matches the offline failed-sync demo (`python demo_failed_sync_gate.py`) and unit tests in `tests/test_checkup_gate_demo.py`.
+## Debug notes: can gate pass after failed sync?
+
+| Scenario | Gate `passed` under default policy? | Status |
+|----------|-------------------------------------|--------|
+| Normal failed sync writes fresh manifest | **false** | Working as designed (this capture) |
+| Stale manifest + sync throws before evidence write | **true** (was bug) | **Fixed** — exception path writes manifest |
+| Inconsistent `overall_success: true` + lang `success: false` | could mark tests passed (was bug) | **Fixed** — per-language outcomes win |
 
 ## Reproduce
 
@@ -107,17 +129,5 @@ pip install -e "../..[dev]"
 export PDD_SKIP_UPDATE_CHECK=1 PDD_AUTO_UPDATE=false CI=1
 
 ./run_offline_checks.sh
-CLEAN=1 ./run_demo.sh    # continues through gate after sync fix
-# or manually after sync:
-pdd checkup gate refund --json
+CLEAN=1 ./run_demo.sh
 ```
-
-## Debug notes: can gate pass after failed sync?
-
-| Scenario | Gate `passed` under default policy? | Status |
-|----------|-------------------------------------|--------|
-| Normal failed sync writes fresh manifest (`unit_tests: failed`, etc.) | **false** | Working as designed (this capture) |
-| Stale `refund.latest.json` from an older successful run, new sync throws before `--evidence` write | **true** (bug) | Fixed: sync `--evidence` now refreshes manifest on exception |
-| Inconsistent `overall_success: true` with `success: false` in language results | could mark tests **passed** (bug) | Fixed: `validation_from_sync` prefers per-language outcomes |
-
-Regression tests: `tests/test_gate_failed_sync.py`.

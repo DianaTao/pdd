@@ -28,7 +28,7 @@ echo "    OK"
 echo ""
 echo "==> 2/4  pytest (demo + gate unit tests)"
 cd "$REPO"
-python -m pytest -vv tests/test_checkup_gate_demo.py tests/test_gate_main.py
+python -m pytest -vv tests/test_checkup_gate_demo.py tests/test_gate_main.py tests/test_gate_failed_sync.py
 cd "$DEMO"
 
 echo ""
