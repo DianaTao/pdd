@@ -21,7 +21,14 @@ fi
 
 echo "==> 1/4  pdd sync refund --evidence"
 echo "     (generates src/, tests/, examples/, user_stories/ from the prompt)"
+set +e
 pdd sync refund --evidence
+SYNC_RC=$?
+set -e
+if [[ "$SYNC_RC" -ne 0 ]]; then
+  echo ""
+  echo "Sync exited $SYNC_RC (continuing to contract/coverage/gate for audit output)."
+fi
 
 echo ""
 echo "==> 2/4  pdd checkup contract check prompts/"

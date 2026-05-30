@@ -53,6 +53,8 @@ python demo_failed_sync_gate.py   # same failure codes as a failed sync run
 
 Full checklist: [MANUAL_TESTS.md](MANUAL_TESTS.md).
 
+**Captured live output:** [VALIDATION_CAPTURE.md](VALIDATION_CAPTURE.md) (PR audit trail).
+
 **Note:** `pdd detect --stories --evidence` writes `stories.latest.json`, not
 `refund.latest.json`, so it does not satisfy `stories_pass` on
 `pdd checkup gate refund` until sync records stories on the refund manifest.
