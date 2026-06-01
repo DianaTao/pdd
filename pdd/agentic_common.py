@@ -2140,16 +2140,29 @@ def run_agentic_task(
     prompt_filename = f".agentic_prompt_{uuid.uuid4().hex[:8]}.txt"
     prompt_path = cwd / prompt_filename
 
-    # Inject user feedback (steers)
+    # Inject user feedback from a prior attempt (GitHub App / orchestrator env)
+    user_feedback = os.environ.get("PDD_USER_FEEDBACK")
+    feedback_section = ""
+    if user_feedback:
+        feedback_section = (
+            "\n\n## User Feedback\n"
+            "The user provided the following feedback from a previous execution attempt. "
+            "Factor this into your response:\n"
+            f"{user_feedback}\n"
+        )
+
+    # Inject mid-run steers (orchestrator drains issue comments between steps)
     steering_section = ""
     if steers:
         steering_section = "\n\n## Steered user input (mid-run)\n"
-        steering_section += "The following comments arrived during this run. Factor them into this step:\n"
+        steering_section += (
+            "The following comments arrived during this run. Factor them into this step:\n"
+        )
         for steer in steers:
             steering_section += f"- @{steer.author} ({steer.comment_id}): {steer.body}\n"
 
     full_instruction = (
-        f"{instruction}{steering_section}\n\n"
+        f"{instruction}{feedback_section}{steering_section}\n\n"
         "You have full file access to explore and modify files as needed."
     )
 
@@ -3796,14 +3809,28 @@ def drain_issue_steers(
         try:
             entries = json.loads(steer_json)
             if isinstance(entries, list):
+                try:
+                    last_id_val = int(state.get("last_steered_comment_id") or -1)
+                except (ValueError, TypeError):
+                    last_id_val = -1
+                max_id_val = last_id_val
                 for entry in entries:
+                    cid_raw = entry.get("comment_id", "")
+                    try:
+                        cid_val = int(cid_raw)
+                    except (ValueError, TypeError):
+                        continue
+                    if cid_val <= last_id_val:
+                        continue
                     steers.append(SteerEntry(
-                        comment_id=str(entry.get("comment_id", "")),
+                        comment_id=str(cid_val),
                         author=entry.get("author", "unknown"),
-                        body=entry.get("body", "")
+                        body=entry.get("body", ""),
                     ))
+                    if cid_val > max_id_val:
+                        max_id_val = cid_val
                 if steers:
-                    # Env-based steers increment generation for idempotency
+                    state["last_steered_comment_id"] = str(max_id_val)
                     state["steer_generation"] = state.get("steer_generation", 0) + 1
                     return steers
         except json.JSONDecodeError:

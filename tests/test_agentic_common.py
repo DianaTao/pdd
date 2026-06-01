@@ -2962,6 +2962,23 @@ def test_drain_issue_steers_from_env(mock_cwd):
         os.environ.pop("PDD_STEER_JSON", None)
 
 
+def test_drain_issue_steers_env_idempotent(mock_cwd):
+    """Same PDD_STEER_JSON comment_id is not returned twice after state update."""
+    from pdd.agentic_common import drain_issue_steers
+
+    steer_data = [{"comment_id": "101", "author": "charlie", "body": "Hello"}]
+    os.environ["PDD_STEER_JSON"] = json.dumps(steer_data)
+    try:
+        state = {}
+        first = drain_issue_steers("owner", "repo", 55, state, cwd=mock_cwd)
+        second = drain_issue_steers("owner", "repo", 55, state, cwd=mock_cwd)
+        assert len(first) == 1
+        assert len(second) == 0
+        assert state["last_steered_comment_id"] == "101"
+    finally:
+        os.environ.pop("PDD_STEER_JSON", None)
+
+
 def test_drain_issue_steers_from_github(mock_cwd, mock_subprocess, mock_shutil_which):
     """Test fetching steers from GitHub comments."""
     from pdd.agentic_common import drain_issue_steers
