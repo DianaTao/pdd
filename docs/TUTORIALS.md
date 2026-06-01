@@ -125,11 +125,64 @@ This tutorial walks through implementing a GitHub issue using PDD.
 - Install `playwright-cli` to enable browser-based exploratory testing (Steps 6-11). Without it, these steps are skipped with a warning.
 - Set `PDD_CLOUD_RUN=true` for parallel execution via Cloud Batch (GitHub App mode).
 
+### Method 5: Generating Architecture from a PRD (GitHub Issue)
+
+Instead of manually writing `architecture.json`, you can point `pdd generate` at a GitHub issue containing your PRD. An 11-step agentic workflow will analyze the PRD, research the tech stack, generate `architecture.json`, create `.pddrc` configuration, and produce prompt files for each module.
+
+#### Prerequisites
+
+1. `gh` CLI installed and authenticated (`gh auth login`)
+2. A GitHub issue containing your PRD (title, goals, features, tech stack)
+
+#### Steps
+
+1. **Create a GitHub issue** with your PRD content:
+   - Title: Project name or feature area
+   - Body: Goals, key features, non-functional requirements, tech stack preferences
+
+2. **Run the agentic generate command**:
+   ```bash
+   pdd generate https://github.com/myorg/myrepo/issues/42
+   ```
+
+3. **Monitor progress**: The workflow posts step-by-step progress as issue comments:
+   - Analyzes your PRD for features and tech stack
+   - Researches documentation and best practices
+   - Designs the module breakdown with dependency ordering
+   - Generates `architecture.json` and `.pddrc` configuration
+   - Creates prompt files for each module
+   - Validates completeness, sync configuration, and dependencies
+
+4. **Review the output**: The workflow produces:
+   - `architecture.json` - Module definitions with priorities and dependencies
+   - `architecture_diagram.html` - Interactive Mermaid visualization
+   - `.pddrc` - Project configuration with context-specific paths
+   - `prompts/*.prompt` - Prompt files for each module (unless `--skip-prompts`)
+
+5. **Run sync on generated prompts** (prompts are already generated):
+   ```bash
+   pdd sync my_module
+   ```
+
+#### Resuming a Failed Run
+
+If the workflow stops (e.g., PRD needs clarification):
+1. Add clarifications as comments on the GitHub issue
+2. Re-run `pdd generate <issue-url>` — it resumes from the last completed step
+
+#### Tips for Architecture Generation
+
+- Write detailed PRDs: The more specific your requirements, the better the architecture
+- Include tech stack preferences explicitly (e.g., "FastAPI + PostgreSQL" vs. leaving it ambiguous)
+- Review the generated `architecture.json` before generating individual module prompts
+- The `context_urls` field in each module entry provides documentation links for code generation
+
 ### Tips
 
 - **Resume from anywhere**: Workflow state is saved to GitHub, so you can continue on any machine
 - **Cost budgeting**: Use `--budget` flag to limit spending on complex issues
 - **Skip steps**: If a step hangs, check the GitHub issue for clarifying questions
+- **Steer the agent mid-run**: You don't have to wait for a clarification step to guide the agent. If you see it making a mistake or want to refine its direction, just post a comment on the GitHub issue. The next time the agent executes a task, it will see your comment in a "Steered user input" section and factor it into its work.
 
 ---
 
@@ -475,55 +528,3 @@ Before submitting your regression test:
 4. **Review logs**: Confirm that logging is clear and helpful for debugging
 
 Remember: Regression tests are crucial for maintaining system stability. They should catch breaking changes and ensure that the PDD workflow continues to function correctly as the codebase evolves.
-
-## Method 4: Generating Architecture from a PRD (GitHub Issue)
-
-Instead of manually writing `architecture.json`, you can point `pdd generate` at a GitHub issue containing your PRD. An 11-step agentic workflow will analyze the PRD, research the tech stack, generate `architecture.json`, create `.pddrc` configuration, and produce prompt files for each module.
-
-### Prerequisites
-
-1. `gh` CLI installed and authenticated (`gh auth login`)
-2. A GitHub issue containing your PRD (title, goals, features, tech stack)
-
-### Steps
-
-1. **Create a GitHub issue** with your PRD content:
-   - Title: Project name or feature area
-   - Body: Goals, key features, non-functional requirements, tech stack preferences
-
-2. **Run the agentic generate command**:
-   ```bash
-   pdd generate https://github.com/myorg/myrepo/issues/42
-   ```
-
-3. **Monitor progress**: The workflow posts step-by-step progress as issue comments:
-   - Analyzes your PRD for features and tech stack
-   - Researches documentation and best practices
-   - Designs the module breakdown with dependency ordering
-   - Generates `architecture.json` and `.pddrc` configuration
-   - Creates prompt files for each module
-   - Validates completeness, sync configuration, and dependencies
-
-4. **Review the output**: The workflow produces:
-   - `architecture.json` - Module definitions with priorities and dependencies
-   - `architecture_diagram.html` - Interactive Mermaid visualization
-   - `.pddrc` - Project configuration with context-specific paths
-   - `prompts/*.prompt` - Prompt files for each module (unless `--skip-prompts`)
-
-5. **Run sync on generated prompts** (prompts are already generated):
-   ```bash
-   pdd sync my_module
-   ```
-
-### Resuming a Failed Run
-
-If the workflow stops (e.g., PRD needs clarification):
-1. Add clarifications as comments on the GitHub issue
-2. Re-run `pdd generate <issue-url>` — it resumes from the last completed step
-
-### Tips
-
-- Write detailed PRDs: The more specific your requirements, the better the architecture
-- Include tech stack preferences explicitly (e.g., "FastAPI + PostgreSQL" vs. leaving it ambiguous)
-- Review the generated `architecture.json` before generating individual module prompts
-- The `context_urls` field in each module entry provides documentation links for code generation
