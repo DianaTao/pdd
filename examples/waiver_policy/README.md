@@ -2,6 +2,9 @@
 
 Human-runnable walkthrough for contract waivers, `pdd gate`, and related tooling.
 
+**Branch:** use `feature/issue-50-verification` (inherits from `feature/issue-50` / PR #1331).
+Verification touch points live on this branch only — not on `feature/issue-50` itself.
+
 ## Prerequisites
 
 From the repository root:
