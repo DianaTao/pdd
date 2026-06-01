@@ -64,6 +64,18 @@ def test_normalize_grounding_defaults_to_unavailable() -> None:
     assert grounding["reviewed"] is False
 
 
+def test_normalize_grounding_does_not_resurrect_stale_reviewed_flag() -> None:
+    stale = {
+        "mode": "cloud",
+        "selected_examples": [{"module": "payments", "id": "payments"}],
+        "pinned": ["payments"],
+        "excluded": [],
+        "reviewed": True,
+    }
+    normalized = normalize_grounding(stale, reviewed=False)
+    assert normalized["reviewed"] is False
+
+
 def test_grounding_from_llm_result_prefers_embedded_grounding() -> None:
     payload = {
         "grounding": {

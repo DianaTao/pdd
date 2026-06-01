@@ -1,0 +1,5 @@
+<pdd-reason>Demo prompt for grounding evidence manual runs (issue #827).</pdd-reason>
+
+Use <pin>payments</pin> when running with --review-examples.
+
+Generate a minimal payments helper module.

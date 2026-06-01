@@ -141,7 +141,9 @@ def normalize_grounding(
         "selected_examples": selected,
         "pinned": pinned,
         "excluded": excluded,
-        "reviewed": bool(grounding.get("reviewed")) or reviewed,
+        # Caller-supplied ``reviewed`` is authoritative (manifest writer recomputes
+        # from pre-generation decisions; do not resurrect a stale dict flag).
+        "reviewed": bool(reviewed),
     }
 
 

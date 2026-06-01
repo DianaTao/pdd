@@ -1,0 +1,4 @@
+grounding:
+  require_review_for_critical_modules: true
+  require_pinned_examples_for:
+    - payments

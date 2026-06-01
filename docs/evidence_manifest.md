@@ -99,6 +99,17 @@ provenance (`.pdd/grounding_policy.yaml`, future `pdd gate` integration).
 
 ## Verification
 
+### Human-runnable demo (no cloud)
+
+```bash
+python examples/grounding_evidence_demo/run_demo.py
+```
+
+See [examples/grounding_evidence_demo/README.md](../examples/grounding_evidence_demo/README.md)
+for copy-paste CLI checks and optional cloud generate steps.
+
+### Focused pytest gate
+
 For this feature, use the focused pytest gate (not full `pytest -q` collection
 on every environment):
 
