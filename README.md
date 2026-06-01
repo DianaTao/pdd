@@ -1108,6 +1108,7 @@ When a GitHub issue URL is passed instead of a basename, sync enters agentic mod
 2. **Dependency Validation**: Validates architecture.json dependencies and applies corrections if needed
 3. **Parallel Execution**: Dispatches parallel sync via `AsyncSyncRunner` with dependency-aware scheduling (max 4 concurrent workers)
 4. **Live Progress**: Posts and updates a GitHub comment with real-time module sync status
+5. **Mid-run Steering**: Orchestrators poll for new GitHub issue comments while a step is running. Non-bot comments are injected into the agent's prompt as `## Steered user input (mid-run)`, allowing you to guide the agent without stopping the workflow.
 
 ```bash
 # Sync modules identified from a GitHub issue (parallel, dependency-aware)
@@ -3306,8 +3307,8 @@ PDD uses several environment variables to customize its behavior:
 - **`PDD_AGENTIC_PROVIDER`**: Comma-separated provider preference for agentic workflows. Supported tokens are `anthropic`, `google`, `openai`, `opencode`, and `antigravity` (for example, `PDD_AGENTIC_PROVIDER=opencode,anthropic`). `antigravity` is an alias for the Google provider that additionally pins binary selection to `agy` — equivalent to `PDD_AGENTIC_PROVIDER=google` plus `PDD_GOOGLE_CLI=agy`, and overrides any prior `PDD_GOOGLE_CLI=gemini` rollback setting.
 - **`PDD_CLAUDE_CODE_MODE`**: Set to `interactive` to make the Anthropic agentic provider use interactive Claude Code through a temporary MCP reply tool instead of `claude -p`. This is an opt-in workaround for environments where `claude -p` uses a separate Agent SDK credit pool; when unset, PDD keeps the existing `claude -p - --output-format json` behavior.
 - **`PDD_GOOGLE_CLI`**: Selects the Google-provider binary. Values: `agy` (Antigravity CLI), `gemini` (legacy Gemini CLI as rollback), or `auto` (default — prefer `agy` when installed and credentialed, but use legacy `gemini` when both binaries are installed and the only Google auth signal is `~/.gemini/oauth_creds.json`). Used by both availability detection and command construction so they cannot disagree.
-- **`PDD_USER_FEEDBACK`**: Inject user feedback from GitHub issue comments into agentic task instructions. Set by the GitHub App executor to pass feedback from previous execution attempts. No default.
 - **`PDD_GH_TOKEN_FILE`**: Path to a file containing a fresh GitHub App installation token. When set, the e2e fix orchestrator reads a new token from this file on push auth failure and retries once. The token file is written and refreshed by the cloud job runner (pdd_cloud). No default; only used in cloud-hosted job environments.
+- **`PDD_STEER_JSON`**: A JSON list of mid-run user steers (feedback). Each entry must have `comment_id`, `author`, and `body`. Used to inject manual course corrections during an active agentic task. Facilitates local testing and CI-driven steering without polling GitHub.
 
 #### Output Path Variables
 

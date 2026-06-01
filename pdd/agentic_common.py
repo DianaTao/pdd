@@ -7,7 +7,6 @@ import sys
 import json
 import shutil
 import subprocess
-import tempfile
 import time
 import uuid
 import re
@@ -97,6 +96,14 @@ class TokenMatch:
 
     def __bool__(self) -> bool:
         return True
+
+
+@dataclass
+class SteerEntry:
+    """Entry for mid-run user steering from GitHub comments."""
+    comment_id: str
+    author: str
+    body: str
 
 
 def detect_control_token(
@@ -951,7 +958,7 @@ def _get_cli_diagnostic_info(name: str) -> str:
         f"CLI '{name}' not found. Troubleshooting steps:",
         "",
         f"1. Check installation: which {name}",
-        f"2. Common installation paths searched:",
+        "2. Common installation paths searched:",
     ]
 
     for path in _iter_common_cli_paths(name):
@@ -960,7 +967,7 @@ def _get_cli_diagnostic_info(name: str) -> str:
     lines.extend([
         "",
         "3. Configure custom path in .pddrc:",
-        f"   agentic:",
+        "   agentic:",
         f"     {name}_path: /path/to/{name}",
         "",
         f"4. Current PATH: {os.environ.get('PATH', 'not set')[:MAX_PATH_DISPLAY_LENGTH]}...",
@@ -2148,6 +2155,7 @@ def run_agentic_task(
     deadline: Optional[float] = None,
     use_playwright: bool = False,
     reasoning_time: Optional[float] = None,
+    steers: Optional[List[SteerEntry]] = None,
 ) -> Tuple[bool, str, float, str]:
     """
     Runs an agentic task using available providers in preference order.
@@ -2167,6 +2175,7 @@ def run_agentic_task(
             top-level ``pdd --time`` flag. When provided, overrides the
             ``PDD_REASONING_EFFORT`` env var for argv injection. ``None``
             means "fall back to env" so unplumbed call sites keep working.
+        steers: Optional list of SteerEntry objects to inject into the instruction.
 
     Returns:
         (success, output_text, cost_usd, provider_used)
@@ -2196,7 +2205,7 @@ def run_agentic_task(
     prompt_filename = f".agentic_prompt_{uuid.uuid4().hex[:8]}.txt"
     prompt_path = cwd / prompt_filename
 
-    # Inject user feedback from GitHub issue comments (set by GitHub App executor)
+    # Inject user feedback from a prior attempt (GitHub App / orchestrator env)
     user_feedback = os.environ.get("PDD_USER_FEEDBACK")
     feedback_section = ""
     if user_feedback:
@@ -2207,8 +2216,18 @@ def run_agentic_task(
             f"{user_feedback}\n"
         )
 
+    # Inject mid-run steers (orchestrator drains issue comments between steps)
+    steering_section = ""
+    if steers:
+        steering_section = "\n\n## Steered user input (mid-run)\n"
+        steering_section += (
+            "The following comments arrived during this run. Factor them into this step:\n"
+        )
+        for steer in steers:
+            steering_section += f"- @{steer.author} ({steer.comment_id}): {steer.body}\n"
+
     full_instruction = (
-        f"{instruction}{feedback_section}\n\n"
+        f"{instruction}{feedback_section}{steering_section}\n\n"
         "You have full file access to explore and modify files as needed."
     )
 
@@ -2543,7 +2562,7 @@ def _revert_out_of_scope_changes(
     # See issue #1080.
     from pdd.git_porcelain import parse_porcelain_z  # local import: avoid cycles
     try:
-        result = subprocess.run(
+        result = _subprocess_run(
             ["git", "-C", str(cwd), "status", "--porcelain=v1", "-z", "-uno"],
             capture_output=True, timeout=30,
         )
@@ -2598,12 +2617,12 @@ def _revert_out_of_scope_changes(
         return reverted
     try:
         if paths_to_reset:
-            subprocess.run(
+            _subprocess_run(
                 ["git", "-C", str(cwd), "reset", "HEAD", "--"] + paths_to_reset,
                 capture_output=True, timeout=30,
             )
         if paths_to_checkout:
-            subprocess.run(
+            _subprocess_run(
                 ["git", "-C", str(cwd), "checkout", "HEAD", "--"] + paths_to_checkout,
                 capture_output=True, timeout=30,
             )
@@ -2667,7 +2686,7 @@ def _probe_claude_auth_status() -> Dict[str, Any]:
 
     for command in probe_commands:
         try:
-            result = subprocess.run(
+            result = _subprocess_run(
                 command,
                 env=probe_env,
                 stdin=subprocess.DEVNULL,
@@ -3772,7 +3791,7 @@ def _run_with_provider(
                 elif lines:
                     try:
                         data = json.loads(lines[-1])
-                    except:
+                    except Exception:
                         pass
         else:
             # Claude Code may emit non-JSON text to stdout (npm warnings,
@@ -4043,7 +4062,7 @@ def _find_state_comment(
             "--paginate",
             "--slurp",
         ]
-        result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+        result = _subprocess_run(cmd, cwd=cwd, capture_output=True, text=True)
         if result.returncode != 0:
             return None
 
@@ -4096,7 +4115,7 @@ def _find_all_state_comments(
             "--paginate",
             "--slurp",
         ]
-        result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+        result = _subprocess_run(cmd, cwd=cwd, capture_output=True, text=True)
         if result.returncode != 0:
             return []
         comments = _load_gh_paginated_comments(result.stdout)
@@ -4121,7 +4140,7 @@ def _github_delete_comment(repo_owner: str, repo_name: str, comment_id: int, cwd
             f"repos/{repo_owner}/{repo_name}/issues/comments/{comment_id}",
             "-X", "DELETE",
         ]
-        res = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+        res = _subprocess_run(cmd, cwd=cwd, capture_output=True, text=True)
         return res.returncode == 0
     except Exception:
         return False
@@ -4196,7 +4215,7 @@ def github_save_state(
                 "-X", "PATCH",
                 "-f", f"body={body}"
             ]
-            res = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+            res = _subprocess_run(cmd, cwd=cwd, capture_output=True, text=True)
             if res.returncode == 0:
                 return comment_id
         else:
@@ -4216,7 +4235,7 @@ def github_save_state(
                     "-X", "PATCH",
                     "-f", f"body={body}",
                 ]
-                res = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+                res = _subprocess_run(cmd, cwd=cwd, capture_output=True, text=True)
                 if res.returncode != 0:
                     return None
                 failed_ids = [
@@ -4240,7 +4259,7 @@ def github_save_state(
                 "-X", "POST",
                 "-f", f"body={body}"
             ]
-            res = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+            res = _subprocess_run(cmd, cwd=cwd, capture_output=True, text=True)
             if res.returncode == 0:
                 data = json.loads(res.stdout)
                 return data.get("id")
@@ -4382,6 +4401,143 @@ def validate_cached_state(
 
 
 # --- High Level State Wrappers ---
+
+def drain_issue_steers(
+    repo_owner: str,
+    repo_name: str,
+    issue_number: int,
+    state: Dict[str, Any],
+    *,
+    cwd: Path,
+) -> List[SteerEntry]:
+    """Fetches new user feedback from PDD_STEER_JSON or GitHub issue comments.
+
+    Updates state["last_steer_at"] and state["last_steered_comment_id"].
+    Filters bot comments and state markers.
+    """
+    steers: List[SteerEntry] = []
+
+    # 1. Check PDD_STEER_JSON env var
+    steer_json = os.environ.get("PDD_STEER_JSON")
+    if steer_json:
+        try:
+            entries = json.loads(steer_json)
+            if isinstance(entries, list):
+                try:
+                    last_id_val = int(state.get("last_steered_comment_id") or -1)
+                except (ValueError, TypeError):
+                    last_id_val = -1
+                max_id_val = last_id_val
+                for entry in entries:
+                    cid_raw = entry.get("comment_id", "")
+                    try:
+                        cid_val = int(cid_raw)
+                    except (ValueError, TypeError):
+                        continue
+                    if cid_val <= last_id_val:
+                        continue
+                    steers.append(SteerEntry(
+                        comment_id=str(cid_val),
+                        author=entry.get("author", "unknown"),
+                        body=entry.get("body", ""),
+                    ))
+                    if cid_val > max_id_val:
+                        max_id_val = cid_val
+                if steers:
+                    state["last_steered_comment_id"] = str(max_id_val)
+                    state["steer_generation"] = state.get("steer_generation", 0) + 1
+                    return steers
+        except json.JSONDecodeError:
+            pass
+
+    # 2. Poll GitHub issue comments
+    if not _find_cli_binary("gh"):
+        return []
+
+    since = state.get("last_steer_at")
+    last_id = state.get("last_steered_comment_id")
+
+    cmd = [
+        "gh", "api",
+        f"repos/{repo_owner}/{repo_name}/issues/{issue_number}/comments",
+        "--paginate",
+        "--slurp"
+    ]
+    if since:
+        cmd.extend(["-f", f"since={since}"])
+
+    try:
+        res = _subprocess_run(cmd, cwd=cwd, capture_output=True, text=True, start_new_session=True)
+        if res.returncode != 0:
+            return []
+
+        comments = _load_gh_paginated_comments(res.stdout)
+
+        new_steers: List[SteerEntry] = []
+        # Coerce last_id to int for safe comparison (Issue #55)
+        try:
+            last_id_val = int(last_id) if last_id is not None else -1
+        except (ValueError, TypeError):
+            last_id_val = -1
+
+        max_id_val = last_id_val
+        latest_timestamp = since
+
+        for comment in comments:
+            cid = comment.get("id")
+            # Convert to int for comparison
+            try:
+                cid_val = int(cid) if cid is not None else 0
+            except (ValueError, TypeError):
+                cid_val = 0
+
+            # Filter by ID to ensure we only get new comments since last seen
+            if cid_val <= last_id_val:
+                continue
+
+            # Filter bot comments
+            user = comment.get("user", {})
+            if user.get("type") == "Bot":
+                continue
+
+            body = comment.get("body", "")
+
+            # Filter known PDD markers
+            if GITHUB_STATE_MARKER_START in body or GITHUB_STATE_MARKER_END in body:
+                continue
+            if "PDD-INCREMENTAL-STATUS" in body:
+                continue
+            if "PDD_WORKFLOW_STATE" in body:
+                continue
+            # Filter common progress patterns like "## Step N/T:"
+            if re.search(r"^## Step \d+/\d+:", body, re.MULTILINE):
+                continue
+
+            author = user.get("login", "unknown")
+            created_at = comment.get("created_at")
+
+            new_steers.append(SteerEntry(
+                comment_id=str(cid_val),
+                author=author,
+                body=body.strip()
+            ))
+
+            if cid_val > max_id_val:
+                max_id_val = cid_val
+            if latest_timestamp is None or (created_at and created_at > latest_timestamp):
+                latest_timestamp = created_at
+
+        if new_steers:
+            state["last_steered_comment_id"] = str(max_id_val)
+            state["last_steer_at"] = latest_timestamp
+            state["steer_generation"] = state.get("steer_generation", 0) + 1
+            return new_steers
+
+    except Exception:
+        pass
+
+    return []
+
 
 def load_workflow_state(
     cwd: Path,
@@ -4658,7 +4814,7 @@ def post_step_comment_once(
         return False
     final_body = _sanitize_comment_body(body)
     try:
-        result = subprocess.run(
+        result = _subprocess_run(
             [
                 "gh", "issue", "comment", str(issue_number),
                 "--repo", f"{repo_owner}/{repo_name}",
@@ -4785,7 +4941,7 @@ def post_step_comment(
         )
 
     try:
-        result = subprocess.run(
+        result = _subprocess_run(
             [
                 "gh", "issue", "comment", str(issue_number),
                 "--repo", f"{repo_owner}/{repo_name}",
@@ -4828,7 +4984,7 @@ def post_pr_comment(
         return False
 
     try:
-        result = subprocess.run(
+        result = _subprocess_run(
             [
                 "gh", "pr", "comment", str(pr_number),
                 "--repo", f"{repo_owner}/{repo_name}",
@@ -4890,7 +5046,7 @@ def post_final_comment(
     )
 
     try:
-        result = subprocess.run(
+        result = _subprocess_run(
             [
                 "gh", "issue", "comment", str(issue_number),
                 "--repo", f"{repo_owner}/{repo_name}",

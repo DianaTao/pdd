@@ -1647,7 +1647,7 @@ def test_anthropic_cost_all_tokens_cached():
 
 # --- Tests for run_agentic_task ---
 
-def test_run_agentic_task_anthropic_success_env_check(mock_shutil_which, mock_subprocess_run, mock_console, tmp_path):
+def test_run_agentic_task_anthropic_success_env_check(mock_shutil_which, mock_subprocess_run, mock_console, tmp_path, mock_env):
     """Test successful execution with Anthropic."""
     # Setup availability
     mock_shutil_which.side_effect = lambda cmd: "/bin/claude" if cmd == "claude" else None
@@ -1744,7 +1744,7 @@ def test_run_agentic_task_false_positive(mock_shutil_which, mock_subprocess_run,
     # Cost should include the 0.0 from the first attempt + the cost from the second
     assert cost > 0.0
 
-def test_run_agentic_task_temp_file_cleanup(mock_shutil_which, mock_subprocess_run, tmp_path):
+def test_run_agentic_task_temp_file_cleanup(mock_shutil_which, mock_subprocess_run, tmp_path, mock_env):
     """Test that the temp prompt file is created and then cleaned up."""
     mock_shutil_which.return_value = "/bin/claude"
     mock_subprocess_run.return_value.returncode = 0
@@ -1769,7 +1769,7 @@ def test_run_agentic_task_temp_file_cleanup(mock_shutil_which, mock_subprocess_r
     temp_files = list(tmp_path.glob(".agentic_prompt_*.txt"))
     assert len(temp_files) == 0
 
-def test_suspicious_file_detection(mock_shutil_which, mock_subprocess_run, mock_console, tmp_path):
+def test_suspicious_file_detection(mock_shutil_which, mock_subprocess_run, mock_console, tmp_path, mock_env):
     """Test that suspicious files (C, E, T) are detected and logged."""
     mock_shutil_which.return_value = "/bin/claude"
     mock_subprocess_run.return_value.returncode = 0
@@ -1790,7 +1790,7 @@ def test_suspicious_file_detection(mock_shutil_which, mock_subprocess_run, mock_
     assert "- C" in combined_output
     assert "- E" in combined_output
 
-def test_run_agentic_task_timeout_override(mock_shutil_which, mock_subprocess_run, tmp_path):
+def test_run_agentic_task_timeout_override(mock_shutil_which, mock_subprocess_run, tmp_path, mock_env):
     """Test that explicit timeout overrides default."""
     mock_shutil_which.return_value = "/bin/claude"
     mock_subprocess_run.return_value.returncode = 0
@@ -3219,15 +3219,20 @@ def test_codex_no_model_env_var_omits_model_flag(mock_cwd, mock_env, mock_load_m
 
 
 # ---------------------------------------------------------------------------
-# PDD_USER_FEEDBACK Injection Tests
+# Mid-run Steering (SteerEntry) Injection Tests
 # ---------------------------------------------------------------------------
 
 
-def test_pdd_user_feedback_injected_into_prompt(mock_cwd, mock_env, mock_load_model_data, mock_shutil_which, mock_subprocess):
-    """Test that PDD_USER_FEEDBACK env var is included in the agentic prompt."""
+def test_steer_injection_into_prompt(mock_cwd, mock_env, mock_load_model_data, mock_shutil_which, mock_subprocess):
+    """Test that steers list is included in the agentic prompt."""
+    from pdd.agentic_common import SteerEntry
     mock_shutil_which.return_value = "/bin/claude"
     os.environ["ANTHROPIC_API_KEY"] = "key"
-    os.environ["PDD_USER_FEEDBACK"] = "@alice (2025-01-15): Try a different approach"
+
+    steers = [
+        SteerEntry(comment_id="123", author="alice", body="Try approach A"),
+        SteerEntry(comment_id="456", author="bob", body="Use library X")
+    ]
 
     mock_output = {
         "result": "Done.",
@@ -3238,26 +3243,22 @@ def test_pdd_user_feedback_injected_into_prompt(mock_cwd, mock_env, mock_load_mo
     mock_subprocess.return_value.stdout = json.dumps(mock_output)
     mock_subprocess.return_value.stderr = ""
 
-    try:
-        success, msg, cost, provider = run_agentic_task("Fix the bug", mock_cwd)
+    success, msg, cost, provider = run_agentic_task("Fix the bug", mock_cwd, steers=steers)
 
-        assert success
+    assert success
 
-        # The prompt piped via stdin should contain the user feedback
-        args, kwargs = mock_subprocess.call_args
-        prompt_input = kwargs.get("input", "")
-        assert "User Feedback" in prompt_input
-        assert "@alice" in prompt_input
-        assert "Try a different approach" in prompt_input
-    finally:
-        os.environ.pop("PDD_USER_FEEDBACK", None)
+    # The prompt piped via stdin should contain the steers
+    args, kwargs = mock_subprocess.call_args
+    prompt_input = kwargs.get("input", "")
+    assert "## Steered user input (mid-run)" in prompt_input
+    assert "- @alice (123): Try approach A" in prompt_input
+    assert "- @bob (456): Use library X" in prompt_input
 
 
-def test_pdd_user_feedback_not_injected_when_absent(mock_cwd, mock_env, mock_load_model_data, mock_shutil_which, mock_subprocess):
-    """Test that prompt is unchanged when PDD_USER_FEEDBACK is not set."""
+def test_no_steer_injection_when_absent(mock_cwd, mock_env, mock_load_model_data, mock_shutil_which, mock_subprocess):
+    """Test that prompt is unchanged when steers list is absent."""
     mock_shutil_which.return_value = "/bin/claude"
     os.environ["ANTHROPIC_API_KEY"] = "key"
-    os.environ.pop("PDD_USER_FEEDBACK", None)
 
     mock_output = {
         "result": "Done.",
@@ -3268,13 +3269,91 @@ def test_pdd_user_feedback_not_injected_when_absent(mock_cwd, mock_env, mock_loa
     mock_subprocess.return_value.stdout = json.dumps(mock_output)
     mock_subprocess.return_value.stderr = ""
 
-    success, msg, cost, provider = run_agentic_task("Fix the bug", mock_cwd)
+    success, msg, cost, provider = run_agentic_task("Fix the bug", mock_cwd, steers=None)
 
     assert success
 
     args, kwargs = mock_subprocess.call_args
     prompt_input = kwargs.get("input", "")
-    assert "User Feedback" not in prompt_input
+    assert "## Steered user input (mid-run)" not in prompt_input
+
+
+def test_drain_issue_steers_from_env(mock_cwd):
+    """Test fetching steers from PDD_STEER_JSON env var."""
+    from pdd.agentic_common import drain_issue_steers, SteerEntry
+
+    steer_data = [
+        {"comment_id": "101", "author": "charlie", "body": "Hello"}
+    ]
+    os.environ["PDD_STEER_JSON"] = json.dumps(steer_data)
+
+    try:
+        state = {}
+        steers = drain_issue_steers("owner", "repo", 55, state, cwd=mock_cwd)
+
+        assert len(steers) == 1
+        assert steers[0].author == "charlie"
+        assert steers[0].body == "Hello"
+        assert state["steer_generation"] == 1
+    finally:
+        os.environ.pop("PDD_STEER_JSON", None)
+
+
+def test_drain_issue_steers_env_idempotent(mock_cwd):
+    """Same PDD_STEER_JSON comment_id is not returned twice after state update."""
+    from pdd.agentic_common import drain_issue_steers
+
+    steer_data = [{"comment_id": "101", "author": "charlie", "body": "Hello"}]
+    os.environ["PDD_STEER_JSON"] = json.dumps(steer_data)
+    try:
+        state = {}
+        first = drain_issue_steers("owner", "repo", 55, state, cwd=mock_cwd)
+        second = drain_issue_steers("owner", "repo", 55, state, cwd=mock_cwd)
+        assert len(first) == 1
+        assert len(second) == 0
+        assert state["last_steered_comment_id"] == "101"
+    finally:
+        os.environ.pop("PDD_STEER_JSON", None)
+
+
+def test_drain_issue_steers_from_github(mock_cwd, mock_subprocess, mock_shutil_which):
+    """Test fetching steers from GitHub comments."""
+    from pdd.agentic_common import drain_issue_steers
+
+    mock_shutil_which.return_value = "/bin/gh"
+
+    mock_comments = [
+        {
+            "id": 1001,
+            "user": {"login": "user1", "type": "User"},
+            "body": "User feedback",
+            "created_at": "2026-06-01T12:00:00Z"
+        },
+        {
+            "id": 1002,
+            "user": {"login": "pdd-bot", "type": "Bot"},
+            "body": "Bot message",
+            "created_at": "2026-06-01T12:01:00Z"
+        },
+        {
+            "id": 1003,
+            "user": {"login": "user2", "type": "User"},
+            "body": "## Step 1/13: ...",
+            "created_at": "2026-06-01T12:02:00Z"
+        }
+    ]
+
+    mock_subprocess.return_value.returncode = 0
+    mock_subprocess.return_value.stdout = json.dumps(mock_comments)
+
+    state = {"last_steered_comment_id": "1000"}
+    steers = drain_issue_steers("owner", "repo", 55, state, cwd=mock_cwd)
+
+    assert len(steers) == 1
+    assert steers[0].author == "user1"
+    assert steers[0].comment_id == "1001"
+    assert state["last_steered_comment_id"] == "1001"
+    assert state["steer_generation"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -3339,7 +3418,7 @@ class TestFindStateCommentPagination:
         mock_comments = _make_mock_comments(5, state_positions=[2])
 
         with patch("shutil.which", return_value="/usr/bin/gh"), \
-             patch("subprocess.run") as mock_run:
+             patch("pdd.agentic_common._subprocess_run") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0,
                 stdout=json.dumps(mock_comments),
@@ -3370,7 +3449,7 @@ class TestFindStateCommentPagination:
         mock_comments = _make_mock_comments(42, state_positions=[35])
 
         with patch("shutil.which", return_value="/usr/bin/gh"), \
-             patch("subprocess.run") as mock_run:
+             patch("pdd.agentic_common._subprocess_run") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0,
                 stdout=json.dumps(mock_comments),
@@ -3391,7 +3470,7 @@ class TestFindStateCommentPagination:
         pages = [mock_comments[:30], mock_comments[30:]]
 
         with patch("shutil.which", return_value="/usr/bin/gh"), \
-             patch("subprocess.run") as mock_run:
+             patch("pdd.agentic_common._subprocess_run") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0,
                 stdout=json.dumps(pages),
@@ -3416,7 +3495,7 @@ class TestFindStateCommentPagination:
         mock_comments = _make_mock_comments(42, state_positions=[10, 35])
 
         with patch("shutil.which", return_value="/usr/bin/gh"), \
-             patch("subprocess.run") as mock_run:
+             patch("pdd.agentic_common._subprocess_run") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0,
                 stdout=json.dumps(mock_comments),
@@ -3436,7 +3515,7 @@ class TestFindStateCommentPagination:
         mock_comments = _make_mock_comments(42, state_positions=None)
 
         with patch("shutil.which", return_value="/usr/bin/gh"), \
-             patch("subprocess.run") as mock_run:
+             patch("pdd.agentic_common._subprocess_run") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0,
                 stdout=json.dumps(mock_comments),
@@ -3449,7 +3528,7 @@ class TestFindStateCommentPagination:
     def test_find_state_comment_empty_issue(self, tmp_path):
         """Returns None gracefully on issues with 0 comments."""
         with patch("shutil.which", return_value="/usr/bin/gh"), \
-             patch("subprocess.run") as mock_run:
+             patch("pdd.agentic_common._subprocess_run") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0,
                 stdout=json.dumps([]),
@@ -3462,7 +3541,7 @@ class TestFindStateCommentPagination:
     def test_find_state_comment_gh_not_installed(self, tmp_path):
         """Returns None without calling subprocess when gh is not installed."""
         with patch("shutil.which", return_value=None), \
-             patch("subprocess.run") as mock_run:
+             patch("pdd.agentic_common._subprocess_run") as mock_run:
             result = _find_state_comment("owner", "repo", 481, "bug", tmp_path)
             assert result is None
             mock_run.assert_not_called()
@@ -3472,7 +3551,7 @@ class TestFindStateCommentPagination:
     def test_find_state_comment_api_failure(self, tmp_path):
         """Returns None gracefully on gh api errors."""
         with patch("shutil.which", return_value="/usr/bin/gh"), \
-             patch("subprocess.run") as mock_run:
+             patch("pdd.agentic_common._subprocess_run") as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="API error")
             result = _find_state_comment("owner", "repo", 481, "bug", tmp_path)
             assert result is None
@@ -3495,7 +3574,7 @@ class TestFindStateCommentPagination:
         mock_comments = _make_mock_comments(42, state_positions=[35])
 
         with patch("shutil.which", return_value="/usr/bin/gh"), \
-             patch("subprocess.run") as mock_run, \
+             patch("pdd.agentic_common._subprocess_run") as mock_run, \
              patch.dict("os.environ", {"PDD_NO_GITHUB_STATE": "0"}):
             mock_run.return_value = MagicMock(
                 returncode=0,
@@ -3671,7 +3750,7 @@ def test_invalid_json_output_not_truncated_at_200_chars(mock_cwd, mock_env, mock
 def test_post_step_comment_posts_to_github(tmp_path):
     """Test that post_step_comment calls gh issue comment with correct args."""
     with patch("shutil.which", return_value="/usr/bin/gh"), \
-         patch("subprocess.run") as mock_run:
+         patch("pdd.agentic_common._subprocess_run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         result = post_step_comment(
@@ -3716,7 +3795,7 @@ def test_post_step_comment_no_gh_cli(tmp_path):
 def test_post_pr_comment_posts_to_github(tmp_path):
     """Test that post_pr_comment calls gh pr comment with correct args."""
     with patch("shutil.which", return_value="/usr/bin/gh"), \
-         patch("subprocess.run") as mock_run:
+         patch("pdd.agentic_common._subprocess_run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         result = post_pr_comment(
@@ -3844,7 +3923,7 @@ def test_deadline_skips_attempt_when_insufficient_time(tmp_path):
     mock_run.assert_not_called()
 
 
-def test_deadline_caps_per_attempt_timeout(tmp_path):
+def test_deadline_caps_per_attempt_timeout(tmp_path, mock_env):
     """Per-attempt timeout is capped to remaining budget minus margin."""
     deadline = time.time() + 300  # 300s left; after 120s margin → 180s available
     with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "k"}, clear=False), \
@@ -3870,7 +3949,7 @@ def test_deadline_caps_per_attempt_timeout(tmp_path):
     assert actual_timeout <= 185  # 300 - 120 + small tolerance
 
 
-def test_no_deadline_preserves_default_timeout(tmp_path):
+def test_no_deadline_preserves_default_timeout(tmp_path, mock_env):
     """Without deadline, default timeout is used."""
     with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "k"}, clear=False), \
          patch("pdd.agentic_common._find_cli_binary", return_value="/usr/bin/claude"), \
@@ -5530,7 +5609,7 @@ class TestIssue1072FailureLogging:
     """
 
     def test_provider_failure_logged_when_not_verbose(
-        self, mock_shutil_which, mock_subprocess_run, tmp_path
+        self, mock_shutil_which, mock_subprocess_run, tmp_path, mock_env
     ):
         """Provider failures must be logged to JSONL even with verbose=False.
 
@@ -7831,7 +7910,7 @@ class TestPostStepCommentOnce:
         from pdd.agentic_common import post_step_comment_once
 
         posted = {1, 2, 3}
-        with patch("pdd.agentic_common.subprocess.run") as mock_run:
+        with patch("pdd.agentic_common._subprocess_run") as mock_run:
             result = post_step_comment_once(
                 repo_owner="owner",
                 repo_name="repo",
@@ -7850,7 +7929,7 @@ class TestPostStepCommentOnce:
 
         posted = {1}
         with patch("pdd.agentic_common._find_cli_binary", return_value="/usr/bin/gh"), \
-             patch("pdd.agentic_common.subprocess.run") as mock_run:
+             patch("pdd.agentic_common._subprocess_run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             result = post_step_comment_once(
                 repo_owner="owner",
@@ -7876,7 +7955,7 @@ class TestPostStepCommentOnce:
 
         posted = {1}
         with patch("pdd.agentic_common._find_cli_binary", return_value="/usr/bin/gh"), \
-             patch("pdd.agentic_common.subprocess.run") as mock_run:
+             patch("pdd.agentic_common._subprocess_run") as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="rate limited")
             result = post_step_comment_once(
                 repo_owner="owner",
@@ -7916,7 +7995,7 @@ class TestPostStepCommentOnce:
             "openai: sk-aaaaaaaaaaaaaaaaaaaaaaaa\n"
         )
         with patch("pdd.agentic_common._find_cli_binary", return_value="/usr/bin/gh"), \
-             patch("pdd.agentic_common.subprocess.run") as mock_run:
+             patch("pdd.agentic_common._subprocess_run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             post_step_comment_once(
                 repo_owner="owner",
@@ -7940,7 +8019,7 @@ class TestPostStepCommentOnce:
 
         oversized = "A" * 200_000
         with patch("pdd.agentic_common._find_cli_binary", return_value="/usr/bin/gh"), \
-             patch("pdd.agentic_common.subprocess.run") as mock_run:
+             patch("pdd.agentic_common._subprocess_run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             post_step_comment_once(
                 repo_owner="owner",
@@ -8004,7 +8083,7 @@ class TestDuplicateStateCommentHandling:
         mock_comments = _make_mock_comments(8, state_positions=[2, 5, 7])
 
         with patch("shutil.which", return_value="/usr/bin/gh"), \
-             patch("subprocess.run") as mock_run:
+             patch("pdd.agentic_common._subprocess_run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout=json.dumps(mock_comments))
             ids = _find_all_state_comments("owner", "repo", 481, "bug", tmp_path)
 
@@ -8018,7 +8097,7 @@ class TestDuplicateStateCommentHandling:
         pages = [mock_comments[:4], mock_comments[4:]]
 
         with patch("shutil.which", return_value="/usr/bin/gh"), \
-             patch("subprocess.run") as mock_run:
+             patch("pdd.agentic_common._subprocess_run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout=json.dumps(pages))
             ids = _find_all_state_comments("owner", "repo", 481, "bug", tmp_path)
 
@@ -8043,7 +8122,7 @@ class TestDuplicateStateCommentHandling:
             return m
 
         with patch("shutil.which", return_value="/usr/bin/gh"), \
-             patch("subprocess.run", side_effect=side_effect):
+             patch("pdd.agentic_common._subprocess_run", side_effect=side_effect):
             ok = github_clear_state("owner", "repo", 481, "bug", tmp_path)
 
         assert ok is True
@@ -8083,7 +8162,7 @@ class TestDuplicateStateCommentHandling:
             return m
 
         with patch("shutil.which", return_value="/usr/bin/gh"), \
-             patch("subprocess.run", side_effect=side_effect):
+             patch("pdd.agentic_common._subprocess_run", side_effect=side_effect):
             returned_id = github_save_state(
                 "owner", "repo", 481, "bug",
                 {"last_completed_step": 7, "step_outputs": {}},
@@ -8123,7 +8202,7 @@ class TestDuplicateStateCommentHandling:
             return m
 
         with patch("shutil.which", return_value="/usr/bin/gh"), \
-             patch("subprocess.run", side_effect=side_effect):
+             patch("pdd.agentic_common._subprocess_run", side_effect=side_effect):
             github_save_state(
                 "owner", "repo", 481, "bug",
                 {"last_completed_step": 1, "step_outputs": {}},
@@ -8161,7 +8240,7 @@ class TestDuplicateStateCommentHandling:
         stderr_capture = io.StringIO()
 
         with patch("shutil.which", return_value="/usr/bin/gh"), \
-             patch("subprocess.run", side_effect=side_effect), \
+             patch("pdd.agentic_common._subprocess_run", side_effect=side_effect), \
              patch("sys.stderr", stderr_capture):
             returned_id = github_save_state(
                 "owner", "repo", 481, "bug",
