@@ -799,7 +799,7 @@ The PDD preprocessor supports additional XML‑style tags to keep prompts clean,
 >
 > **Impact:** Same prompt file → different generations on different machines/times
 >
-> **Prefer instead:** Capture output to a static file, then `<include>` that file. This ensures reproducible regeneration.
+> **Best Practice:** The `pdd generate` and `pdd sync` commands now support a `--snapshot-context` flag that captures these dynamic outputs (along with the expanded prompt text) into a stable `snapshot_<basename>.json` artifact for auditing. You can also run `pdd preprocess --snapshot` directly. However, it is still generally safer to capture output to a static file and `<include>` it for strict reproducibility across the team.
 
 Use these tags sparingly. When you must use them, prefer stable commands with bounded output (e.g., `head -n 20` in `<shell>`).
 

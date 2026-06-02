@@ -16,6 +16,7 @@ from .cloud import (
     DEFAULT_BASE_URL,
     CLOUD_ENDPOINTS,
 )
+from .redact import redact
 
 __all__ = [
     'CloudConfig',
@@ -30,4 +31,5 @@ __all__ = [
     'PDD_JWT_TOKEN_ENV',
     'DEFAULT_BASE_URL',
     'CLOUD_ENDPOINTS',
+    'redact',
 ]

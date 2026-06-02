@@ -62,7 +62,8 @@ PDD is built on several fundamental concepts, detailed in the PDD methodology:
 3.  **Intent Preservation**: Prompts capture the "why" behind the code, preserving design rationale more effectively than code comments alone.
 4.  **Modularity**: Similar to code, prompts are designed as modular units, often linked via minimal "example" files that act as interfaces, promoting reusability and token efficiency.
 5.  **Synchronization**: A core tenet is maintaining synchronization between the prompt, the generated code, usage examples, and tests. Learning gained during implementation is fed back into the prompts, ensuring they remain accurate and up-to-date. This contrasts with patching approaches where documentation and original specifications often become stale.
-6.  **Batch-Oriented Workflow**: PDD is fundamentally designed as a batch process, allowing for scripted, reproducible generation, contrasting with the inherently interactive nature of many code-patching AI tools.
+6.  **Reproducibility and Snapshots**: To bridge the gap between dynamic, environment-dependent context (like shell commands or web fetches) and the need for deterministic, reproducible generation, PDD supports **context snapshots**. These artifacts capture the exact state of all dynamic context at the time of generation, ensuring that an execution can be audited or replayed with the same inputs even if external resources change.
+7.  **Batch-Oriented Workflow**: PDD is fundamentally designed as a batch process, allowing for scripted, reproducible generation, contrasting with the inherently interactive nature of many code-patching AI tools.
 
 ## Key Benefits of PDD
 

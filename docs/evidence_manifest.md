@@ -37,13 +37,16 @@ Schema version 1 records:
 - contract coverage status when the prompt has contract rules
 - available validation outcomes and references to existing logs
 
+**Context Snapshots**:
+When `pdd preprocess --snapshot`, `pdd generate --snapshot-context`, or `pdd sync --snapshot-context` are executed, an accompanying `.pdd/evidence/runs/<run_id>/snapshot_<basename>.json` is written. This snapshot captures the full expanded prompt text along with all dynamic context (shell outputs, web contents, semantic query extractions, and grounding examples) to ensure reproducibility.
+
 `expanded_sha256` is the SHA-256 of the prompt after `pdd.preprocess` with
 `recursive=True` and `double_curly_brackets=False` (the same deterministic
 include expansion used before generation). `context.includes` uses the shared
 include grammar (`path=` attributes, self-closing tags, backtick includes, and
 `include-many`) and skips include-looking text inside fenced or inline code.
 If a prompt uses shell, web, variable, query-based, or otherwise effectful
-expansion, `expanded_sha256` is `null` rather than a guessed value.
+expansion, `expanded_sha256` is `null` rather than a guessed value (unless captured via the snapshot artifact).
 
 Missing stories or contracts are reported as `not_applicable`; they do not make
 an otherwise successful command fail. The schema is packaged at
