@@ -1,12 +1,15 @@
-<pdd-reason>Preprocesses prompt files by resolving include/shell/web tags, handling selective extraction, and escaping curly braces.</pdd-reason>
+<pdd-reason>Preprocesses prompt files by resolving include/shell/web tags, handling selective extraction, and escaping curly braces. Now supports reproducibility snapshots of dynamic context.</pdd-reason>
 
 <pdd-interface>
 {
   "type": "module",
   "module": {
     "functions": [
-      {"name": "preprocess", "signature": "(prompt, recursive, double_curly_brackets, exclude_keys, _seen)", "returns": "str"},
+      {"name": "preprocess", "signature": "(prompt, recursive, double_curly_brackets, exclude_keys, _seen, snapshot_recorder)", "returns": "str"},
       {"name": "get_file_path", "signature": "(file_name)", "returns": "str"}
+    ],
+    "classes": [
+      {"name": "SnapshotRecorder", "methods": ["capture_shell", "capture_web", "capture_query", "capture_grounding", "capture_include", "capture_code_hash", "capture_test_hash", "capture_expanded_text", "write"]}
     ]
   }
 }
@@ -15,6 +18,7 @@
 <pdd-dependency>path_resolution_python.prompt</pdd-dependency>
 <pdd-dependency>content_selector_python.prompt</pdd-dependency>
 <pdd-dependency>include_query_extractor_python.prompt</pdd-dependency>
+<pdd-dependency>core/redact_python.prompt</pdd-dependency>
 
 <include>./context/python_preamble.prompt</include>
 
@@ -25,8 +29,9 @@ Write the `pdd/preprocess.py` module.
 Preprocesses prompt files for LLMs by resolving XML-like tags (`<pdd>`, `<include>`, `<include-many>`, `<shell>`, `<web>`) and optionally escaping curly braces. Supports recursive include resolution, selective extraction, semantic LLM queries, and code block protection.
 
 % Requirements
-1. Function: `preprocess(prompt, recursive=False, double_curly_brackets=True, exclude_keys=None, _seen=None) -> str`
+1. Function: `preprocess(prompt, recursive=False, double_curly_brackets=True, exclude_keys=None, _seen=None, snapshot_recorder=None) -> str`
    - `_seen`: set of resolved real paths for circular include detection, passed to child calls
+   - `snapshot_recorder`: Optional `SnapshotRecorder` instance for capturing dynamic context
    - Returns the preprocessed prompt string; preserve leading/trailing whitespace
    - If `prompt` is not a string, return `str(prompt)`; if empty, print error and return `""`
 2. Tags must be processed in this order: `<pdd>` → `<include>` (and backtick includes) → `<include-many>` → `<shell>` → `<web>`. This order matters because earlier tags can produce content containing later tags (e.g., an included file may contain `<shell>` tags). Apply curly-brace doubling last, only on the top-level call.
@@ -43,9 +48,25 @@ Preprocesses prompt files for LLMs by resolving XML-like tags (`<pdd>`, `<includ
 8. When both `select=` and `query=` present, keep `select=` and discard `query=`; fall back to `query=` only if `select=` fails
 9. Image includes (.png, .jpg, .jpeg, .gif, .webp, .heic): resize to max 1024px and convert to base64 data URL. GIF first frame converted to static image. HEIC converted to JPEG (requires `pillow_heif`).
 10. `<include-many>` — comma/newline-separated paths; concatenate with newlines. Missing files → `[File not found: path]`. Deferred when `recursive=True`.
-11. `<shell>cmd</shell>` — execute command string in a shell, replace with stdout. Timeout controlled by `PDD_SHELL_TIMEOUT` env var (default 30s). On non-zero exit, insert error message with exit code and combined stdout/stderr. On timeout, insert timeout message. Deferred when `recursive=True`.
-12. `<web>url</web>` — fetch via Firecrawl (requires `FIRECRAWL_API_KEY`), replace with markdown content. Cache responses via `firecrawl_cache`. Use a hard 30s client-side timeout to prevent hanging. Handle missing API key, import error, empty response, timeout, and scrape failure with inline error messages. Deferred when `recursive=True`.
+11. `<shell>cmd</shell>` — execute command string in a shell, replace with REDACTED stdout (use `pdd.core.redact.redact`). Timeout controlled by `PDD_SHELL_TIMEOUT` env var (default 30s). On non-zero exit, insert error message with exit code and combined stdout/stderr. On timeout, insert timeout message. Deferred when `recursive=True`.
+12. `<web>url</web>` — fetch via Firecrawl (requires `FIRECRAWL_API_KEY`), replace with REDACTED markdown content (use `pdd.core.redact.redact`). Cache responses via `firecrawl_cache`. Use a hard 30s client-side timeout to prevent hanging. Handle missing API key, import error, empty response, timeout, and scrape failure with inline error messages. Deferred when `recursive=True`.
 13. Backtick includes: ``` `<path>` ``` → ```{file contents}```. Same recursive/missing-file behavior as XML includes.
+14. **Context Snapshotting**:
+    - Add `SnapshotRecorder` class to track dynamic context: `run_id`, `prompt_hash`, `expanded_text`, `has_nondeterministic_context`, `includes`, `shell_outputs`, `web_snapshots`, `query_extractions`, `grounding`, `code_hash`, `test_hash`.
+    - `SnapshotRecorder.capture_shell(cmd, output)`: Redact sensitive data from `output` using `pdd.core.redact.redact` before storing. Store SHA-256 hash of output.
+    - `SnapshotRecorder.capture_web(url, content)`: Redact sensitive data from `content` using `pdd.core.redact.redact`. Store SHA-256 hash of content.
+    - `SnapshotRecorder.capture_query(query, results)`: Store semantic query results and their hash.
+    - `SnapshotRecorder.capture_grounding(prompt, code)`: Store grounding prompt/code pair and their hashes.
+    - `SnapshotRecorder.capture_include(path, hash, content)`: Store an included file's metadata and content.
+    - `SnapshotRecorder.capture_code_hash(hash)`: Store the SHA-256 hash of the generated code.
+    - `SnapshotRecorder.capture_test_hash(hash)`: Store the SHA-256 hash of the generated tests.
+    - `SnapshotRecorder.capture_expanded_text(text)`: Store the final expanded text. Since dynamic outputs are redacted before inlining (see Requirements 11 and 12), this text contains redacted dynamic data but preserves static prompt content (like example emails or internal IPs) without inadvertent redaction. Store the text. The `prompt_hash` MUST be the SHA-256 of this text (the payload actually sent to the LLM) to ensure strict byte-for-byte reproducibility audits of the received payload.
+    - `SnapshotRecorder.write(output_path)`: Serialize to JSON with formatting.
+    - Integration: When a `snapshot_recorder` instance is passed to `preprocess`, it must capture all dynamic outputs (shell, web, query) and the final `expanded_text` (after all resolution passes).
+    - Set `has_nondeterministic_context: true` if any `<shell>`, `<web>`, `query=` tag, or grounding example is successfully expanded; otherwise `false`.
+    - `prompt_hash`: SHA-256 of the final (redacted) `expanded_text` sent to the LLM.
+    - For `<include>` tags (including backtick and `include-many`), capture `path`, `hash`, and `content` (NOT redacted) via `capture_include` if `snapshot_recorder` is active. Redaction applies to dynamic tool outputs (`<shell>`, `<web>`) before they are inlined into the prompt.
+15. Import the `redact` function from `pdd.core.redact` for use in `SnapshotRecorder`.
 
 % Circular Include Detection
 - Detect circular includes by tracking resolved file paths; raise `ValueError` with "Circular include" in the message if a file appears twice in the include chain

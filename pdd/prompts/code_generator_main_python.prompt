@@ -1,5 +1,21 @@
 <pdd-reason>Primary orchestration engine for transitioning .prompt files to source code, handling path resolution, incremental generation, and architectural conformance.</pdd-reason>
 
+<pdd-interface>
+{
+  "type": "module",
+  "module": {
+    "functions": [
+      {"name": "code_generator_main", "signature": "(ctx, prompt_file, output, force, snapshot_context, output_from_config: bool = False)", "returns": "Tuple[str, bool, float, str]"}
+    ],
+    "classes": [
+      {"name": "ArchitectureConformanceError", "methods": []},
+      {"name": "PublicSurfaceRegressionError", "methods": []},
+      {"name": "TestChurnError", "methods": []}
+    ]
+  }
+}
+</pdd-interface>
+
 <pdd-dependency>construct_paths_python.prompt</pdd-dependency>
 <pdd-dependency>preprocess_python.prompt</pdd-dependency>
 <pdd-dependency>code_generator_python.prompt</pdd-dependency>
@@ -13,8 +29,6 @@
 name: pdd/code_generator_main
 language: Python
 ---
-
-<pdd-dependency>auto_include_python.prompt</pdd-dependency>
 
 # Role and Scope
 You are an expert Python Backend Engineer responsible for the `code_generator_main` module. This module serves as the primary orchestration engine for the PDD CLI, coordinating the transition from a `.prompt` file to finalized source code. It must handle complex logic involving local/cloud LLM providers, incremental diff-based generation, Git-based version recovery, and extensible post-processing hooks.
@@ -102,6 +116,15 @@ You are an expert Python Backend Engineer responsible for the `code_generator_ma
 6. **Integration & Wiring**:
     - Implement opt-in "Auto-Wiring": detect public exports in generated Python files and insert/update import statements in the parent `__init__.py` only when `PDD_ENABLE_WIRING=1` is set. The default must not mutate sibling files; `PDD_SKIP_WIRING=1` must continue to override and disable wiring for backward compatibility.
     - Validate `<include>` tags in generated `.prompt` files to ensure they point to existing files.
+7. **Snapshot Capture**:
+    - Add `snapshot_context` and `output_from_config` parameters to `code_generator_main`. `output_from_config` is used by `sync_main` to indicate the output path was resolved from architecture/config rather than explicitly at the CLI.
+    - If `snapshot_context` is True, initialize `SnapshotRecorder` using the `run_id` from `ctx.obj` (defaulting to "local").
+    - Pass this recorder to the `preprocess()` call used to expand the prompt before generation.
+    - After generation (successful or failed), if the recorder is active:
+        - Call `capture_grounding(prompt, code)` for the grounding example used.
+        - Call `capture_code_hash(sha256(generated_code))` if code was generated.
+        - Call `capture_test_hash(sha256(tests_content))` if tests were generated.
+        - Write the snapshot to `.pdd/evidence/runs/<run_id>/snapshot_{Path(prompt_file).stem}.json`. Ensure the directory exists.
 
 # Dependencies
 <construct_paths>
@@ -158,7 +181,7 @@ You are an expert Python Backend Engineer responsible for the `code_generator_ma
 
 # Deliverables
 A single Python file containing:
-1. The primary `code_generator_main` function returning `(generated_code, was_incremental, total_cost, model_name)`.
+1. The primary `code_generator_main` function returning `(generated_code, was_incremental, total_cost, model_name)`. It accepts `snapshot_context: bool = False` and `output_from_config: bool = False`.
 2. Private helper functions for Git operations (`_run_git_command`, `is_git_repository`).
 3. Private helpers for architecture and wiring (`_verify_architecture_conformance`, the `_verify_architecture_json_conformance` symbol-existence helper it delegates to, the `pdd-interface` signature helpers `_verify_pdd_interface_signatures` / `_extract_pdd_interface_signatures` / `_find_target_function`, the parameter introspection helpers `_parse_declared_param_names` / `_collect_actual_param_names` (name-only) and `_parse_declared_param_specs` / `_collect_actual_param_specs` / `_ast_args_to_specs` (name + annotation + default, used for the drift check), the public-surface helpers `_snapshot_public_surface` / `_diff_public_surface` / `_prompt_has_breaking_change_marker`, the test-churn helper `_compute_test_churn_ratio`, `_should_wire_generated_exports`, `_wire_to_parent_init`).
 4. Logic for handling Cloud API requests, including JWT authentication and error code handling.

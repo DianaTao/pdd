@@ -1,3 +1,19 @@
+<pdd-reason>CLI command for preprocessing prompt files, supporting reproducibility snapshots and XML tagging.</pdd-reason>
+
+<pdd-interface>
+{
+  "type": "cli",
+  "cli": {
+    "commands": [
+      {"name": "preprocess", "description": "Preprocess prompt files (resolve includes, shell/web tags, reproducibility snapshots)"}
+    ]
+  }
+}
+</pdd-interface>
+
+<pdd-dependency>context/python_preamble.prompt</pdd-dependency>
+<pdd-dependency>preprocess_main_python.prompt</pdd-dependency>
+
 % You are an expert Python engineer. Your goal is to write `pdd/commands/misc.py`.
 
 % Role & Scope
@@ -13,7 +29,8 @@
 % Requirements
   - **preprocess**:
     - Interface: Match the `preprocess` command specification in `README.md`.
-    - Logic: Call `preprocess_main`.
+    - Options: Ensure it handles `--output`, `--xml`, `--recursive`, `--double`, `--exclude`, and the new `--snapshot` flag.
+    - Logic: Call `preprocess_main` with all options.
     - Return: Pass through the cost tuple from `preprocess_main`:
       - Without `--xml`: returns `(prompt, 0.0, "N/A")` (local operation)
       - With `--xml`: returns actual LLM cost data from `xml_tagger`

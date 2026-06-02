@@ -1,6 +1,18 @@
 <pdd-reason>CLI entry point for the unified sync workflow, handling both single-module and global project-wide synchronization.</pdd-reason>
 
+<pdd-interface>
+{
+  "type": "module",
+  "module": {
+    "functions": [
+      {"name": "sync_main", "signature": "(ctx, basename, max_attempts, budget, skip_verify, skip_tests, target_coverage, dry_run, no_steer, steer_timeout, agentic_mode, one_session, snapshot_context)", "returns": "Tuple[Dict[str, Any], float, str]"}
+    ]
+  }
+}
+</pdd-interface>
+
 <pdd-dependency>core/cloud_python.prompt</pdd-dependency>
+<pdd-dependency>preprocess_python.prompt</pdd-dependency>
 <pdd-dependency>code_generator_main_python.prompt</pdd-dependency>
 <pdd-dependency>agentic_sync_runner_python.prompt</pdd-dependency>
 # sync_main_python.prompt
@@ -29,6 +41,7 @@
         - `steer_timeout` (Optional[float]): Steering choice timeout in seconds. None = default timeout.
         - `agentic_mode` (bool): When True, Python behaves like non-Python languages (uses agentic path for operations)
         - `one_session` (bool): When True, run example/crash/verify/test/fix in a single agentic session instead of separate steps
+        - `snapshot_context` (bool): When True, triggers snapshot capture during code generation phases.
 
     Outputs:
         - Tuple of (Dict[str, Any] results, float total_cost, str model_name)
@@ -89,7 +102,7 @@
     - Mutually exclusive with `skip_tests` and `skip_verify` (raise UsageError if combined)
     - Use `get_pdd_file_paths()` from `sync_determine_operation` to resolve module file paths
     - **Fingerprint check**: If not force mode, call `sync_determine_operation()` to check if module is already synced; skip if operation is "nothing"
-    - **Phase 1 (Generation)**: If code file doesn't exist or `force`, run `code_generator_main()` to generate the code file; track the generation cost as `pre_cost`. Pass `output_from_config=True` — the resolved code path comes from `get_pdd_file_paths()` (which uses `.pddrc` `generate_output_path`), not an explicit user `--output` flag, so front-matter `output:` should still take precedence over the .pddrc default.
+    - **Phase 1 (Generation)**: If code file doesn't exist or `force`, run `code_generator_main()` to generate the code file; track the generation cost as `pre_cost`. Pass `output_from_config=True` and `snapshot_context=snapshot_context`. The resolved code path comes from `get_pdd_file_paths()` (which uses `.pddrc` `generate_output_path`), not an explicit user `--output` flag, so front-matter `output:` should still take precedence over the .pddrc default.
     - **Architecture-conformance / public-surface / test-churn retry (#866, #1012)**: Wrap the `code_generator_main()` call in a retry loop bounded by `MAX_CONFORMANCE_ATTEMPTS` (imported from `pdd.agentic_sync_runner`). The loop catches three typed exceptions raised from `code_generator_main`: `ArchitectureConformanceError`, `PublicSurfaceRegressionError`, and `TestChurnError`. For each, add `exc.total_cost` to `pre_cost`, remember `exc.model_name`, set `PDD_REPAIR_DIRECTIVE` to `exc.repair_directive`, and retry only if budget remains.
         - Track the failure signature across attempts: sorted `missing_symbols` for conformance, sorted `removed_symbols` for public-surface, `(round(churn_ratio, 2), pre_line_count)` for test-churn. If the next attempt fails with the **identical** signature, abort the loop (no progress) instead of looping forever. Test-churn additionally caps at ONE repair attempt — the additive-only directive either lands the first try or stays stuck.
         - **`.pddrc` / `strength` stability across retries (#1012)**: in-process retries reuse the same resolved `ctx.obj` (`strength`, `temperature`, `context_override`, `context_config`) that was set up before the first `code_generator_main` call, so retries cannot silently switch model or context. Do NOT re-resolve `.pddrc` mid-loop. (The cross-subprocess pinning needed when `agentic_sync_runner` retries a child process is handled separately in `agentic_sync_runner_python.prompt` Req 9b.)
@@ -116,6 +129,7 @@
 
 10. **Multi-Language Processing**:
     - Process each detected language separately via sync_orchestration (or one-session mode)
+    - Pass `snapshot_context=snapshot_context` to `sync_orchestration` or the one-session block.
     - Track remaining_budget across languages (reduce after each language's cost)
     - Skip subsequent languages if budget exhausted
     - Aggregate results and costs from all language syncs

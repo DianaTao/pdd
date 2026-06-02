@@ -1,0 +1,43 @@
+<pdd-reason>Scrubs sensitive information like API keys, tokens, and credentials from text strings to prevent data leakage in snapshots and logs.</pdd-reason>
+
+<pdd-interface>
+{
+  "type": "module",
+  "module": {
+    "functions": [
+      {"name": "redact", "signature": "(text: str)", "returns": "str"}
+    ]
+  }
+}
+</pdd-interface>
+
+<pdd-dependency>context/python_preamble.prompt</pdd-dependency>
+
+<include>context/python_preamble.prompt</include>
+
+% Goal
+Scrub sensitive information from text strings to prevent data leakage in snapshots and logs.
+
+% Role & Scope
+A utility module for redacting credentials, tokens, and other sensitive data from PDD artifacts.
+
+% Requirements
+1. Provide a `redact(text: str) -> str` function that replaces sensitive patterns with placeholders.
+2. Redact common API key patterns (GitHub, OpenAI, Google, Anthropic, AWS, Azure).
+3. Redact Bearer tokens and other Authorization header values.
+4. Redact environment variable values that look like secrets (e.g., matching `*_KEY`, `*_TOKEN`, `*_SECRET`).
+5. Redact email addresses and IP addresses. While primarily intended for dynamic tool outputs, this applies to any text passed to `redact()`.
+6. Use consistent placeholders like `[REDACTED_API_KEY]`, `[REDACTED_EMAIL]`, and `[REDACTED_IP]`.
+7. Ensure redaction is case-insensitive where appropriate.
+8. Implementation should be efficient for large expanded prompt texts.
+9. **Documentation Policy**: The generated code MUST include a comprehensive documented redaction policy in the module-level docstring or as a block of comments. This policy should explicitly list what categories of data are redacted and what placeholders are used.
+
+% Instructions
+- Include the redaction policy documentation within the generated code comments.
+
+
+% Dependencies
+<utils><include>context/core/utils_example.py</include></utils>
+
+% Deliverables
+- Code: `pdd/core/redact.py`

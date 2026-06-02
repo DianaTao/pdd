@@ -928,6 +928,7 @@ Options:
 - `--durable-branch TEXT`: Durable mode only. Override the durable checkpoint branch name. Default is `sync/issue-<N>` derived from the GitHub issue. Refused if it resolves to `main`, `master`, or the repository default branch.
 - `--no-resume`: Durable mode only. Ignore existing `PDD-Sync-Checkpoint-V1` commit trailers on the durable branch and re-run every selected module. By default, durable sync reads checkpoint trailers (`PDD-Sync-Checkpoint-V1: issue=<N> module=<basename>`) and skips modules already checkpointed for the same issue, which is what makes a cloud rerun safely resume completed work after a partial failure.
 - `--durable-max-parallel INT`: Durable mode only. Cap how many module worktrees run concurrently. Defaults to the standard runner concurrency. A total budget still forces sequential execution.
+- `--snapshot-context`: Triggers snapshot capture during code generation phases to persist dynamic tool outputs to `.pdd/evidence/runs/<run_id>/snapshot_<basename>.json` for reproducible debugging.
 
 **Durable Issue Sync** (`--durable`):
 
@@ -1168,6 +1169,7 @@ Options:
 - `--experimental-prd`: Explicitly opt in to experimental Incremental PRD Mode for PRD-like files (`.md`, `.markdown`, `.txt`, `.rst`, `.adoc`) or GitHub issue URLs. Requires `--incremental`.
 - `--unit-test FILENAME`: Path to a unit test file. If provided, automatic test discovery is disabled and only the content of this file is included in the prompt, instructing the model to generate code that passes the specified tests.
 - `--exclude-tests`: Do not automatically include test files found in the default tests directory.
+- `--snapshot-context`: When specified, triggers snapshot capture during preprocessing to write dynamic context outputs (shell, web, semantic query) to `.pdd/evidence/runs/<run_id>/snapshot_<basename>.json` for reproducible debugging.
 
 **Parameter Variables (-e/--env)**:
 Pass key=value pairs to parameterize a prompt so one prompt can generate multiple variants (e.g., multiple files) by invoking `generate` repeatedly with different values.
@@ -1994,6 +1996,7 @@ Options:
 - `--recursive`: Recursively preprocess all prompt files in the prompt file.
 - `--double`: Curly brackets will be doubled.
 - `--exclude`: List of keys to exclude from curly bracket doubling.
+- `--snapshot`: Capture all dynamic context (expanded text, includes, shell outputs, web outputs, semantic queries) and write to a stable artifact `.pdd/evidence/runs/<run_id>/snapshot_<basename>.json` for auditing and reproducibility.
 
 #### XML-like Tags
 
