@@ -319,6 +319,43 @@
     }
   },
   {
+    "reason": "File editor module that uses Claude 3.7 to edit files based on natural language instructions.",
+    "description": "Enables editing files through natural language instructions using a LangGraph workflow and MCP tools. Features SHA256 hash tracking for safe edits.",
+    "dependencies": [
+      "edit_file_python.prompt"
+    ],
+    "priority": 15,
+    "filename": "edit_file_python.prompt",
+    "filepath": "pdd/edit_file.py",
+    "tags": [
+      "module",
+      "python",
+      "editing",
+      "langgraph"
+    ],
+    "interface": {
+      "type": "module",
+      "module": {
+        "functions": [
+          {
+            "name": "edit_file",
+            "signature": "(file_path: str, edit_instructions: str, mcp_config_path: str = None) -> tuple[bool, Optional[str]]",
+            "returns": "tuple[bool, Optional[str]]"
+          },
+          {
+            "name": "run_edit_in_subprocess",
+            "signature": "(file_path: str, edit_instructions: str) -> Tuple[bool, Optional[str]]",
+            "returns": "Tuple[bool, Optional[str]]"
+          }
+        ]
+      }
+    },
+    "position": {
+      "x": 8000,
+      "y": 1400
+    }
+  },
+  {
     "reason": "Generates and verifies language-specific tests.",
     "description": "Creates tests appropriate for the target language. Handles language-specific testing patterns.",
     "dependencies": [],
@@ -459,51 +496,6 @@
             "errors": [
               "AuthError"
             ]
-          }
-        ]
-      }
-    }
-  },
-  {
-    "reason": "Daily Rising Stars resurface check \u2014 Cloud Scheduler function scanning contribution thresholds to identify high-potential nurtured candidates and detect churned candidates",
-    "description": "Cloud Function entry point recruiting_resurface_check triggered by Cloud Scheduler (daily). Scans all recruiting/candidates with crmFunnelStage in ('nurture', 'contributing'). For each candidate, evaluates four resurface criteria from config thresholds: (1) merged_prs >= threshold (e.g., 3 merged PRs), (2) hackathon_score >= threshold (e.g., top 25%), (3) platform_usage_days >= threshold (power user), (4) marketplace_examples >= threshold (marketplace contributor). Candidates meeting any criterion are marked resurfaced=true with appropriate ResurfaceReason, CrmFunnelStage updated to 'resurfaced', and CRM GitHub Issue label updated from recruiting-nurture to recruiting-resurfaced. Also detects churned candidates: if last_activity_at > 60 days ago and no contributions, sets crmFunnelStage='churned' and updates CRM label to recruiting-churned. Verifies merged PR counts via GitHub API to prevent gaming. Logs all resurface and churn transitions. Returns summary counts.",
-    "dependencies": [],
-    "priority": 18,
-    "filename": "resurface_check_Python.prompt",
-    "filepath": "extensions/recruiting/resurface_check.py",
-    "tags": [
-      "backend",
-      "api",
-      "scheduling",
-      "nurture"
-    ],
-    "context_urls": [
-      {
-        "url": "https://cloud.google.com/scheduler/docs/creating",
-        "purpose": "Cloud Scheduler daily job configuration"
-      },
-      {
-        "url": "https://firebase.google.com/docs/firestore/query-data/queries",
-        "purpose": "Firestore compound queries for contribution threshold scanning"
-      },
-      {
-        "url": "https://docs.github.com/en/rest/pulls/pulls#list-pull-requests",
-        "purpose": "GitHub API for merged PR count verification"
-      },
-      {
-        "url": "https://cloud.google.com/functions/docs/writing/write-http-functions",
-        "purpose": "Cloud Functions HTTP entry point for scheduler triggers"
-      }
-    ],
-    "interface": {
-      "type": "api",
-      "api": {
-        "endpoints": [
-          {
-            "method": "POST",
-            "path": "/recruiting_resurface_check",
-            "auth": "cloud-scheduler",
-            "responseSchema": "{ scanned: int, resurfaced: int, churned: int, reasons: dict }"
           }
         ]
       }
@@ -2485,9 +2477,15 @@
     "reason": "CLI entry point for the fix command; auto-submit short-circuits in cloud executors and bounds the Device Flow JWT call so a stuck headless auth cannot eat the fix budget.",
     "description": "Command-line interface for fix. Parses arguments, orchestrates the workflow, and formats output. The post-success auto-submit branch skips when CloudConfig.is_running_in_cloud() is true, calls CloudConfig.ensure_default_env() before lower-level cached JWT lookup, and wraps the asyncio JWT request in asyncio.wait_for (PDD_AUTO_SUBMIT_AUTH_TIMEOUT_S, default 300s / 5 min, sized for interactive Device Flow auth; defensive parse falls back to 300s on malformed values).",
     "dependencies": [
+      "preprocess_python.prompt",
+      "construct_paths_python.prompt",
+      "fix_errors_from_unit_tests_python.prompt",
+      "fix_error_loop_python.prompt",
+      "get_jwt_token_python.prompt",
+      "get_language_python.prompt",
+      "core/cloud_python.prompt",
       "agentic_langtest_python.prompt",
-      "auth_service_python.prompt",
-      "core/cloud_python.prompt"
+      "auth_service_python.prompt"
     ],
     "priority": 66,
     "filename": "fix_main_python.prompt",
@@ -3048,12 +3046,12 @@
     }
   },
   {
-    "reason": "LLM prompt template for agentic bug step4 reproduce operations.",
-    "description": "Defines the prompt structure for agentic bug step4 reproduce. Invoked by the corresponding Python module to format LLM requests.",
+    "reason": "LLM prompt template for agentic bug step5 reproduce operations.",
+    "description": "Defines the prompt structure for agentic bug step5 reproduce. Invoked by the corresponding Python module to format LLM requests.",
     "dependencies": [],
     "priority": 75,
-    "filename": "agentic_bug_step4_reproduce_LLM.prompt",
-    "filepath": "prompts/agentic_bug_step4_reproduce_LLM.prompt",
+    "filename": "agentic_bug_step5_reproduce_LLM.prompt",
+    "filepath": "prompts/agentic_bug_step5_reproduce_LLM.prompt",
     "tags": [
       "agentic",
       "config",
@@ -3170,12 +3168,12 @@
     }
   },
   {
-    "reason": "Creates draft PR with failing tests and PDD fix command for step 10 of agentic bug workflow.",
-    "description": "Step 10 (final step) of the agentic bug workflow. Creates a draft pull request with failing tests and links it to the GitHub issue. Includes pdd fix command for resolving the bug.",
+    "reason": "Creates draft PR with failing tests and PDD fix command for step 12 of agentic bug workflow.",
+    "description": "Step 12 (final step) of the agentic bug workflow. Creates a draft pull request with failing tests and links it to the GitHub issue. Includes pdd fix command for resolving the bug.",
     "dependencies": [],
     "priority": 80,
-    "filename": "agentic_bug_step10_pr_LLM.prompt",
-    "filepath": "prompts/agentic_bug_step10_pr_LLM.prompt",
+    "filename": "agentic_bug_step12_pr_LLM.prompt",
+    "filepath": "prompts/agentic_bug_step12_pr_LLM.prompt",
     "tags": [
       "agentic",
       "config",
@@ -3185,7 +3183,7 @@
     "interface": {
       "type": "command",
       "command": {
-        "name": "agentic_bug_step10",
+        "name": "agentic_bug_step12",
         "description": "Generate draft PR with failing tests and link to GitHub issue"
       }
     },
@@ -4356,7 +4354,7 @@
     "dependencies": [],
     "priority": 125,
     "filename": "regression_bash.prompt",
-    "filepath": "regression.sh",
+    "filepath": "prompts/regression_bash.prompt",
     "tags": [
       "cli",
       "shell"
@@ -4422,7 +4420,7 @@
     "dependencies": [],
     "priority": 127,
     "filename": "run_generated_python.prompt",
-    "filepath": "pdd/run_generated.py",
+    "filepath": "utils/run_generated.py",
     "tags": [
       "generation",
       "module",
@@ -5124,7 +5122,7 @@
     "dependencies": [],
     "priority": 143,
     "filename": "prompt_tester_python.prompt",
-    "filepath": "pdd/prompt_tester.py",
+    "filepath": "tests/prompt_tester.py",
     "tags": [
       "module",
       "python",
@@ -9694,5 +9692,180 @@
       "x": 0,
       "y": 0
     }
+  },
+  {
+    "filename": "app.py",
+    "filepath": "pdd/server/app.py",
+    "description": "Main FastAPI application for the PDD server.",
+    "reason": "Entry point for the REST API and web frontend.",
+    "priority": 10,
+    "tags": [
+      "server",
+      "api",
+      "fastapi"
+    ]
+  },
+  {
+    "filename": "auth.py",
+    "filepath": "pdd/server/routes/auth.py",
+    "description": "Authentication routes for the PDD server.",
+    "reason": "Handles login, logout, and token verification for the web frontend.",
+    "priority": 10,
+    "tags": [
+      "server",
+      "api",
+      "auth"
+    ]
+  },
+  {
+    "filename": "click_executor.py",
+    "filepath": "pdd/server/click_executor.py",
+    "description": "Executes PDD commands via Click's internal API.",
+    "reason": "Allows the server to run CLI commands without spawning separate processes for each call.",
+    "priority": 10,
+    "tags": [
+      "server",
+      "executor"
+    ]
+  },
+  {
+    "filename": "executor.py",
+    "filepath": "pdd/server/executor.py",
+    "description": "Core command execution logic for the PDD server.",
+    "reason": "Coordinates command execution, logging, and result reporting.",
+    "priority": 10,
+    "tags": [
+      "server",
+      "executor"
+    ]
+  },
+  {
+    "filename": "models.py",
+    "filepath": "pdd/server/models.py",
+    "description": "Data models for the PDD server API.",
+    "reason": "Defines request and response schemas using Pydantic.",
+    "priority": 10,
+    "tags": [
+      "server",
+      "api",
+      "models"
+    ]
+  },
+  {
+    "filename": "security.py",
+    "filepath": "pdd/server/security.py",
+    "description": "Security and authorization utilities for the PDD server.",
+    "reason": "Implements CORS, rate limiting, and other security measures.",
+    "priority": 10,
+    "tags": [
+      "server",
+      "security"
+    ]
+  },
+  {
+    "filename": "terminal_spawner.py",
+    "filepath": "pdd/server/terminal_spawner.py",
+    "description": "Spawns and manages interactive terminal sessions.",
+    "reason": "Enables the web UI to provide an interactive CLI experience.",
+    "priority": 10,
+    "tags": [
+      "server",
+      "terminal"
+    ]
+  },
+  {
+    "filename": "token_counter.py",
+    "filepath": "pdd/server/token_counter.py",
+    "description": "Utilities for counting tokens and estimating LLM costs.",
+    "reason": "Provides real-time cost tracking for server-initiated agent tasks.",
+    "priority": 10,
+    "tags": [
+      "server",
+      "cost-tracking"
+    ]
+  },
+  {
+    "filename": "architecture.py",
+    "filepath": "pdd/server/routes/architecture.py",
+    "description": "Architecture-related API routes.",
+    "reason": "Exposes project architecture and dependency information to the frontend.",
+    "priority": 10,
+    "tags": [
+      "server",
+      "api",
+      "architecture"
+    ]
+  },
+  {
+    "filename": "commands.py",
+    "filepath": "pdd/server/routes/commands.py",
+    "description": "Routes for triggering PDD commands.",
+    "reason": "Main entry point for CLI command execution via the web UI.",
+    "priority": 10,
+    "tags": [
+      "server",
+      "api",
+      "commands"
+    ]
+  },
+  {
+    "filename": "config.py",
+    "filepath": "pdd/server/routes/config.py",
+    "description": "Routes for managing project configuration.",
+    "reason": "Allows the web UI to read and update .pddrc and other settings.",
+    "priority": 10,
+    "tags": [
+      "server",
+      "api",
+      "config"
+    ]
+  },
+  {
+    "filename": "extracts.py",
+    "filepath": "pdd/server/routes/extracts.py",
+    "description": "Routes for accessing generated code extracts.",
+    "reason": "Enables the frontend to display and manage AI-generated code snippets.",
+    "priority": 10,
+    "tags": [
+      "server",
+      "api",
+      "extracts"
+    ]
+  },
+  {
+    "filename": "files.py",
+    "filepath": "pdd/server/routes/files.py",
+    "description": "File system access routes.",
+    "reason": "Provides the frontend with file browsing and editing capabilities.",
+    "priority": 10,
+    "tags": [
+      "server",
+      "api",
+      "files"
+    ]
+  },
+  {
+    "filename": "prompts.py",
+    "filepath": "pdd/server/routes/prompts.py",
+    "description": "Routes for managing LLM prompts.",
+    "reason": "Enables the frontend to view, edit, and test prompt templates.",
+    "priority": 10,
+    "tags": [
+      "server",
+      "api",
+      "prompts"
+    ]
+  },
+  {
+    "filename": "websocket.py",
+    "filepath": "pdd/server/routes/websocket.py",
+    "description": "WebSocket endpoints for real-time updates.",
+    "reason": "Streams job progress and terminal output to the frontend.",
+    "priority": 10,
+    "tags": [
+      "server",
+      "api",
+      "websocket"
+    ]
   }
 ]

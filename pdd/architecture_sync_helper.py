@@ -32,7 +32,7 @@ def filepath_to_prompt_filename(filepath: str, language: str) -> str:
     new_filename = f"{filename_stem}_{language}.prompt"
 
     if directory == pathlib.Path('.'):
-        result_path = new_filename
+        result_path = pathlib.Path(new_filename)
     else:
         result_path = directory / new_filename
 

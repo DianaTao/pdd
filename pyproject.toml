@@ -76,7 +76,8 @@ dependencies = [
     "websockets>=13.0",
     "watchdog>=4.0.0",
     "tiktoken>=0.7.0",
-    "filelock>=3.12"]
+    "filelock>=3.12",
+    "flask>=3.0.0"]
 requires-python = ">=3.12"
 
 [project.urls]

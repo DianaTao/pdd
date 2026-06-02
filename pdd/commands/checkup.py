@@ -436,7 +436,7 @@ def checkup(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         simplify_args = list(ctx.args)
         if show_help:
             simplify_args.append("--help")
-        exit_code = checkup_simplify.main(
+        result = checkup_simplify.main(
             args=simplify_args,
             prog_name="pdd checkup simplify",
             standalone_mode=False,
@@ -444,8 +444,10 @@ def checkup(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         )
         if show_help:
             ctx.exit()
-        if exit_code:
-            raise click.exceptions.Exit(exit_code)
+        if isinstance(result, tuple):
+            return result
+        if result:
+            raise click.exceptions.Exit(result)
         return None
 
     if target == "lint":

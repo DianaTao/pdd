@@ -121,7 +121,7 @@ ENV_VAR_MAP: Dict[str, Dict[str, str]] = {
 }
 
 # Define mapping from context config keys to output keys for different commands
-CONTEXT_CONFIG_MAP: Dict[str, Dict[str, str]] = {
+CONTEXT_CONFIG_MAP: Dict[str, Dict[str, Optional[str]]] = {
     'generate': {'output': 'generate_output_path'},
     'example': {'output': 'example_output_path'},
     'test': {'output': 'test_output_path'},

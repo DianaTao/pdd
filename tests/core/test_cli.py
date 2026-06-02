@@ -205,6 +205,7 @@ def test_cli_command_help(runner):
     assert result.exit_code == 0
     assert "Usage: cli generate [OPTIONS]" in result.output
 
+@patch.dict(os.environ, {"PDD_AUTO_UPDATE": "true"})
 @patch('pdd.core.cli.auto_update')
 @patch('pdd.commands.generate.code_generator_main')
 @patch('pdd.cli.construct_paths')
@@ -234,6 +235,7 @@ def test_cli_global_options_defaults(mock_construct, mock_main, mock_auto_update
     assert ctx.obj['time'] == DEFAULT_TIME
     mock_auto_update.assert_called_once_with()
 
+@patch.dict(os.environ, {"PDD_AUTO_UPDATE": "true"})
 @patch('pdd.core.cli.auto_update')
 @patch('pdd.commands.generate.code_generator_main')
 @patch('pdd.cli.construct_paths')
@@ -273,6 +275,7 @@ def test_cli_global_options_explicit(mock_construct, mock_main, mock_auto_update
     assert ctx.obj['time'] == 0.7
     mock_auto_update.assert_called_once_with()
 
+@patch.dict(os.environ, {"PDD_AUTO_UPDATE": "true"})
 @patch('pdd.core.cli.auto_update')
 @patch('pdd.commands.generate.code_generator_main')
 @patch('pdd.cli.construct_paths')
@@ -294,6 +297,7 @@ def test_cli_global_options_quiet_overrides_verbose(mock_construct, mock_main, m
     assert ctx.obj['quiet'] is True
     mock_auto_update.assert_called_once_with()
 
+@patch.dict(os.environ, {"PDD_AUTO_UPDATE": "true"})
 @patch('pdd.core.cli.auto_update')
 @patch('pdd.commands.generate.code_generator_main')
 @patch('pdd.cli.construct_paths')
@@ -329,6 +333,7 @@ def test_cli_auto_update_not_called_when_disabled(mock_construct, mock_main, moc
     runner.invoke(cli_command, ["generate", str(files["test.prompt"])])
     mock_auto_update.assert_not_called()
 
+@patch.dict(os.environ, {"PDD_AUTO_UPDATE": "true"})
 @patch('pdd.core.cli.auto_update', side_effect=Exception("Network error"))
 @patch('pdd.commands.generate.code_generator_main')
 @patch('pdd.cli.construct_paths')

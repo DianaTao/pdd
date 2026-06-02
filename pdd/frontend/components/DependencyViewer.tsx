@@ -509,14 +509,14 @@ const DependencyViewer: React.FC<DependencyViewerProps> = ({
     let positionedTopLevelNodes: Node<ModuleNodeData | GroupNodeData>[];
     if (!noneHavePositions) {
       // Hybrid: use Dagre positions but override top-level module nodes with saved positions
-      const savedPositions = new Map(
+      const savedPositions = new Map<string, { x: number; y: number }>(
         visibleModules
           .filter((m) => m.position && !(m.group && expandedGroups.has(m.group)))
-          .map((m) => [m.filename, m.position!])
+          .map((m) => [m.filename, m.position as { x: number; y: number }])
       );
-      positionedTopLevelNodes = layouted.nodes.map((node) => {
+      positionedTopLevelNodes = layouted.nodes.map((node): Node<ModuleNodeData | GroupNodeData> => {
         const savedPos = savedPositions.get(node.id);
-        return savedPos ? { ...node, position: savedPos } : node;
+        return savedPos ? { ...node, position: { x: savedPos.x, y: savedPos.y } } : node;
       });
     } else {
       positionedTopLevelNodes = layouted.nodes;
