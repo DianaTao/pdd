@@ -20,6 +20,7 @@ from .coverage import coverage_cmd
 from .gate import gate_cmd
 from .drift import drift_cmd
 from .gate import gate_cmd
+from .policy import policy_group
 from .prompt import prompt_lint
 
 
@@ -373,6 +374,8 @@ def checkup(  # pylint: disable=too-many-arguments,too-many-positional-arguments
       pdd checkup snapshot PROMPT_FILE [OPTIONS]
     Evidence and waiver gate:
       pdd checkup gate [TARGET] [OPTIONS]  →  evidence manifests and waiver policy.
+    Capability side-effect policy:
+      pdd checkup policy check TARGET [OPTIONS]  →  AST checks vs <capabilities>.
     Regeneration drift:
       pdd checkup drift <DEVUNIT> [OPTIONS]
     """
@@ -385,6 +388,7 @@ def checkup(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         "coverage",
         "drift",
         "gate",
+        "policy",
         "simplify",
         "snapshot",
     }:
@@ -536,6 +540,32 @@ def checkup(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         exit_code = drift_cmd.main(
             args=drift_args,
             prog_name="pdd checkup drift",
+            standalone_mode=False,
+            obj=ctx.obj,
+        )
+        if exit_code:
+            raise click.exceptions.Exit(exit_code)
+        return None
+
+    if target == "policy":
+        policy_args = list(ctx.args)
+        if strict:
+            if policy_args and policy_args[0] == "check":
+                policy_args.insert(1, "--strict")
+            else:
+                policy_args.insert(0, "--strict")
+        if show_help and not policy_args:
+            click.echo(
+                policy_group.get_help(
+                    click.Context(policy_group, info_name="pdd checkup policy")
+                )
+            )
+            return None
+        if show_help:
+            policy_args.append("--help")
+        exit_code = policy_group.main(
+            args=policy_args,
+            prog_name="pdd checkup policy",
             standalone_mode=False,
             obj=ctx.obj,
         )

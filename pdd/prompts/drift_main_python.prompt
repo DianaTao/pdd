@@ -1,0 +1,39 @@
+<pdd-reason>Regeneration stability checks for PDD dev units (drift check).</pdd-reason>
+
+<pdd-interface>
+{
+  "type": "module",
+  "module": {
+    "functions": [
+      {
+        "name": "run_drift",
+        "description": "Orchestrates multi-run regeneration to ensure deterministic output and behavioral consistency.",
+        "parameters": [
+          {"name": "devunit", "type": "str"},
+          {"name": "project_root", "type": "Path"},
+          {"name": "runs", "type": "int", "default": 1},
+          {"name": "model", "type": "Optional[str]", "default": null},
+          {"name": "from_evidence", "type": "Optional[Path]", "default": null},
+          {"name": "code_file", "type": "Optional[Path]", "default": null},
+          {"name": "dry_run", "type": "bool", "default": false},
+          {"name": "max_cost_usd", "type": "Optional[float]", "default": null}
+        ],
+        "returns": "DriftReport"
+      }
+    ]
+  }
+}
+</pdd-interface>
+<pdd-dependency>code_generator_python.prompt</pdd-dependency>
+<pdd-dependency>policy_check_python.prompt</pdd-dependency>
+<pdd-dependency>evidence_manifest_python.prompt</pdd-dependency>
+
+% Requirements
+1. Support multi-run regeneration (default 1 run if just checking current state).
+2. Compare candidate code against baseline using both hash and API signatures.
+3. Integrate with `pdd checkup policy check` when the prompt defines `<capabilities>` (distinct from evidence `pdd checkup gate`).
+4. Calculate and report cost metrics across all runs.
+5. Support sandbox isolation for verification steps.
+
+% Deliverables
+- Code: `pdd/drift_main.py`

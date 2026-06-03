@@ -57,6 +57,8 @@ For pre-merge prompt and user-story quality (vague terms, vocabulary, optional L
 
 For deterministic contract-section lint (`<contract_rules>`, `<coverage>`, waivers, story `## Covers`), see [docs/contract_check.md](docs/contract_check.md).
 
+For deterministic side-effect policy validation (`pdd policy check`), see [docs/policy_check.md](docs/policy_check.md).
+
 For a rule-to-story/test coverage matrix (`pdd checkup coverage`), see [docs/coverage_contracts.md](docs/coverage_contracts.md).
 ## Installation
 
@@ -2024,10 +2026,11 @@ PDD supports the following XML-like tags in prompt files. Note: XML-like tags (`
    ```xml
    <include>./path/to/file.txt</include>
    <include select="def:foo,class:Bar">src/utils.py</include>
+   <include select="pytest:test_my_feature">tests/test_existing.py</include>
    <include select="class:Handler" mode="interface">src/api.py</include>
    <include query="authentication flow">docs/api_reference.md</include>
    ```
-   - `select=` — deterministic structural extraction (functions, classes, line ranges, headings, regex, JSON/YAML paths). Composable via comma-separation.
+   - `select=` — deterministic structural extraction (functions, classes, pytest tests, API contract slices (`contract:symbol`), line ranges, headings, regex, JSON/YAML paths). Composable via comma-separation; values like `pytest:test_a,test_b` stay grouped.
    - `mode="interface"` — Python-only. Extracts signatures and docstrings with bodies replaced by `...`.
    - `query=` — LLM-powered semantic extraction, cached in `.pdd/extracts/`.
    - `optional` — when present on an `<include ...>` tag, a missing file resolves to an empty string (`""`) during non-recursive preprocessing (while still logging a warning).
@@ -3223,6 +3226,25 @@ pdd firecrawl-cache check <url>        # Check if a URL is cached
 ```
 
 **When to use**: Caching is automatic. Use `stats` to check cache status, `info` to view configuration, `check` to verify if a URL is cached, or `clear` to force re-scraping all URLs.
+
+### 23. policy check
+
+Verify generated code against side-effect rules in prompt `<capabilities>` blocks (network, shell, filesystem writes, env reads, sensitive logging). Primary entry point: **`pdd policy check`**. The same command is available as **`pdd checkup policy check`**. Review-loop gates run `pdd policy check` automatically for changed Python files whose prompt defines `<capabilities>`.
+
+```bash
+# Check one module (explicit prompt)
+pdd policy check src/module.py --prompt prompts/module_python.prompt
+
+# JSON for CI
+pdd policy check src/module.py --prompt prompts/module_python.prompt --json
+
+# Strict: flag side effects even when the prompt has no <capabilities>
+pdd policy check src/module.py --strict
+```
+
+**Options:** `--prompt`, `--json`, `--strict`, `--evidence` (writes `validation.policy` to an evidence manifest).
+
+**When to use**: During local development or CI to catch capability violations before merge. Distinct from **`pdd checkup gate`**, which enforces evidence-manifest YAML policy under `.pdd/`.
 
 ## Example Review Process
 
