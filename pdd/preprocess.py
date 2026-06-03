@@ -588,7 +588,17 @@ def _parse_attrs(attr_str: str) -> dict:
     # This keeps the include tag syntax ergonomic without requiring key="true".
     if "optional" not in attrs and re.search(r'(?<![A-Za-z0-9_])optional(?![A-Za-z0-9_])', attr_str):
         attrs["optional"] = "true"
+    if "expand" not in attrs and re.search(r'(?<![A-Za-z0-9_])expand(?![A-Za-z0-9_])', attr_str):
+        attrs["expand"] = "true"
     return attrs
+
+def _include_expand_dependencies(attrs: dict) -> bool:
+    """Return True when an include tag requests dependency expansion."""
+    expand_val = attrs.get("expand")
+    if expand_val is None:
+        return False
+    return str(expand_val).strip().lower() not in {"", "0", "false", "no", "off"}
+
 
 def process_include_tags(
     text: str,
@@ -723,7 +733,8 @@ def process_include_tags(
                     if not mode:
                         mode = "compressed" if compress else "full"
 
-                    if selectors_str or lines_str or mode != 'full':
+                    expand_dependencies = _include_expand_dependencies(attrs)
+                    if selectors_str or lines_str or mode != 'full' or expand_dependencies:
                         selectors = []
                         if selectors_str:
                             from pdd._selector_parse import parse_selectors_string
@@ -747,6 +758,7 @@ def process_include_tags(
                                     selectors=selectors,
                                     file_path=full_path,
                                     mode=mode,
+                                    expand_dependencies=expand_dependencies,
                                 )
                         except ImportError:
                             # Fall back to query if originally present, otherwise full file
