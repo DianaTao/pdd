@@ -763,12 +763,13 @@ def process_include_tags(
                         mode = "interface"
 
                 # Check for contracts/all mode
-                    if mode == "full" and ("all" in modes or "contracts" in modes):
-                        if any(file_path.endswith(ext) for ext in (".prompt", ".md", ".markdown", ".rst")):
-                            mode = "contracts"
+                if mode == "full" and ("all" in modes or "contracts" in modes):
+                    if any(file_path.endswith(ext) for ext in (".prompt", ".md", ".markdown", ".rst")):
+                        mode = "contracts"
 
-                if attrs.get("mode") is None and compress:
-                    mode = "compressed"
+                if attrs.get("mode") is None and compress and mode == "full":
+                    if os.path.splitext(file_path)[1].lower() == ".py":
+                        mode = "compressed"
 
             ext = os.path.splitext(file_path)[1].lower()
             image_extensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.heic']

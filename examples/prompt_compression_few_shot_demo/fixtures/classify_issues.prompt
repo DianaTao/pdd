@@ -1,0 +1,26 @@
+% Task
+Classify GitHub issues into JSON using the schema at the end of this prompt.
+
+% Few-shot examples (behavioral contract — preserve exactly)
+Input: "The app crashes when I click Save."
+Output: {"category": "bug", "severity": "high"}
+
+Input: "Can you add dark mode?"
+Output: {"category": "feature_request", "severity": "medium"}
+
+Input: "The README is missing install steps."
+Output: {"category": "documentation", "severity": "low"}
+
+Input: "Dashboard feels slow on mobile."
+Output: {"category": "usability", "severity": "medium"}
+
+% Grounding mold (Python few-shot include — compress docstrings, keep logic)
+<include>examples/prompt_compression_few_shot_demo/fixtures/classify_issue_fewshot.py</include>
+
+% Long redundant background (safe to compress via contracts mode)
+<include>examples/prompt_compression_few_shot_demo/fixtures/redundant_project_notes.md</include>
+
+% Required output schema (preserve exactly)
+Return JSON with keys:
+- category: one of bug | feature_request | documentation | usability | other
+- severity: one of low | medium | high

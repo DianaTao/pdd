@@ -1144,6 +1144,34 @@ Selectors are composable: `select="lines:1-5,def:main,def:helper"`. If a selecto
 
 Use `mode="compressed"` when you need implementation details (unlike `mode="interface"`) but want to save tokens by removing documentation. This mode reduces line counts by 20-40% for typical modules. PDD handles token budget management automatically: if a compressed include exceeds 30,000 tokens, it falls back to `mode="interface"` (preserving sibling-test `patch()` targets), then to a truncated full copy if still over budget.
 
+### Few-shot examples and compression
+
+**Few-shot examples** are input/output pairs (or Python grounding molds) that define
+behavioral contracts: expected JSON shape, classification mappings, tone, and
+reasoning patterns. They are not optional decoration.
+
+When compressing prompts:
+
+| Usually preserve | Usually safe to compress |
+|------------------|--------------------------|
+| Few-shot `Input:` / `Output:` pairs in the prompt body | Redundant project background and repeated onboarding prose |
+| Required output schemas and hard constraints | Docstrings and comment-only lines in Python few-shot includes |
+| Executable logic in `<include mode="compressed">` molds | Narrative `.md` sections outside PDD contract tags (`mode="contracts"`) |
+| Grounding/provenance metadata (`<pdd-interface>`, evidence manifests) | Long historical notes that do not change task behavior |
+
+If token budget forces summarizing examples, do so explicitly in a labeled
+**Preserved examples** section and keep representative input/output mappings plus
+the schema.
+
+**Runnable verification:** from the repo root,
+
+```bash
+python examples/prompt_compression_few_shot_demo/run_demo.py
+pytest -q tests/test_prompt_compression_few_shot_demo.py
+```
+
+See `examples/prompt_compression_few_shot_demo/README.md` for fixture details.
+
 **Attribute priority:** `select=` always wins over `query=` (deterministic, no LLM cost). `mode="interface"` and `mode="compressed"` are applied to the result of `select=`.
 
 ### Interfaces for Contracts, Examples for Usage
