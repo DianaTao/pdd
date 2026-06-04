@@ -38,6 +38,7 @@ def _write_sync_evidence_manifest(
     context_snapshot: Optional[Mapping[str, Any]] = None,
     grounding: Optional[Mapping[str, Any]] = None,
     reviewed: bool = False,
+    compress: bool = False,
 ) -> None:
     """Write or refresh the dev-unit evidence manifest for a sync attempt."""
     project_root = Path.cwd()
@@ -54,6 +55,7 @@ def _write_sync_evidence_manifest(
         model=model_name,
         cost_usd=total_cost,
         temperature=temperature,
+        compress=compress,
         validation=validation_from_sync(
             result,
             skip_tests=skip_tests,
@@ -195,6 +197,15 @@ def _write_sync_evidence_manifest(
     ),
 )
 @click.option(
+    "--compress",
+    is_flag=True,
+    default=False,
+    help=(
+        "Use AST-based compression for Python few-shot includes during sync "
+        "(auto-deps tags and generate preprocess expansion)."
+    ),
+)
+@click.option(
     "--model",
     "model",
     default=None,
@@ -203,6 +214,30 @@ def _write_sync_evidence_manifest(
          "the local llm_invoke route; for a chatgpt/* subscription model on a "
          "cloud-enabled install, also pass --local. Takes precedence over the "
          "PDD_MODEL_DEFAULT env var for this run only.",
+)
+@click.option(
+    "--compress-examples",
+    is_flag=True,
+    default=None,
+    help="Automatically apply mode=\"interface\" to example includes.",
+)
+@click.option(
+    "--compress-test-context",
+    is_flag=True,
+    default=None,
+    help="Automatically compress test context to failing tests only.",
+)
+@click.option(
+    "--context-compression",
+    type=click.Choice(["off", "test", "examples", "contracts", "all"]),
+    default=None,
+    help="Set context compression mode for this sync run.",
+)
+@click.option(
+    "--compression-fallback",
+    type=click.Choice(["full", "error"]),
+    default=None,
+    help="Behavior when context compression fails (default: full).",
 )
 @click.pass_context
 @track_cost
@@ -228,7 +263,12 @@ def sync(
     durable_max_parallel: Optional[int],
     evidence: bool,
     snapshot_context: bool,
+    compress: bool,
     model: Optional[str] = None,
+    compress_examples: Optional[bool] = None,
+    compress_test_context: Optional[bool] = None,
+    context_compression: Optional[str] = None,
+    compression_fallback: Optional[str] = None,
 ) -> Optional[Tuple[str, float, str]]:
     """
     Synchronize prompts with code and tests.
@@ -237,6 +277,25 @@ def sync(
     'prompts/my_module_python.prompt'), a GitHub issue URL for agentic
     multi-module sync, or omitted for project-wide Tier 1 architecture sync.
     """
+    from ..config_resolution import merge_cli_compression_override
+
+    ctx.ensure_object(dict)
+    cli_compression: dict[str, object] = {}
+    if compress_examples is not None:
+        ctx.obj["compress_examples"] = compress_examples
+        cli_compression["compress_examples"] = compress_examples
+    if compress_test_context is not None:
+        ctx.obj["compress_test_context"] = compress_test_context
+        cli_compression["compress_test_context"] = compress_test_context
+    if context_compression is not None:
+        ctx.obj["context_compression"] = context_compression
+        cli_compression["context_compression"] = context_compression
+    if compression_fallback is not None:
+        ctx.obj["compression_fallback"] = compression_fallback
+        cli_compression["compression_fallback"] = compression_fallback
+    if cli_compression:
+        merge_cli_compression_override(cli_compression)
+
     # Honor an explicit per-run model override (CLI > env, issue #1269).
     # Set PDD_MODEL_DEFAULT: subprocess/agentic sync paths inherit the env and
     # read it at their own import, and the in-process llm_invoke path resolves
@@ -374,6 +433,7 @@ def sync(
             agentic_mode=agentic,
             one_session=effective_one_session,
             snapshot_context=snapshot_context,
+            compress=compress,
         )
         if evidence:
             _write_sync_evidence_manifest(
@@ -387,6 +447,7 @@ def sync(
                 temperature=ctx.obj.get("temperature", 0.0),
                 quiet=ctx.obj.get("quiet", False),
                 context_snapshot=(ctx.obj or {}).get("context_snapshot"),
+                compress=compress,
                 **grounding_kwargs_from_ctx(ctx.obj),
             )
         return str(result), total_cost, model_name
@@ -749,6 +810,15 @@ def sync_architecture(
     default=1,
     help="Maximum number of parallel LLM calls for dependency analysis (default: 1).",
 )
+@click.option(
+    "--compress",
+    is_flag=True,
+    default=False,
+    help=(
+        "Tag discovered Python dependencies with mode=\"compressed\" for "
+        "few-shot context reduction."
+    ),
+)
 @click.pass_context
 @track_cost
 def auto_deps(
@@ -761,6 +831,7 @@ def auto_deps(
     include_docs: bool,
     no_dedup: bool,
     concurrency: int,
+    compress: bool,
 ) -> Optional[Tuple[str, float, str]]:
     """Analyze project dependencies and update the prompt file."""
     try:
@@ -784,6 +855,7 @@ def auto_deps(
             include_docs=include_docs,
             no_dedup=no_dedup,
             concurrency=concurrency,
+            compress=compress,
         )
         return result, total_cost, model_name
     except click.Abort:

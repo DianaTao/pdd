@@ -116,6 +116,34 @@ On re-generation: Your prior successful generation is typically the closest matc
 
 ---
 
+## Automated Context Compression
+
+To manage large context windows and reduce costs, PDD supports automated context compression. This feature reduces the token count of dependencies while maintaining their behavioral contract.
+
+### How It Works
+
+Users can enable compression via **global** CLI flags (before the subcommand), `.pddrc` defaults, or command-local flags on `pdd sync` / `pdd fix`:
+
+- **`--compress-examples`**: Automatically applies `mode="interface"` to all example files in the `<include>` graph. This extracts signatures and docstrings, replacing function bodies with `...`.
+- **`--compress-test-context`**: Uses AST-based slicing to include only failing tests and their necessary fixtures from the test context during `pdd fix` or `pdd test`.
+- **`--context-compression {off,test,examples,contracts,all}`**: Enables one or more compression modes for the invocation.
+
+Place global flags before the subcommand, for example `pdd --context-compression test generate prompts/foo_python.prompt`. The `generate` and `preprocess` commands do **not** accept `--context-compression` after the subcommand; `sync` and `fix` may pass the same flags after their subcommand as well.
+
+### The "Mold Walls" Concept
+
+Compressed context acts as a "mold" that constrains the generated code. By sending only the interface of a dependency, you define the boundaries (the "mold walls") without cluttering the context with implementation details. This ensures the generated code respects the dependency's contract while staying within token budgets.
+
+### Fallback Behavior
+
+If compression fails (e.g., due to AST parsing errors in a dependency), the system defaults to full file inclusion to ensure correctness. This behavior can be controlled with the `--compression-fallback {full,error}` flag.
+
+### Reporting
+
+PDD reports active compression modes in the execution summary, lists successfully compressed include targets (path and mode), and records any fallback events (including the file path when slicing or selection fails).
+
+---
+
 ## Grounding Overrides: Pin & Exclude (PDD Cloud)
 
 For users with PDD Cloud access, you can override automatic grounding using XML tags:
@@ -1092,8 +1120,14 @@ Use `select=` to include only specific parts of a file instead of the whole thin
 | `section:Heading` | Markdown | `section:Installation` |
 | `pattern:/regex/` | Any | `pattern:/^import/` |
 | `path:key.nested` | JSON/YAML | `path:config.database.host` |
+| `pytest:test_name` | Python (pytest) (Python only) | `pytest:test_auth,test_login` |
+| `contract:symbol` | Python only | `contract:run_worker,_get_job_secrets` |
 
 Selectors are composable: `select="lines:1-5,def:main,def:helper"`. If a selector fails to match, PDD falls back to the full file with a warning.
+
+**`pytest:` selector** (Python only): Specifically designed for testing context. It uses AST slicing to extract only the requested tests and their transitive closure of dependencies (fixtures, helper functions, decorators, and imports). It automatically resolves fixtures from the same file or `conftest.py` files.
+
+**`contract:` selector** (Python only): Preserves a seed symbol and its transitive local dependencies (helpers, constants, classes, required imports) for compressed generation. Use when generated code must keep patch targets and private helpers referenced from tests. Seeds can be listed explicitly (`contract:run_worker`) or derived in code via `ApiContractSlicer.seeds_from_test(test_source, module_qualname)` before slicing. Output is verified so missing symbols fail fast instead of silently drifting.
 
 **Interface mode** (`mode="interface"`, Python only) extracts signatures, docstrings, and type hints with bodies replaced by `...`. Useful when you only need the contract, not the implementation:
 
@@ -1102,7 +1136,15 @@ Selectors are composable: `select="lines:1-5,def:main,def:helper"`. If a selecto
 <include mode="interface">src/billing/service.py</include>
 ```
 
-**Attribute priority:** `select=` always wins over `query=` (deterministic, no LLM cost). `mode="interface"` is applied to the result of `select=`.
+**Compressed mode** (`mode="compressed"`, Python only) produces dense implementation snippets optimized for few-shot examples (grounding). It strips docstrings and logic-external comments while preserving all executable code.
+
+```xml
+<include mode="compressed">src/core/utils.py</include>
+```
+
+Use `mode="compressed"` when you need implementation details (unlike `mode="interface"`) but want to save tokens by removing documentation. This mode reduces line counts by 20-40% for typical modules. PDD handles token budget management automatically: if a compressed include exceeds 30,000 tokens, it falls back to `mode="interface"` (preserving sibling-test `patch()` targets), then to a truncated full copy if still over budget.
+
+**Attribute priority:** `select=` always wins over `query=` (deterministic, no LLM cost). `mode="interface"` and `mode="compressed"` are applied to the result of `select=`.
 
 ### Interfaces for Contracts, Examples for Usage
 

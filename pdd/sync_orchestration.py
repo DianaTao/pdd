@@ -1999,6 +1999,8 @@ def sync_orchestration(
     no_steer: bool = False,
     steer_timeout: float = DEFAULT_STEER_TIMEOUT_S,
     agentic_mode: bool = False,
+    compress: bool = False,
+    evidence: bool = False,
     snapshot_context: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -2583,6 +2585,7 @@ def sync_orchestration(
                                     # finalization to avoid orphan
                                     # ``.pdd/meta/*_with_deps.json`` files for
                                     # the temp output (issue #989 follow-up).
+                                    compress=compress,
                                     _skip_finalization=True,
                                 )
                                 if temp_output.exists():
@@ -2649,7 +2652,7 @@ def sync_orchestration(
                                     for _conform_attempt in range(MAX_CONFORMANCE_ATTEMPTS):
                                         try:
                                             # Use absolute paths to avoid path_resolution_mode mismatch between sync (cwd) and generate (config_base)
-                                            result = code_generator_main(ctx, prompt_file=str(pdd_files['prompt'].resolve()), output=str(pdd_files['code'].resolve()), original_prompt_file_path=None, force_incremental_flag=False, output_from_config=True, snapshot_context=snapshot_context)
+                                            result = code_generator_main(ctx, prompt_file=str(pdd_files['prompt'].resolve()), output=str(pdd_files['code'].resolve()), original_prompt_file_path=None, force_incremental_flag=False, output_from_config=True, compress=compress, snapshot_context=snapshot_context)
                                             last_conform_exc = None
                                             break
                                         except (
@@ -2745,6 +2748,32 @@ def sync_orchestration(
                                         os.environ["PDD_REPAIR_DIRECTIVE"] = _prev_repair
                                 # Clear stale run_report so crash/verify is required for newly generated code
                                 clear_run_report(basename, language, paths=pdd_files)
+
+                                if evidence:
+                                    try:
+                                        from .evidence_manifest import write_evidence_manifest, validation_from_sync
+                                        # Use the current sync result state for evidence
+                                        sync_result = {"success": True, "summary": "Generated code from prompt"}
+                                        if isinstance(result, tuple) and len(result) >= 3:
+                                            sync_result["total_cost"] = result[1]
+                                            sync_result["model_name"] = result[2]
+                                        elif isinstance(result, dict):
+                                            sync_result.update(result)
+
+                                        validation = validation_from_sync(
+                                            sync_result,
+                                            skip_tests=skip_tests,
+                                            skip_verify=skip_verify,
+                                        )
+                                        write_evidence_manifest(
+                                            basename=basename,
+                                            language=language,
+                                            command="sync",
+                                            validation=validation,
+                                            pdd_files=pdd_files,
+                                        )
+                                    except Exception as e:
+                                        logger.warning(f"Failed to write evidence manifest: {e}")
                                 # Issue #572: Validate Python imports after generation in agentic mode
                                 if agentic_mode and language.lower() == 'python' and pdd_files['code'].exists():
                                     unresolved = _validate_python_imports(
@@ -3259,7 +3288,28 @@ def sync_orchestration(
                                     _fix_pre_code = pdd_files['code'].read_text(encoding="utf-8")
                                 except OSError:
                                     _fix_pre_code = ""
-                                result = fix_main(ctx, prompt_file=str(pdd_files['prompt']), code_file=str(pdd_files['code']), unit_test_file=unit_test_file_for_fix, error_file=str(error_file_path), output_test=output_test_for_fix, output_code=str(pdd_files['code']), output_results=f"{basename.replace('/', '_')}_fix_results.log", loop=True, verification_program=str(pdd_files['example']), max_attempts=effective_max_attempts, budget=budget - current_cost_ref[0], auto_submit=(not local), strength=strength, temperature=temperature, test_files=test_files_for_fix)
+                                _ctx_obj = ctx.obj if ctx and ctx.obj else {}
+                                result = fix_main(
+                                    ctx,
+                                    prompt_file=str(pdd_files['prompt']),
+                                    code_file=str(pdd_files['code']),
+                                    unit_test_file=unit_test_file_for_fix,
+                                    error_file=str(error_file_path),
+                                    output_test=output_test_for_fix,
+                                    output_code=str(pdd_files['code']),
+                                    output_results=f"{basename.replace('/', '_')}_fix_results.log",
+                                    loop=True,
+                                    verification_program=str(pdd_files['example']),
+                                    max_attempts=effective_max_attempts,
+                                    budget=budget - current_cost_ref[0],
+                                    auto_submit=(not local),
+                                    strength=strength,
+                                    temperature=temperature,
+                                    test_files=test_files_for_fix,
+                                    compress_test_context=bool(_ctx_obj.get("compress_test_context")),
+                                    context_compression=_ctx_obj.get("context_compression"),
+                                    compression_fallback=_ctx_obj.get("compression_fallback"),
+                                )
                                 _fix_surface_exc = _verify_code_surface_after_write(
                                     code_path=pdd_files['code'],
                                     pre_code=_fix_pre_code,

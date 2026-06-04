@@ -20,6 +20,7 @@ from rich.text import Text
 
 # Relative imports for PDD package structure
 from . import DEFAULT_STRENGTH, DEFAULT_TIME, EXTRACTION_STRENGTH # Assuming these are in __init__.py
+from .config_resolution import resolve_effective_config
 from .construct_paths import construct_paths
 from .preprocess import preprocess as pdd_preprocess
 from .code_generator import code_generator as local_code_generator_func
@@ -3047,6 +3048,7 @@ def code_generator_main(
     exclude_tests: bool = False,
     language: Optional[str] = None,
     output_from_config: bool = False,
+    compress: bool = False,
     snapshot_context: bool = False,
 ) -> Tuple[str, bool, float, str]:
     """
@@ -3155,6 +3157,7 @@ def code_generator_main(
             context_override=ctx.obj.get('context'),
             confirm_callback=cli_params.get('confirm_callback')
         )
+        resolve_effective_config(ctx, resolved_config)
         # Determine final output path: if user passed a directory, use resolved file path
         resolved_output = output_file_paths.get("output")
         if output is None:
@@ -3696,9 +3699,24 @@ def code_generator_main(
                 # include warning against real intent (see #1354 codex pass-3).
                 from .preprocess import compute_user_intent_paths as _cuip
                 _cloud_intent = _cuip(prompt_content) | _cuip(_expand_vars(prompt_content, env_vars))
-                processed_prompt_for_cloud = pdd_preprocess(prompt_content, recursive=True, double_curly_brackets=False, exclude_keys=[], snapshot_recorder=snapshot_recorder)
+                processed_prompt_for_cloud = pdd_preprocess(
+                    prompt_content,
+                    recursive=True,
+                    double_curly_brackets=False,
+                    exclude_keys=[],
+                    compress=compress,
+                    snapshot_recorder=snapshot_recorder,
+                )
                 processed_prompt_for_cloud = _expand_vars(processed_prompt_for_cloud, env_vars)
-                processed_prompt_for_cloud = pdd_preprocess(processed_prompt_for_cloud, recursive=False, double_curly_brackets=True, exclude_keys=[], _user_intent_paths=_cloud_intent, snapshot_recorder=snapshot_recorder)
+                processed_prompt_for_cloud = pdd_preprocess(
+                    processed_prompt_for_cloud,
+                    recursive=False,
+                    double_curly_brackets=True,
+                    exclude_keys=[],
+                    compress=compress,
+                    _user_intent_paths=_cloud_intent,
+                    snapshot_recorder=snapshot_recorder,
+                )
                 snapshot_expanded_prompt = processed_prompt_for_cloud
                 if verbose: console.print(Panel(Text(processed_prompt_for_cloud, overflow="fold"), title="[cyan]Preprocessed Prompt for Cloud[/cyan]", expand=False))
 
@@ -3726,6 +3744,7 @@ def code_generator_main(
                         "strength": strength,
                         "temperature": temperature,
                         "verbose": verbose,
+                        "compress": compress,
                     }
                     headers = {"Authorization": f"Bearer {jwt_token}", "Content-Type": "application/json"}
                     cloud_url = CloudConfig.get_endpoint_url("generateCode")
@@ -3870,9 +3889,24 @@ def code_generator_main(
                 # against real intent (see #1354 codex pass-3).
                 from .preprocess import compute_user_intent_paths as _cuip
                 _local_intent = _cuip(prompt_content) | _cuip(_expand_vars(prompt_content, env_vars))
-                local_prompt = pdd_preprocess(prompt_content, recursive=True, double_curly_brackets=False, exclude_keys=[], snapshot_recorder=snapshot_recorder)
+                local_prompt = pdd_preprocess(
+                    prompt_content,
+                    recursive=True,
+                    double_curly_brackets=False,
+                    exclude_keys=[],
+                    compress=compress,
+                    snapshot_recorder=snapshot_recorder,
+                )
                 local_prompt = _expand_vars(local_prompt, env_vars)
-                local_prompt = pdd_preprocess(local_prompt, recursive=False, double_curly_brackets=True, exclude_keys=[], _user_intent_paths=_local_intent, snapshot_recorder=snapshot_recorder)
+                local_prompt = pdd_preprocess(
+                    local_prompt,
+                    recursive=False,
+                    double_curly_brackets=True,
+                    exclude_keys=[],
+                    compress=compress,
+                    _user_intent_paths=_local_intent,
+                    snapshot_recorder=snapshot_recorder,
+                )
                 snapshot_expanded_prompt = local_prompt
                 if snapshot_recorder:
                     snapshot_recorder.record_grounding_unavailable("local_generation")
@@ -3891,6 +3925,7 @@ def code_generator_main(
                     verbose=verbose,
                     preprocess_prompt=False,
                     output_schema=output_schema,
+                    compress=compress,
                 )
                 was_incremental_operation = False
                 if verbose:

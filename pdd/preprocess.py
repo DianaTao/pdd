@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import warnings
 import base64
 import subprocess
 from typing import Any, List, Optional, Tuple, Union
@@ -28,6 +29,33 @@ def _is_debug() -> bool:
 
 def _is_quiet_mode() -> bool:
     return os.getenv("PDD_QUIET") == "1"
+
+
+def _warn_selector_fallback(
+    file_path: str,
+    mode: str,
+    error: Exception,
+    *,
+    selectors: str | None = None,
+) -> None:
+    """Emit a UserWarning when compression/selector fails and full content is used."""
+    selector_detail = f" for select={selectors}" if selectors else ""
+    if isinstance(error, ImportError):
+        message = (
+            f"ContentSelector not importable{selector_detail} in {file_path}: {error}. "
+            "Falling back to full content."
+        )
+    else:
+        message = (
+            f"ContentSelector failed{selector_detail} in {file_path} (mode={mode}): {error}. "
+            "Falling back to full content."
+        )
+    warnings.warn(message, UserWarning, stacklevel=4)
+    from pdd.compression_reporting import record_compression_fallback
+
+    record_compression_fallback(message)
+    if not _is_quiet_mode():
+        console.print(f"[yellow]Warning: {message}[/yellow]")
 
 def _dbg(msg: str) -> None:
     if _is_debug():
@@ -225,7 +253,22 @@ def compute_user_intent_paths(text: str) -> set:
     return paths
 
 
-def preprocess(prompt: Union[str, Any], recursive: bool = False, double_curly_brackets: bool = True, exclude_keys: Optional[List[str]] = None, _seen: Optional[set] = None, _failed: Optional[List[str]] = None, _user_intent_paths: Optional[set] = None, snapshot_recorder: Optional[Any] = None) -> str:
+def preprocess(
+    prompt: Union[str, Any],
+    recursive: bool = False,
+    double_curly_brackets: bool = True,
+    exclude_keys: Optional[List[str]] = None,
+    compress: bool = False,
+    examples_dir: str = "examples/",
+    tests_dir: str = "tests/",
+    _seen: Optional[set] = None,
+    _failed: Optional[List[str]] = None,
+    _user_intent_paths: Optional[set] = None,
+    snapshot_recorder: Optional[Any] = None,
+    exclude: Optional[List[str]] = None,
+) -> str:
+    if exclude_keys is None:
+        exclude_keys = exclude
     try:
         # Some tests patch template loading to return mock objects with .format().
         # In that case preprocessing is not applicable; return as string.
@@ -242,13 +285,36 @@ def preprocess(prompt: Union[str, Any], recursive: bool = False, double_curly_br
         if _failed is None:
             _failed = []
         _DEBUG_EVENTS.clear()
-        _dbg(f"Start preprocess(recursive={recursive}, double_curly={double_curly_brackets}, exclude_keys={exclude_keys})")
+        _dbg(
+            f"Start preprocess(recursive={recursive}, double_curly={double_curly_brackets}, "
+            f"exclude_keys={exclude_keys}, compress={compress}, examples_dir={examples_dir}, tests_dir={tests_dir})"
+        )
         _dbg(f"Initial length: {len(prompt)} characters")
         if not _is_quiet_mode():
             console.print(Panel("Starting prompt preprocessing", style="bold blue"))
-        prompt = process_backtick_includes(prompt, recursive, _seen=_seen, _failed=_failed, _user_intent_paths=_user_intent_paths, snapshot_recorder=snapshot_recorder)
+        prompt = process_backtick_includes(
+            prompt,
+            recursive,
+            compress=compress,
+            examples_dir=examples_dir,
+            tests_dir=tests_dir,
+            _seen=_seen,
+            _failed=_failed,
+            _user_intent_paths=_user_intent_paths,
+            snapshot_recorder=snapshot_recorder,
+        )
         _dbg("After backtick includes processed")
-        prompt = process_xml_tags(prompt, recursive, _seen=_seen, _failed=_failed, _user_intent_paths=_user_intent_paths, snapshot_recorder=snapshot_recorder)
+        prompt = process_xml_tags(
+            prompt,
+            recursive,
+            compress=compress,
+            examples_dir=examples_dir,
+            tests_dir=tests_dir,
+            _seen=_seen,
+            _failed=_failed,
+            _user_intent_paths=_user_intent_paths,
+            snapshot_recorder=snapshot_recorder,
+        )
         _dbg("After XML-like tags processed")
         if double_curly_brackets:
             prompt = double_curly(prompt, exclude_keys)
@@ -314,6 +380,10 @@ def preprocess(prompt: Union[str, Any], recursive: bool = False, double_curly_br
             raise
         raise
     except Exception as e:
+        from pdd.compression_reporting import CompressionFallbackError
+
+        if isinstance(e, CompressionFallbackError):
+            raise
         console.print(f"[bold red]Error during preprocessing:[/bold red] {str(e)}")
         console.print(Panel(traceback.format_exc(), title="Error Details", style="red"))
         _dbg(f"Exception: {str(e)}")
@@ -329,11 +399,36 @@ def get_file_path(file_name: str) -> str:
         return os.path.join("./", file_name)
     return str(resolved)
 
+
+
+def _compressed_include_with_fallback_or_raw(
+    raw_content: str,
+    file_path: str,
+    *,
+    selectors: Optional[List[str]] = None,
+) -> str:
+    """Apply compressed include transform; return raw content when compression fails."""
+    try:
+        from pdd.content_selector import apply_compressed_include_with_fallback
+
+        return apply_compressed_include_with_fallback(
+            raw_content,
+            file_path=file_path,
+            selectors=selectors,
+        )
+    except Exception as exc:
+        _warn_selector_fallback(file_path, "compressed", exc, selectors=",".join(selectors or []) or None)
+        return raw_content
+
+
 def _process_nested_includes(
     content: str,
     _seen: set,
     _failed: Optional[List[str]],
     _user_intent_paths: Optional[set],
+    compress: bool = False,
+    examples_dir: str = "examples/",
+    tests_dir: str = "tests/",
     snapshot_recorder: Optional[Any] = None,
 ) -> str:
     """Resolve include syntax from included content while preserving the include stack."""
@@ -341,6 +436,9 @@ def _process_nested_includes(
     content = process_backtick_includes(
         content,
         recursive=False,
+        compress=compress,
+        examples_dir=examples_dir,
+        tests_dir=tests_dir,
         _seen=_seen,
         _failed=_failed,
         _user_intent_paths=nested_user_intent_paths,
@@ -349,6 +447,9 @@ def _process_nested_includes(
     content = process_include_tags(
         content,
         recursive=False,
+        compress=compress,
+        examples_dir=examples_dir,
+        tests_dir=tests_dir,
         _seen=_seen,
         _failed=_failed,
         _user_intent_paths=nested_user_intent_paths,
@@ -357,13 +458,27 @@ def _process_nested_includes(
     content = process_include_many_tags(
         content,
         recursive=False,
+        compress=compress,
+        examples_dir=examples_dir,
+        tests_dir=tests_dir,
+        _seen=_seen,
         _failed=_failed,
         _user_intent_paths=nested_user_intent_paths,
         snapshot_recorder=snapshot_recorder,
     )
     return content
 
-def process_backtick_includes(text: str, recursive: bool, _seen: Optional[set] = None, _failed: Optional[List[str]] = None, _user_intent_paths: Optional[set] = None, snapshot_recorder: Optional[Any] = None) -> str:
+def process_backtick_includes(
+    text: str,
+    recursive: bool,
+    compress: bool = False,
+    examples_dir: str = "examples/",
+    tests_dir: str = "tests/",
+    _seen: Optional[set] = None,
+    _failed: Optional[List[str]] = None,
+    _user_intent_paths: Optional[set] = None,
+    snapshot_recorder: Optional[Any] = None,
+) -> str:
     if _seen is None:
         _seen = set()
     # More specific pattern that doesn't match nested > characters
@@ -384,6 +499,9 @@ def process_backtick_includes(text: str, recursive: bool, _seen: Optional[set] =
                         content,
                         recursive=True,
                         double_curly_brackets=False,
+                        compress=compress,
+                        examples_dir=examples_dir,
+                        tests_dir=tests_dir,
                         _seen=child_seen,
                         _failed=_failed,
                         _user_intent_paths=_user_intent_paths,
@@ -395,6 +513,9 @@ def process_backtick_includes(text: str, recursive: bool, _seen: Optional[set] =
                         _seen=child_seen,
                         _failed=_failed,
                         _user_intent_paths=_user_intent_paths,
+                        compress=compress,
+                        examples_dir=examples_dir,
+                        tests_dir=tests_dir,
                         snapshot_recorder=snapshot_recorder,
                     )
                 if snapshot_recorder is not None:
@@ -453,7 +574,17 @@ def process_backtick_includes(text: str, recursive: bool, _seen: Optional[set] =
         iterations += 1
     return current_text
 
-def process_xml_tags(text: str, recursive: bool, _seen: Optional[set] = None, _failed: Optional[List[str]] = None, _user_intent_paths: Optional[set] = None, snapshot_recorder: Optional[Any] = None) -> str:
+def process_xml_tags(
+    text: str,
+    recursive: bool,
+    compress: bool = False,
+    examples_dir: str = "examples/",
+    tests_dir: str = "tests/",
+    _seen: Optional[set] = None,
+    _failed: Optional[List[str]] = None,
+    _user_intent_paths: Optional[set] = None,
+    snapshot_recorder: Optional[Any] = None,
+) -> str:
     if _seen is None:
         _seen = set()
     # If the caller supplied an explicit user-intent set, use it directly
@@ -474,8 +605,28 @@ def process_xml_tags(text: str, recursive: bool, _seen: Optional[set] = None, _f
     else:
         user_intent_many_paths = None
     text = process_pdd_tags(text)
-    text = process_include_tags(text, recursive, _seen=_seen, _failed=_failed, _user_intent_paths=_user_intent_paths, snapshot_recorder=snapshot_recorder)
-    text = process_include_many_tags(text, recursive, _failed=_failed, _user_intent_paths=user_intent_many_paths, snapshot_recorder=snapshot_recorder)
+    text = process_include_tags(
+        text,
+        recursive,
+        compress=compress,
+        examples_dir=examples_dir,
+        tests_dir=tests_dir,
+        _seen=_seen,
+        _failed=_failed,
+        _user_intent_paths=_user_intent_paths,
+        snapshot_recorder=snapshot_recorder,
+    )
+    text = process_include_many_tags(
+        text,
+        recursive,
+        compress=compress,
+        examples_dir=examples_dir,
+        tests_dir=tests_dir,
+        _seen=_seen,
+        _failed=_failed,
+        _user_intent_paths=user_intent_many_paths,
+        snapshot_recorder=snapshot_recorder,
+    )
     text = process_shell_tags(text, recursive, snapshot_recorder=snapshot_recorder)
     text = process_web_tags(text, recursive, snapshot_recorder=snapshot_recorder)
     return text
@@ -493,19 +644,28 @@ def _parse_attrs(attr_str: str) -> dict:
         attrs["optional"] = "true"
     return attrs
 
-def process_include_tags(text: str, recursive: bool, _seen: Optional[set] = None, _failed: Optional[List[str]] = None, _user_intent_paths: Optional[set] = None, snapshot_recorder: Optional[Any] = None) -> str:
+def process_include_tags(
+    text: str,
+    recursive: bool,
+    compress: bool = False,
+    examples_dir: str = "examples/",
+    tests_dir: str = "tests/",
+    _seen: Optional[set] = None,
+    _failed: Optional[List[str]] = None,
+    _user_intent_paths: Optional[set] = None,
+    snapshot_recorder: Optional[Any] = None,
+) -> str:
     if _seen is None:
         _seen = set()
     # Support both <include>path</include> and <include path="path" attrs... />
     pattern = r'<include(?P<attrs>\s+[^>]*?)?>(?P<content>.*?)</include>|<include(?P<attrs_self>\s+[^>]*?)\s*/>'
-    
+
     def replace_include(match):
         attrs_str = match.group('attrs') or match.group('attrs_self') or ""
         attrs = _parse_attrs(attrs_str)
 
         # Content between tags (used as path for bare <include>path</include>)
         content = match.group('content') if match.group('content') is not None else ""
-
         file_path = attrs.get('path') or content.strip()
         if not file_path:
             return match.group(0)
@@ -565,6 +725,31 @@ def process_include_tags(text: str, recursive: bool, _seen: Optional[set] = None
             resolved = os.path.realpath(full_path)
             if resolved in _seen:
                 raise ValueError(f"Circular include detected: {file_path} is already in the include chain")
+
+            # Automatic mode detection based on context compression settings
+            mode = attrs.get('mode', 'full')
+            if mode == "full":
+                compression = (os.environ.get("PDD_CONTEXT_COMPRESSION") or "").lower()
+                modes = [m.strip() for m in compression.split(",") if m.strip()]
+
+                # Check for test/all mode or legacy test context compression
+                if "all" in modes or "test" in modes or os.environ.get("PDD_COMPRESS_TEST_CONTEXT") == "1":
+                    if file_path.startswith(tests_dir):
+                        mode = "test_interface"
+
+                # Check for examples/all mode or legacy examples compression
+                if mode == "full" and ("all" in modes or "examples" in modes or os.environ.get("PDD_COMPRESS_EXAMPLES") == "1"):
+                    if file_path.startswith(examples_dir):
+                        mode = "interface"
+
+                # Check for contracts/all mode
+                if mode == "full" and ("all" in modes or "contracts" in modes):
+                    if any(file_path.endswith(ext) for ext in (".prompt", ".md", ".markdown", ".rst")):
+                        mode = "contracts"
+
+            if attrs.get("mode") is None and mode == "full" and compress:
+                mode = "compressed"
+
             ext = os.path.splitext(file_path)[1].lower()
             image_extensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.heic']
 
@@ -613,91 +798,129 @@ def process_include_tags(text: str, recursive: bool, _seen: Optional[set] = None
                     # Apply selectors if any
                     selectors_str = attrs.get('select')
                     lines_str = attrs.get('lines')
-                    mode = attrs.get('mode', 'full')
 
                     if selectors_str or lines_str or mode != 'full':
                         selectors = []
                         if selectors_str:
-                            selectors.extend([s.strip() for s in selectors_str.split(',')])
+                            from pdd._selector_parse import parse_selectors_string
+                            selectors.extend(parse_selectors_string(selectors_str))
                         if lines_str:
                             selectors.append(f"lines:{lines_str}")
-                        
-                        try:
-                            from pdd.content_selector import ContentSelector
-                            selector = ContentSelector()
-                            content = selector.select(
-                                content=content,
+
+                        if mode == "compressed":
+                            raw_include_content = content
+                            content = _compressed_include_with_fallback_or_raw(
+                                raw_include_content,
+                                full_path,
                                 selectors=selectors,
-                                file_path=full_path,
-                                mode=mode,
                             )
-                        except ImportError:
-                            # Fall back to query if originally present, otherwise full file
-                            fallback_query = attrs.get('query')
-                            if fallback_query:
-                                console.print(f"[yellow]Warning: ContentSelector not available; falling back to query= for {full_path}[/yellow]")
-                                try:
-                                    from pdd.include_query_extractor import IncludeQueryExtractor
-                                    extracted = IncludeQueryExtractor().extract(file_path=full_path, query=fallback_query)
-                                    if snapshot_recorder is not None:
-                                        snapshot_recorder.record_include(
-                                            source_path=full_path,
-                                            content=extracted,
-                                            query=fallback_query,
-                                            output=extracted,
+                        else:
+                            try:
+                                from pdd.compression_reporting import (
+                                    CompressionFallbackError,
+                                    record_compression_applied,
+                                )
+                                from pdd.content_selector import ContentSelector, SelectorError
+
+                                original_content = content
+                                selector = ContentSelector()
+                                content = selector.select(
+                                    content=content,
+                                    selectors=selectors,
+                                    file_path=full_path,
+                                    mode=mode,
+                                )
+                                if content != original_content:
+                                    if selectors_str:
+                                        record_compression_applied(
+                                            full_path, f"select:{selectors_str}"
                                         )
-                                    return extracted
-                                except Exception as inner_e:
-                                    if snapshot_recorder is not None:
-                                        snapshot_recorder.record_include(
-                                            source_path=full_path,
-                                            content=f"[query_include failed: {inner_e}]",
-                                            query=fallback_query,
-                                            output=f"[query_include failed: {inner_e}]",
-                                        )
-                            import warnings
-                            warnings.warn(
-                                f"ContentSelector not importable for select=\"{selectors_str}\" "
-                                f"on file {full_path}. Including full file content."
-                            )
-                            console.print(f"[yellow]Warning: pdd.content_selector not found for select=\"{selectors_str}\" on {full_path}. Including full content.[/yellow]")
-                        except Exception as e:
-                            # Fall back to query if originally present, otherwise full file
-                            fallback_query = attrs.get('query')
-                            if fallback_query:
-                                console.print(f"[yellow]Warning: ContentSelector failed for select=\"{selectors_str}\"; falling back to query= for {full_path}[/yellow]")
-                                try:
-                                    from pdd.include_query_extractor import IncludeQueryExtractor
-                                    extracted = IncludeQueryExtractor().extract(file_path=full_path, query=fallback_query)
-                                    if snapshot_recorder is not None:
-                                        snapshot_recorder.record_include(
-                                            source_path=full_path,
-                                            content=extracted,
-                                            query=fallback_query,
-                                            output=extracted,
-                                        )
-                                    return extracted
-                                except Exception as inner_e:
-                                    if snapshot_recorder is not None:
-                                        snapshot_recorder.record_include(
-                                            source_path=full_path,
-                                            content=f"[query_include failed: {inner_e}]",
-                                            query=fallback_query,
-                                            output=f"[query_include failed: {inner_e}]",
-                                        )
-                            import warnings
-                            warnings.warn(
-                                f"ContentSelector failed for select=\"{selectors_str}\" "
-                                f"on file {full_path}: {e}. Including full file content."
-                            )
-                            console.print(f"[yellow]Warning: ContentSelector failed for select=\"{selectors_str}\" on {full_path}: {e}. Including full content.[/yellow]")
-                    
+                                    elif mode != "full":
+                                        record_compression_applied(full_path, mode)
+                            except CompressionFallbackError:
+                                raise
+                            except ImportError as e:
+                                fallback_query = attrs.get('query')
+                                if fallback_query:
+                                    try:
+                                        from pdd.include_query_extractor import IncludeQueryExtractor
+                                        extracted = IncludeQueryExtractor().extract(file_path=full_path, query=fallback_query)
+                                        if snapshot_recorder is not None:
+                                            snapshot_recorder.record_include(
+                                                source_path=full_path,
+                                                content=extracted,
+                                                query=fallback_query,
+                                                output=extracted,
+                                            )
+                                        return extracted
+                                    except Exception as inner_e:
+                                        if snapshot_recorder is not None:
+                                            snapshot_recorder.record_include(
+                                                source_path=full_path,
+                                                content=f"[query_include failed: {inner_e}]",
+                                                query=fallback_query,
+                                                output=f"[query_include failed: {inner_e}]",
+                                            )
+                                _warn_selector_fallback(file_path, mode, e, selectors=selectors_str)
+                            except SelectorError as e:
+                                fallback_query = attrs.get('query')
+                                if fallback_query:
+                                    try:
+                                        from pdd.include_query_extractor import IncludeQueryExtractor
+                                        extracted = IncludeQueryExtractor().extract(file_path=full_path, query=fallback_query)
+                                        if snapshot_recorder is not None:
+                                            snapshot_recorder.record_include(
+                                                source_path=full_path,
+                                                content=extracted,
+                                                query=fallback_query,
+                                                output=extracted,
+                                            )
+                                        return extracted
+                                    except Exception as inner_e:
+                                        if snapshot_recorder is not None:
+                                            snapshot_recorder.record_include(
+                                                source_path=full_path,
+                                                content=f"[query_include failed: {inner_e}]",
+                                                query=fallback_query,
+                                                output=f"[query_include failed: {inner_e}]",
+                                            )
+                                _warn_selector_fallback(file_path, mode, e, selectors=selectors_str)
+                            except Exception as e:
+                                fallback_strategy = os.environ.get("PDD_COMPRESSION_FALLBACK", "full").lower()
+                                if fallback_strategy == "error":
+                                    raise CompressionFallbackError(str(e)) from e
+                                fallback_query = attrs.get('query')
+                                if fallback_query:
+                                    try:
+                                        from pdd.include_query_extractor import IncludeQueryExtractor
+                                        extracted = IncludeQueryExtractor().extract(file_path=full_path, query=fallback_query)
+                                        if snapshot_recorder is not None:
+                                            snapshot_recorder.record_include(
+                                                source_path=full_path,
+                                                content=extracted,
+                                                query=fallback_query,
+                                                output=extracted,
+                                            )
+                                        return extracted
+                                    except Exception as inner_e:
+                                        if snapshot_recorder is not None:
+                                            snapshot_recorder.record_include(
+                                                source_path=full_path,
+                                                content=f"[query_include failed: {inner_e}]",
+                                                query=fallback_query,
+                                                output=f"[query_include failed: {inner_e}]",
+                                            )
+                                _warn_selector_fallback(file_path, mode, e, selectors=selectors_str)
+
                     if recursive:
                         child_seen = _seen | {resolved}
                         content = preprocess(
                             content,
                             recursive=True,
                             double_curly_brackets=False,
+                            compress=compress,
+                            examples_dir=examples_dir,
+                            tests_dir=tests_dir,
                             _seen=child_seen,
                             _failed=_failed,
                             _user_intent_paths=_user_intent_paths,
@@ -710,6 +933,9 @@ def process_include_tags(text: str, recursive: bool, _seen: Optional[set] = None
                             _seen=child_seen,
                             _failed=_failed,
                             _user_intent_paths=_user_intent_paths,
+                            compress=compress,
+                            examples_dir=examples_dir,
+                            tests_dir=tests_dir,
                             snapshot_recorder=snapshot_recorder,
                         )
                     if snapshot_recorder is not None:
@@ -776,6 +1002,10 @@ def process_include_tags(text: str, recursive: bool, _seen: Optional[set] = None
             _dbg(f"OSError processing XML include {file_path}: {e}")
             return match.group(0)
         except Exception as e:
+            from pdd.compression_reporting import CompressionFallbackError
+
+            if isinstance(e, CompressionFallbackError):
+                raise
             console.print(f"[bold red]Error processing include:[/bold red] {str(e)}")
             _dbg(f"Error processing XML include {file_path}: {e}")
             if recursive:
@@ -1015,6 +1245,10 @@ def process_web_tags(text: str, recursive: bool, snapshot_recorder: Optional[Any
 def process_include_many_tags(
     text: str,
     recursive: bool,
+    compress: bool = False,
+    examples_dir: str = "examples/",
+    tests_dir: str = "tests/",
+    _seen: Optional[set] = None,
     _failed: Optional[List[str]] = None,
     _user_intent_paths: Optional[set] = None,
     snapshot_recorder: Optional[Any] = None,
@@ -1054,7 +1288,15 @@ def process_include_many_tags(
                 full_path = get_file_path(p)
                 console.print(f"Including (many): [cyan]{full_path}[/cyan]")
                 with open(full_path, 'r', encoding='utf-8') as fh:
-                    content = fh.read()
+                    raw_content = fh.read()
+                    content = (
+                        _compressed_include_with_fallback_or_raw(
+                            raw_content,
+                            full_path,
+                        )
+                        if compress
+                        else raw_content
+                    )
                     contents.append(content)
                 if snapshot_recorder is not None:
                     snapshot_recorder.record_include(source_path=full_path, content=content)
@@ -1088,9 +1330,13 @@ def process_include_many_tags(
         return replace_many(match)
     return re.sub(pattern, replace_many_with_spans, text, flags=re.DOTALL)
 
-def double_curly(text: str, exclude_keys: Optional[List[str]] = None) -> str:
+def double_curly(
+    text: str,
+    exclude_keys: Optional[List[str]] = None,
+    exclude: Optional[List[str]] = None,
+) -> str:
     if exclude_keys is None:
-        exclude_keys = []
+        exclude_keys = exclude if exclude is not None else []
     
     if not _is_quiet_mode():
         console.print("Doubling curly brackets...")
