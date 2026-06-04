@@ -1172,6 +1172,15 @@ pytest -q tests/test_prompt_compression_few_shot_demo.py
 
 See `examples/prompt_compression_few_shot_demo/README.md` for fixture details.
 
+**Regeneration benchmark (#876):** preprocess-only proof is not enough for marketplace few-shot. Run the paired demo that exercises `pdd generate` with fixture `source: marketplace` examples and compares uncompressed vs `--compress`:
+
+```bash
+python examples/marketplace_compression_regeneration_demo/run_demo.py
+pytest -q tests/test_marketplace_compression_regeneration_demo.py
+```
+
+Optional live PDD Cloud run: `python examples/marketplace_compression_regeneration_demo/run_demo.py --live` after `pdd auth login`. See `examples/BENCHMARK_876.md` for the full review mapping.
+
 **Attribute priority:** `select=` always wins over `query=` (deterministic, no LLM cost). `mode="interface"` and `mode="compressed"` are applied to the result of `select=`.
 
 ### Interfaces for Contracts, Examples for Usage

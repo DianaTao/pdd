@@ -1,0 +1,10 @@
+Marketplace example: ticket classifier documentation severity pattern.
+
+Input: "The README is missing install steps."
+Output: {"category": "documentation", "severity": "low"}
+
+Input: "API docs do not mention the new auth header."
+Output: {"category": "documentation", "severity": "low"}
+
+Creator notes (provenance only): documentation tickets are low severity unless
+they block a release. Writers should keep labels lowercase for dashboard sorts.

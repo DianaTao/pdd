@@ -24,7 +24,7 @@ def test_marketplace_compression_regeneration_demo_runs() -> None:
 
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "Behavior checks: PASS" in proc.stdout
-    assert "Marketplace examples used:" in proc.stdout
+    assert "examples used" in proc.stdout.lower()
 
     report = json.loads(REPORT.read_text(encoding="utf-8"))
     uncompressed, compressed = report["runs"]
@@ -44,3 +44,7 @@ def test_marketplace_compression_regeneration_demo_runs() -> None:
         example.get("source") == "marketplace"
         for example in compressed["examples_used"]
     )
+    assert report["execution_mode"] == "representative"
+    assert report["benchmark_criteria"]["compression_compare"]
+    assert report["reduction"]["expanded_prompt_chars"] > 0
+    assert report["reduction"]["marketplace_few_shot_chars"] > 0

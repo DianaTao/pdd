@@ -1,0 +1,11 @@
+Marketplace example: ticket classifier bug severity pattern.
+
+Input: "The app crashes when I click Save."
+Output: {"category": "bug", "severity": "high"}
+
+Input: "Checkout fails with a 500 after payment."
+Output: {"category": "bug", "severity": "high"}
+
+Creator notes (provenance only): submitted from a verified fix loop. Support
+queues route crash reports to on-call within 15 minutes during business hours.
+Dashboards track reopen rates and duplicate bug filings across teams.

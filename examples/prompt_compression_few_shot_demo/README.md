@@ -3,6 +3,10 @@
 This demo shows how PDD prompt compression shortens redundant context while
 preserving **few-shot behavioral contracts**.
 
+For the **regeneration / marketplace** benchmark (#876), see
+[`marketplace_compression_regeneration_demo`](../marketplace_compression_regeneration_demo/)
+and [`examples/BENCHMARK_876.md`](../BENCHMARK_876.md).
+
 ## What are few-shot examples?
 
 Few-shot examples are small input/output pairs embedded in a prompt that teach
