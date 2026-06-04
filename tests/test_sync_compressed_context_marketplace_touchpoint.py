@@ -22,7 +22,7 @@ def test_sync_compressed_context_marketplace_touchpoint() -> None:
         text=True,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "PASS: local compressed-sync-context" in proc.stdout
+    assert "PASS in" in proc.stdout and "local packages" in proc.stdout
 
     report = json.loads(REPORT.read_text(encoding="utf-8"))
     assert report["local"]["checks"]["all_phases_used"] is True

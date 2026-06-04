@@ -12,8 +12,10 @@ import json
 import shutil
 import subprocess
 import sys
+import time
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -32,6 +34,25 @@ EXAMPLE = DEMO_DIR / "examples" / "ticket_classifier_example.py"
 TESTS = [DEMO_DIR / "tests" / "test_ticket_classifier.py"]
 REPORT = DEMO_DIR / "generated" / "sync_compressed_context_report.json"
 MOLD = DEMO_DIR / "fixtures" / "ticket_classifier_mold.py"
+
+# Rough guide for --live (two full cloud syncs on a small dev unit).
+_LIVE_SYNC_RUNS = 2
+_LIVE_MINUTES_PER_SYNC = (5, 20)
+
+
+def _ts() -> str:
+    return datetime.now(timezone.utc).strftime("%H:%M:%S")
+
+
+def _log(message: str, *, stream: TextIO | None = None) -> None:
+    print(f"[{_ts()}] {message}", file=stream, flush=True)
+
+
+def _format_elapsed(seconds: float) -> str:
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes, secs = divmod(int(seconds), 60)
+    return f"{minutes}m {secs}s"
 
 
 def _ensure_generated_code() -> None:
@@ -63,14 +84,28 @@ def _package_report(phase: str) -> dict[str, Any]:
 
 
 def _run_local_touchpoint() -> dict[str, Any]:
+    started = time.monotonic()
+    _log("Building local compressed-sync-context packages (no LLM)...")
     _ensure_generated_code()
     phases = ["generate", "verify", "test", "fix"]
-    reports = [_package_report(phase) for phase in phases]
+    reports = []
+    for phase in phases:
+        phase_started = time.monotonic()
+        reports.append(_package_report(phase))
+        row = reports[-1]
+        _log(
+            f"  phase={phase} used={row['used']} "
+            f"chars={row['rendered_chars']} tokens={row.get('token_estimate')} "
+            f"({_format_elapsed(time.monotonic() - phase_started)})"
+        )
     generate = reports[0]
     fix = next(row for row in reports if row["phase"] == "fix")
+    elapsed = time.monotonic() - started
+    _log(f"Local touchpoint finished in {_format_elapsed(elapsed)}")
     return {
         "touchpoint": "compressed-sync-context-local",
         "prompt": str(PROMPT.relative_to(DEMO_DIR)),
+        "duration_seconds": round(elapsed, 2),
         "phases": reports,
         "checks": {
             "all_phases_used": all(row["used"] for row in reports),
@@ -81,7 +116,8 @@ def _run_local_touchpoint() -> dict[str, Any]:
     }
 
 
-def _run_live_sync(*, compressed: bool) -> dict[str, Any]:
+def _run_live_sync(*, compressed: bool, run_index: int, run_total: int) -> dict[str, Any]:
+    label = "compressed-context ON" if compressed else "compressed-context OFF (baseline)"
     cmd = [
         "pdd",
         "sync",
@@ -96,23 +132,56 @@ def _run_live_sync(*, compressed: bool) -> dict[str, Any]:
         cmd.append("--compressed-context")
     else:
         cmd.append("--no-compressed-context")
-    proc = subprocess.run(
+
+    _log(
+        f"Live sync run {run_index}/{run_total}: {label} "
+        f"(expect ~{_LIVE_MINUTES_PER_SYNC[0]}–{_LIVE_MINUTES_PER_SYNC[1]} min; "
+        "generate → verify → test → fix depends on cloud + model)"
+    )
+    _log(f"  command: {' '.join(cmd)}")
+    _log("  streaming pdd output below (no output yet = still working)...")
+
+    started = time.monotonic()
+    captured: list[str] = []
+    proc = subprocess.Popen(
         cmd,
         cwd=DEMO_DIR,
-        check=False,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
+        bufsize=1,
     )
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+        captured.append(line)
+    returncode = proc.wait()
+    elapsed = time.monotonic() - started
+    combined = "".join(captured)
+    status = "OK" if returncode == 0 else f"FAILED (exit {returncode})"
+    _log(f"Live sync run {run_index}/{run_total} finished: {status} in {_format_elapsed(elapsed)}")
+
     return {
         "compressed_context": compressed,
-        "returncode": proc.returncode,
-        "stdout_tail": proc.stdout[-4000:],
-        "stderr_tail": proc.stderr[-4000:],
+        "label": label,
+        "returncode": returncode,
+        "duration_seconds": round(elapsed, 2),
+        "stdout_tail": combined[-4000:],
+        "stderr_tail": "",
     }
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        epilog=(
+            "Timing: local mode is sub-second. --live runs two full pdd sync invocations; "
+            f"plan ~{_LIVE_MINUTES_PER_SYNC[0] * _LIVE_SYNC_RUNS}–"
+            f"{_LIVE_MINUTES_PER_SYNC[1] * _LIVE_SYNC_RUNS} minutes total "
+            "(varies with model, fix loops, and marketplace retrieval)."
+        ),
+    )
     parser.add_argument(
         "--live",
         action="store_true",
@@ -120,31 +189,55 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    overall_started = time.monotonic()
+    _log("Compressed sync context touchpoint (#76 on #876 fixtures)")
+    if args.live:
+        low = _LIVE_MINUTES_PER_SYNC[0] * _LIVE_SYNC_RUNS
+        high = _LIVE_MINUTES_PER_SYNC[1] * _LIVE_SYNC_RUNS
+        _log(
+            f"--live enabled: {_LIVE_SYNC_RUNS} cloud sync runs; "
+            f"typical wall time ~{low}–{high} minutes (logged per run)"
+        )
+
     payload: dict[str, Any] = {"local": _run_local_touchpoint()}
     if args.live:
-        payload["live_sync"] = [
-            _run_live_sync(compressed=False),
-            _run_live_sync(compressed=True),
-        ]
+        live_runs: list[dict[str, Any]] = []
+        for index, compressed in enumerate((False, True), start=1):
+            live_runs.append(
+                _run_live_sync(
+                    compressed=compressed,
+                    run_index=index,
+                    run_total=_LIVE_SYNC_RUNS,
+                )
+            )
+        payload["live_sync"] = live_runs
+        total_live = sum(r.get("duration_seconds", 0) for r in live_runs)
+        payload["live_sync_total_seconds"] = round(total_live, 2)
+        _log(f"All live sync runs finished in {_format_elapsed(total_live)}")
 
     REPORT.parent.mkdir(parents=True, exist_ok=True)
+    payload["total_duration_seconds"] = round(time.monotonic() - overall_started, 2)
     REPORT.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
     checks = payload["local"]["checks"]
-    print("Compressed sync context touchpoint (#76 on #876 fixtures)")
-    for row in payload["local"]["phases"]:
-        print(
-            f"  {row['phase']}: used={row['used']} "
-            f"chars={row['rendered_chars']} tokens={row.get('token_estimate')}"
-        )
-    print(f"Report: {REPORT.relative_to(REPO_ROOT)}")
+    _log(f"Report written: {REPORT.relative_to(REPO_ROOT)}")
     if not checks["all_phases_used"]:
-        print("FAIL: one or more phases did not use compressed context", file=sys.stderr)
+        _log("FAIL: one or more phases did not use compressed context", stream=sys.stderr)
         return 1
-    if args.live and any(r["returncode"] != 0 for r in payload.get("live_sync", [])):
-        print("FAIL: live sync returned non-zero", file=sys.stderr)
-        return 1
-    print("PASS: local compressed-sync-context packages built for all phases")
+    if args.live:
+        for row in payload.get("live_sync", []):
+            if row.get("returncode") != 0:
+                _log(
+                    f"FAIL: live sync ({row.get('label')}) exit {row.get('returncode')}",
+                    stream=sys.stderr,
+                )
+                return 1
+    _log(
+        f"PASS in {_format_elapsed(payload['total_duration_seconds'])} "
+        "(local packages"
+        + (", both live sync runs OK" if args.live else "")
+        + ")"
+    )
     return 0
 
 
