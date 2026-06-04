@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -120,11 +121,11 @@ def _run_live_sync(*, compressed: bool, run_index: int, run_total: int) -> dict[
     label = "compressed-context ON" if compressed else "compressed-context OFF (baseline)"
     cmd = [
         "pdd",
+        "--force",
         "sync",
         "ticket_classifier",
-        "--force",
         "--evidence",
-        "-y",
+        "--no-steer",
         "--compress",
         "--compress-examples",
     ]
@@ -143,13 +144,24 @@ def _run_live_sync(*, compressed: bool, run_index: int, run_total: int) -> dict[
 
     started = time.monotonic()
     captured: list[str] = []
+    # pdd auto_update() blocks on input("Would you like to upgrade?") when a newer
+    # PyPI version exists and stdin is a TTY — subprocess inherits the terminal.
+    env = {
+        **os.environ,
+        "PDD_AUTO_UPDATE": "false",
+        "PDD_SKIP_UPDATE_CHECK": "1",
+        "PYTHONUNBUFFERED": "1",
+        "CI": "1",
+    }
     proc = subprocess.Popen(
         cmd,
         cwd=DEMO_DIR,
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
+        env=env,
     )
     assert proc.stdout is not None
     for line in proc.stdout:

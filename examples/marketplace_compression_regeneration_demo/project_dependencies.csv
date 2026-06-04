@@ -1,0 +1,2 @@
+full_path,file_summary,key_exports,dependencies,content_hash
+examples/marketplace_compression_regeneration_demo/examples/ticket_classifier_example.py,A verification script that runs the pytest test suite for the ticket classifier dev unit and returns the exit code.,"[""main""]","[""subprocess"", ""sys"", ""pathlib""]",9369b6766f40715683cbff91bf11769f9f4932500781248eb671491b654599c9
