@@ -1,0 +1,33 @@
+---
+language: python
+output: generated/ticket_classifier.py
+---
+<pdd-interface>{"type":"module","module":{"functions":[{"name":"classify_ticket","signature":"(text: str) -> dict[str, str]"},{"name":"format_ticket_json","signature":"(text: str) -> str"}]}}</pdd-interface>
+
+Build a small Python module for classifying product support tickets.
+
+The implementation must expose:
+
+- `classify_ticket(text: str) -> dict[str, str]`
+- `format_ticket_json(text: str) -> str`
+
+Return categories using exactly one of:
+
+- bug
+- feature_request
+- documentation
+- usability
+- other
+
+Return severities using exactly one of:
+
+- low
+- medium
+- high
+
+Preserve the behavioral mold shown by the selected marketplace few-shot
+examples and by the local implementation sketch.
+
+<include mode="contracts">fixtures/product_ticket_requirements.md</include>
+
+<include>fixtures/ticket_classifier_mold.py</include>

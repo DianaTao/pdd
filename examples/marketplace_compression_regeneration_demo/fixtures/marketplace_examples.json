@@ -1,0 +1,20 @@
+[
+  {
+    "id": "mkt-ticket-classifier-bug-001",
+    "slug": "marketplace/ticket-classifier-bug",
+    "title": "Ticket classifier bug severity pattern",
+    "source": "marketplace",
+    "similarity": 0.97,
+    "promptSha256": "8fd4cfa21d4de732c793af57a21edc1b6e37ec16ea6e9d54c8814a644e9e6029",
+    "codeSha256": "3d62af27bfb6d4fb6e746f7af80c4ba4a20ae0130a2a40fc3cd50f8a3dfef807"
+  },
+  {
+    "id": "mkt-ticket-classifier-docs-002",
+    "slug": "marketplace/ticket-classifier-docs",
+    "title": "Ticket classifier documentation severity pattern",
+    "source": "marketplace",
+    "similarity": 0.91,
+    "promptSha256": "455b702db91fe1b61d86db7599de83e30e7d6319ba8f6df9e473587a366f69d4",
+    "codeSha256": "d05e68fc6e6dd628865bcaa789dfbb8d58e0e09707c5e3288d66f8aa091e9a22"
+  }
+]
