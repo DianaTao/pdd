@@ -35,7 +35,28 @@ If your tenant cannot return marketplace-tagged examples, use the **representati
 
 Default mode exists for CI (`pytest`); it does **not** call OpenAI/Gemini or live PDD Cloud.
 
-See also [`examples/BENCHMARK_876.md`](../BENCHMARK_876.md) for the full review mapping.
+See also [`examples/BENCHMARK_876.md`](../BENCHMARK_876.md) and [`examples/BENCHMARK_76_876.md`](../BENCHMARK_76_876.md) for the combined #76 + #876 review mapping.
+
+## Compressed sync context touchpoint (#76)
+
+| Command | LLM | What it proves |
+|---------|-----|----------------|
+| `python .../run_sync_compressed_touchpoint.py` | **None** | Phase packages for generate/verify/test/fix via `build_compressed_sync_context` |
+| `python .../run_sync_compressed_touchpoint.py --live` | **Real** | `pdd sync ticket_classifier` with and without `--compressed-context` |
+
+```bash
+python examples/marketplace_compression_regeneration_demo/run_sync_compressed_touchpoint.py
+pytest -q tests/test_sync_compressed_context_marketplace_touchpoint.py
+```
+
+Live sync (after `pdd auth login`):
+
+```bash
+cd examples/marketplace_compression_regeneration_demo
+python run_sync_compressed_touchpoint.py --live
+```
+
+Inspect `.pdd/evidence/runs/*.json` for `generation.compression.mode == "compressed-sync-context"` and marketplace grounding on the compressed run.
 
 ## Fixture marketplace examples (not synthetic prose only)
 
