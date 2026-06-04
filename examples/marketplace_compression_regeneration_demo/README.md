@@ -56,6 +56,12 @@ cd examples/marketplace_compression_regeneration_demo
 python run_sync_compressed_touchpoint.py --live
 ```
 
+Faster live touchpoint (one sync, ~5–20 min) after `run_demo_live.sh` baseline:
+
+```bash
+python run_sync_compressed_touchpoint.py --live --single-run
+```
+
 **Timing:** local package build is sub-second. `--live` runs **two** full `pdd sync` passes (baseline, then `--compressed-context`); expect roughly **10–40 minutes** total depending on model, marketplace retrieval, and whether verify/fix loops run. The script prints UTC timestamps, per-phase local progress, streams `pdd` stdout live, and records `duration_seconds` in `generated/sync_compressed_context_report.json`.
 
 Inspect `.pdd/evidence/runs/*.json` for `generation.compression.mode == "compressed-sync-context"` and marketplace grounding on the compressed run.

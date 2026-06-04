@@ -187,29 +187,49 @@ def main() -> int:
         action="store_true",
         help="Run real pdd sync (requires pdd auth login and API access).",
     )
+    parser.add_argument(
+        "--single-run",
+        action="store_true",
+        help=(
+            "With --live: run only one sync with --compressed-context (~5–20 min). "
+            "Use after run_demo_live.sh for marketplace/generate baseline."
+        ),
+    )
     args = parser.parse_args()
+    if args.single_run and not args.live:
+        parser.error("--single-run requires --live")
 
     overall_started = time.monotonic()
     _log("Compressed sync context touchpoint (#76 on #876 fixtures)")
+    live_run_plan: list[tuple[bool, str]] = [(False, "baseline"), (True, "compressed")]
     if args.live:
-        low = _LIVE_MINUTES_PER_SYNC[0] * _LIVE_SYNC_RUNS
-        high = _LIVE_MINUTES_PER_SYNC[1] * _LIVE_SYNC_RUNS
-        _log(
-            f"--live enabled: {_LIVE_SYNC_RUNS} cloud sync runs; "
-            f"typical wall time ~{low}–{high} minutes (logged per run)"
-        )
+        if args.single_run:
+            live_run_plan = [(True, "compressed-only")]
+            _log(
+                "--live --single-run: one cloud sync with --compressed-context "
+                f"(~{_LIVE_MINUTES_PER_SYNC[0]}–{_LIVE_MINUTES_PER_SYNC[1]} min)"
+            )
+        else:
+            low = _LIVE_MINUTES_PER_SYNC[0] * _LIVE_SYNC_RUNS
+            high = _LIVE_MINUTES_PER_SYNC[1] * _LIVE_SYNC_RUNS
+            _log(
+                f"--live enabled: {_LIVE_SYNC_RUNS} cloud sync runs; "
+                f"typical wall time ~{low}–{high} minutes (logged per run)"
+            )
 
     payload: dict[str, Any] = {"local": _run_local_touchpoint()}
     if args.live:
         live_runs: list[dict[str, Any]] = []
-        for index, compressed in enumerate((False, True), start=1):
+        run_total = len(live_run_plan)
+        for index, (compressed, _tag) in enumerate(live_run_plan, start=1):
             live_runs.append(
                 _run_live_sync(
                     compressed=compressed,
                     run_index=index,
-                    run_total=_LIVE_SYNC_RUNS,
+                    run_total=run_total,
                 )
             )
+        payload["live_sync_mode"] = "single-run" if args.single_run else "full-compare"
         payload["live_sync"] = live_runs
         total_live = sum(r.get("duration_seconds", 0) for r in live_runs)
         payload["live_sync_total_seconds"] = round(total_live, 2)
@@ -235,7 +255,11 @@ def main() -> int:
     _log(
         f"PASS in {_format_elapsed(payload['total_duration_seconds'])} "
         "(local packages"
-        + (", both live sync runs OK" if args.live else "")
+        + (
+            ", live sync OK"
+            if args.live
+            else ""
+        )
         + ")"
     )
     return 0
