@@ -249,7 +249,7 @@ pdd setup
 The setup wizard runs these steps:
   1.  Detects agentic CLI tools (Claude, Gemini/Antigravity, Codex, OpenCode) and offers installation and credential configuration if needed. Credentials can be environment-variable API keys, stored OAuth/subscription/config credentials such as Claude Max/Pro, Google Gemini/Antigravity login, Vertex AI env auth, Codex ChatGPT login, or OpenCode provider auth/config.
   2. Scans for API keys across `.env`, `~/.pdd/api-env.*`, and the shell environment. If no API key is found but a selected CLI already has a stored OAuth/subscription/config credential, setup skips the API-key prompt for the agentic workflow and explains which direct prompt/LiteLLM commands still need API keys.
-  3. Configures models from a reference CSV `data/llm_model.csv` of top models (ELO ≥ 1300) across all LiteLLM-supported providers based on your available API keys
+  3. Configures models from a reference CSV `data/llm_model.csv` of top ranked models across all LiteLLM-supported providers based on your available API keys
   4. If you have credentials for **more than one** provider, asks which provider(s) `pdd --local` should use, then removes the unselected providers' PDD-managed rows from `~/.pdd/llm_model.csv` (rows you hand-edited or added yourself are preserved — see below)
   5. Optionally creates a `.pddrc` project config
   6. Tests a model from your selected provider with a real LLM call
@@ -376,7 +376,9 @@ The CSV includes columns for:
 - `provider`: The LLM provider (e.g., "openai", "anthropic", "google")
 - `model`: The LiteLLM model identifier (e.g., "gpt-4", "claude-3-opus-20240229")
 - `input`/`output`: Costs per million tokens
-- `coding_arena_elo`: ELO rating for coding ability
+- `coding_arena_elo`: Raw Arena/static ELO metadata
+- `model_rank_score`: Primary selection rank. DeepSWE rows use a high solve-rate band; Arena/static rows fall back to raw ELO.
+- `model_rank_source`: Source of `model_rank_score` (for example `deepswe-solve-rate`, `arena-elo-fallback`, or `static`)
 - `api_key`: The environment variable name for required authentication, or
   blank for local and device-flow providers such as Ollama, LM Studio, and
   GitHub Copilot
@@ -718,7 +720,7 @@ These options can be used with any command:
 - `--strength FLOAT`: Set the strength of the AI model (0.0 to 1.0, default is 0.5).
   - 0.0: Cheapest available model
   - 0.5: Default base model
-  - 1.0: Most powerful model (highest ELO rating)
+  - 1.0: Most powerful model (highest DeepSWE-first rank score)
 - `--time FLOAT`: Controls the reasoning allocation for LLM models supporting reasoning capabilities (0.0 to 1.0, default is 0.25).
   - For models with specific reasoning token limits (e.g., 64k), a value of `1.0` utilizes the maximum available tokens.
   - For models with discrete effort levels, `1.0` corresponds to the highest effort level.
@@ -733,6 +735,10 @@ These options can be used with any command:
 - `report-core`: Report a bug by creating a GitHub issue with the core dump file.
 - `--context CONTEXT_NAME`: Override automatic context detection and use the specified context from `.pddrc`.
 - `--list-contexts`: List all available contexts defined in `.pddrc` and exit.
+- `--compress-examples`: Automatically apply `mode="interface"` to example includes (legacy; prefer `--context-compression examples`).
+- `--compress-test-context`: Compress test includes to failing tests only (legacy; prefer `--context-compression test`).
+- `--context-compression {off,test,examples,contracts,all}`: Set context compression for this CLI invocation (default: `off`). Must appear **before** the subcommand (e.g. `pdd --context-compression test generate ...`). `sync` and `fix` also accept the same flags after their subcommand.
+- `--compression-fallback {full,error}`: When compression or slicing fails, use full content (`full`, default) or abort (`error`). Global placement is the same as `--context-compression`.
 
 ### Core Dump Debug Bundles
 
@@ -817,13 +823,13 @@ This is particularly useful in:
 
 PDD uses a large language model to generate and manipulate code. The `--strength` and `--temperature` options allow you to control the model's output:
 
-- Strength: Determines how powerful/expensive a model should be used. Higher values (closer to 1.0) result in high performance models with better capabilities (selected by ELO rating), while lower values (closer to 0.0) select more cost-effective models.
+- Strength: Determines how powerful/expensive a model should be used. Higher values (closer to 1.0) result in high performance models with better capabilities (selected by `model_rank_score`, where DeepSWE is primary and Arena/static ELO is fallback), while lower values (closer to 0.0) select more cost-effective models.
 - Temperature: Controls the randomness of the output. Higher values increase diversity but may lead to less coherent results, while lower values produce more focused and deterministic outputs.
 - Time: (Optional, controlled by `--time FLOAT`) For models supporting reasoning, this scales the allocated reasoning resources (e.g., tokens or effort level) between minimum (0.0) and maximum (1.0), with a default of 0.25.
 
 When running in local mode, PDD uses LiteLLM to select and interact with language models based on a configuration file that includes:
 - Input and output costs per million tokens
-- ELO ratings for coding ability
+- Primary `model_rank_score` values for selection and raw Arena/static `coding_arena_elo` metadata
 - Required API key environment variables
 - Structured output capability flags
 - Reasoning capabilities (budget-based, effort-based, or adaptive)
@@ -928,11 +934,17 @@ Options:
 - `--skip-verify`: Skip the functional verification step
 - `--skip-tests`: Skip unit test generation and fixing
 - `--target-coverage FLOAT`: Desired code coverage percentage (default is 90.0)
+- `--compress`: Use AST-based compression for Python few-shot examples (strips docstrings and logic-external comments). Helps fit more context into limited LLM windows without losing executable logic.
 - `--dry-run`: Display real-time sync analysis instead of running sync operations. For no-argument project-wide sync, this prints the dependency-ordered module list and estimated cost without executing any module syncs, plus a single compact roll-up of modules outside the Tier 1 (`generate` / `auto-deps`) scope — bucketed by reason (e.g. `Out of Tier 1 scope: 42 example, 31 test, 18 verify, 12 update, 74 no-prompt fixture`) instead of one warning line per skipped entry. When zero modules are stale, the `0 stale module(s)` fragment is rendered in green so the success signal is visually unambiguous. Actionable architecture-graph warnings (ambiguous or unresolved cross-arch dependencies) are still printed individually in yellow. For single-module sync, it performs the same state analysis as a normal sync run but without acquiring exclusive locks or executing operations. Passing the top-level `pdd --verbose` flag (see above) restores the legacy per-module enumeration after the compact roll-up — one yellow warning line per module outside the Tier 1 scope — for debugging.
 - `--snapshot-context`: Capture the fully expanded prompt context used for generation, including nondeterministic `<shell>`, `<web>`, and `<include ... query="...">` outputs. The run manifest is `.pdd/evidence/runs/<run_id>.json`; snapshot artifacts are in `.pdd/evidence/runs/<run_id>/`. Replay can later reconstruct the same prompt/context from the recorded run artifact.
+- `--compressed-context / --no-compressed-context`: Enable or disable compressed sync context for generation and repair phases. This option is tri-state internally: omitting it lets `.pddrc` `defaults.compressed_context` apply, `--compressed-context` forces it on, and `--no-compressed-context` forces it off. When enabled, sync builds bounded phase packages from the prompt, existing tests, examples when present, contract sections, and recent repair evidence, then passes those packages to generate, verify, test, and fix attempts. The sync result records whether compression was used and whether any agentic fallback was needed.
 - `--one-session / --no-one-session`: Run sync in a single agentic session instead of separate sessions for each step. Cannot be combined with `--skip-tests` or `--skip-verify`.
 - `--no-steer`: Disable interactive steering of sync operations.
 - `--steer-timeout FLOAT`: Timeout in seconds for steering prompts (default: 8.0).
+- `--compress-examples`: Automatically apply `mode="interface"` to example files in the `<include>` graph for this sync operation.
+- `--compress-test-context`: Use AST-based slicing to include only failing tests and fixtures in the fix/test context.
+- `--context-compression {off,test,examples,contracts,all}`: Set a global compression mode for this sync operation (default: `off`). `test` and `examples` mirror the legacy flags; `contracts` extracts contract rules and metadata from prompts and documentation; `all` enables all compression modes.
+- `--compression-fallback {full,error}`: Strategy for when a file cannot be compressed (default: `full`).
 - `--durable`: Issue-sync only. Run each module in an isolated git worktree under `.pdd/worktrees/sync-issue-<N>-<module>/` and checkpoint successful module output to a dedicated durable branch worktree under `.pdd/worktrees/durable-issue-<N>/`. Default issue-sync behavior (shared parallel worktree) is unchanged unless this flag is passed.
 - `--durable-branch TEXT`: Durable mode only. Override the durable checkpoint branch name. Default is `sync/issue-<N>` derived from the GitHub issue. Refused if it resolves to `main`, `master`, or the repository default branch.
 - `--no-resume`: Durable mode only. Ignore existing `PDD-Sync-Checkpoint-V1` commit trailers on the durable branch and re-run every selected module. By default, durable sync reads checkpoint trailers (`PDD-Sync-Checkpoint-V1: issue=<N> module=<basename>`) and skips modules already checkpointed for the same issue, which is what makes a cloud rerun safely resume completed work after a partial failure.
@@ -990,7 +1002,7 @@ If multiple development language prompt files exist for the same basename, sync 
 The sync command automatically detects what files exist and executes the appropriate workflow:
 
 1. **auto-deps**: Find and inject relevant dependencies into the prompt — both code examples and documentation files (schema docs, API docs, etc.). Removes redundant inline content that duplicates included documents.
-2. **generate**: Create or update the code module from the prompt. After generation an **architecture conformance gate** validates the output against both `architecture.json` and the prompt's `<pdd-interface>` block:
+2. **generate**: Create or update the code module from the prompt. When compressed context is enabled, this phase receives a generated phase package containing compressed prompt/test/example/contract context instead of the raw boolean option value or repeatedly expanded full context. After generation an **architecture conformance gate** validates the output against both `architecture.json` and the prompt's `<pdd-interface>` block:
     - Each declared symbol must exist in the generated code (architecture.json symbol-existence check).
     - For interface entries that declare a paren-list `signature` (`module`, `cli`, and `command` types), each declared parameter name must appear in the matching function/method signature (dotted names like `ContentSelector.select` are resolved through the class body; variadic `*args`/`**kwargs` do not satisfy a declared named parameter).
     - **Signature drift** is checked per parameter: annotation drift fires only when both sides specify and differ (conservative — gradually-typed code does not churn), while default drift fires whenever the prompt declares a default and the generated code drops or changes it (strict — a missing default is a runtime contract break for callers omitting the optional kwarg).
@@ -1000,9 +1012,9 @@ The sync command automatically detects what files exist and executes the appropr
     - On failure, sync retries the generation step up to `MAX_CONFORMANCE_ATTEMPTS` with a `PDD_REPAIR_DIRECTIVE` that names the function to fix and the parameters/annotations/defaults to add or restore. Public-surface and test-churn failures use the same repair loop **only on the generate and one-session paths**; surface regressions detected after a crash/fix/verify write are hard failures (no retry) because each of those operations already runs its own internal fix loop and a second outer retry would compound retries (`N × M`) without converging. `.pddrc` context/strength are pinned across the entire retry sequence so a retry never silently switches model or context. The retry stops early when the missing-symbol/signature set repeats across attempts, and the final failure is surfaced as a structured `=== architecture conformance failure ===`, `=== public surface regression ===`, or `=== test churn threshold exceeded ===` block listing the offending symbols / churn ratio plus a `Reproduce locally: pdd sync <basename>` line.
 3. **example**: Generate usage example if it doesn't exist or is outdated
 4. **crash**: Fix any runtime errors to make code executable
-5. **verify**: Run functional verification against prompt intent (unless --skip-verify)
+5. **verify**: Run functional verification against prompt intent (unless --skip-verify). When compressed context is enabled, verification receives its own phase-aware compressed context package built from the same bounded prompt/test/example/contract evidence.
 6. **test**: Generate comprehensive unit tests if they don't exist (unless --skip-tests). Auth modules get auth-specific test patterns (mock OAuth servers, JWT fixtures, token lifecycle testing)
-7. **fix**: Resolve any bugs found by unit tests (unless --skip-tests). Because `--skip-tests` skips both unit test generation (step 6) and fixing, the fix step is skipped along with the test step.
+7. **fix**: Resolve any bugs found by unit tests (unless --skip-tests). Because `--skip-tests` skips both unit test generation (step 6) and fixing, the fix step is skipped along with the test step. When the requested operation is an isolated code repair or generation replay, sync consumes existing examples if present but must not detour into unrelated example generation just to construct repair context.
 8. **update**: Back-propagate any learnings to the prompt file
 
 **One-Session Mode** (`--one-session`):
@@ -1037,6 +1049,7 @@ pdd sync --no-one-session https://github.com/myorg/myrepo/issues/100
 - Uses git integration to detect changes and determine incremental vs full regeneration
 - Accumulates tests over time rather than replacing them (in a single test file per target)
 - Automatically handles dependencies between steps
+- **Compressed Context Telemetry**: Sync results and logs record whether compressed context was requested, the effective value after CLI and `.pddrc` resolution, whether it was actually applied for each phase, the source inputs used to build it, and whether the run fell back to agentic repair. This makes replay and benchmark comparisons distinguish normal sync from compressed-context sync.
 
 **Robust State Management**:
 - **Fingerprint Files**: Maintains `.pdd/meta/{basename}_{language}.json` with operation history
@@ -1177,6 +1190,7 @@ Options:
 - `--experimental-prd`: Explicitly opt in to experimental Incremental PRD Mode for PRD-like files (`.md`, `.markdown`, `.txt`, `.rst`, `.adoc`) or GitHub issue URLs. Requires `--incremental`.
 - `--unit-test FILENAME`: Path to a unit test file. If provided, automatic test discovery is disabled and only the content of this file is included in the prompt, instructing the model to generate code that passes the specified tests.
 - `--exclude-tests`: Do not automatically include test files found in the default tests directory.
+- Context compression: use global `--context-compression` / `--compression-fallback` before `generate` (see [Global Options](#global-options)); `generate` does not accept these flags after the subcommand.
 - `--snapshot-context`: Capture the expanded prompt and dynamic context outputs used for this generation. The run manifest is `.pdd/evidence/runs/<run_id>.json`; snapshot artifacts are in `.pdd/evidence/runs/<run_id>/`. This is recommended when a prompt uses `<shell>`, `<web>`, or `<include ... query="...">` for contract-relevant context.
 
 **Parameter Variables (-e/--env)**:
@@ -2008,6 +2022,7 @@ Options:
 - `--recursive`: Recursively preprocess all prompt files in the prompt file.
 - `--double`: Curly brackets will be doubled.
 - `--exclude`: List of keys to exclude from curly bracket doubling.
+- Context compression: use global `--context-compression` / `--compression-fallback` before `preprocess` (see [Global Options](#global-options)); `preprocess` does not accept these flags after the subcommand.
 - `--snapshot`: Write the expanded prompt plus a snapshot manifest for any dynamic context resolved during preprocessing. The manifest records hashes and artifact paths for captured `<shell>`, `<web>`, and semantic `query=` include outputs so a later replay can reconstruct the same prompt context.
 
 ```bash
@@ -2024,10 +2039,11 @@ PDD supports the following XML-like tags in prompt files. Note: XML-like tags (`
    ```xml
    <include>./path/to/file.txt</include>
    <include select="def:foo,class:Bar">src/utils.py</include>
+   <include select="pytest:test_my_feature">tests/test_existing.py</include>
    <include select="class:Handler" mode="interface">src/api.py</include>
    <include query="authentication flow">docs/api_reference.md</include>
    ```
-   - `select=` — deterministic structural extraction (functions, classes, line ranges, headings, regex, JSON/YAML paths). Composable via comma-separation.
+   - `select=` — deterministic structural extraction (functions, classes, pytest tests, API contract slices (`contract:symbol`), line ranges, headings, regex, JSON/YAML paths). Composable via comma-separation; values like `pytest:test_a,test_b` stay grouped.
    - `mode="interface"` — Python-only. Extracts signatures and docstrings with bodies replaced by `...`.
    - `query=` — LLM-powered semantic extraction, cached in `.pdd/extracts/`.
    - `optional` — when present on an `<include ...>` tag, a missing file resolves to an empty string (`""`) during non-recursive preprocessing (while still logging a warning).
@@ -2127,6 +2143,8 @@ pdd [GLOBAL OPTIONS] fix --manual [OPTIONS] PROMPT_FILE CODE_FILE UNIT_TEST_FILE
 - `--max-cycles INT`: Maximum number of outer loop cycles before giving up (default: 5).
 - `--resume/--no-resume`: Resume from saved state if available (default: `--resume`).
 - `--clean-restart`: Discard saved agentic E2E fix state and ignore sibling `pdd bug` analysis state before starting fresh. Implies `--no-resume`.
+- `--context-compression {off,test,examples,contracts,all}`: **Command-local** on `pdd fix` (and also available globally before the subcommand). Unlike `generate` and `preprocess`, `fix` accepts these flags after `fix` in the argv list.
+- `--compression-fallback {full,error}`: Same placement as `--context-compression` on `fix` (command-local or global before `fix`).
 - `--force`: Override the branch mismatch safety check. By default, the command aborts if the current git branch doesn't match the expected branch from the issue (to prevent accidentally modifying the wrong codebase).
 
 #### Manual Mode Options
@@ -2138,6 +2156,7 @@ pdd [GLOBAL OPTIONS] fix --manual [OPTIONS] PROMPT_FILE CODE_FILE UNIT_TEST_FILE
   - `--max-attempts INT`: Set the maximum number of fix attempts before giving up (default is 3).
   - `--budget FLOAT`: Set the maximum cost allowed for the fixing process (default is $5.0).
 - `--auto-submit`: Automatically submit the example if all unit tests pass during the fix loop.
+- `--context-compression` / `--compression-fallback`: Same **command-local** `fix` options as in Agentic E2E Fix Options above (not accepted after `generate` or `preprocess`).
 
 When the `--loop` option is used, the fix command will attempt to fix errors through multiple iterations. It will use the specified verification program to check if the code runs correctly after each fix attempt. The process will continue until either the errors are fixed, the maximum number of attempts is reached, or the budget is exhausted.
 
@@ -2239,7 +2258,7 @@ The workflow analyzes the GitHub issue to extract test information, then iterati
 7. **Verify Tests**: Run new unit tests to confirm they detect the bugs and will pass once fixed
 8. **Run PDD Fix**: Execute `pdd fix` sequentially on failing unit tests for each dev unit
 9. **Verify All**: Final verification that all tests pass locally
-10. **CI Validation**: Poll external CI, retrieve logs on failure, and run an LLM fix loop to remediate CI-specific issues (lint, artifacts, build)
+10. **CI Validation**: First poll external CI, retrieve logs on failure, and run an LLM fix loop to remediate any CI-specific issues (lint, artifacts, build). Once CI is green, run a real pre-checkup gate (the fix path's first drift-sync step) that **blocks** on any mechanical failure (build/smoke — compile, import, caller-compat, targeted tests) or unhealable update-drift. (Architecture-sync residuals and example-only drift are advisory in default mode — not hard blocks — because they are frequently spurious on a clean tree; strict mode promotes them.) It first drift-syncs code ↔ prompt ↔ `architecture.json` ↔ `.pdd/meta` in the worktree (the prompt/code sync is committed to the PR (an example regenerated as a side effect of an update-heal is committed and validated too; example-*only* drift is advisory — the gate does not auto-heal it, to avoid the #1243 null-hash heal loop); `.pdd/meta` fingerprint finalization is intentionally left to the post-merge sync — see #1317 — so the PR tree itself may still show fingerprint drift until then), then executes its own deterministic build/smoke checks — compile touched files, import changed modules, probe changed router/app modules for route/router objects (a non-blocking note, not a hard block — best-effort app-wiring smoke that stays with checkup), lint, caller-compatibility sweep, and run targeted unit tests by git-diff (Python tests are executed; a changed JS/TS test is reported, not run). It runs these checks itself rather than relying solely on GitHub required checks (which are often absent or vacuous)
 11. **Code Cleanup**: Review all changes from the workflow and clean up code quality issues (debug statements, unused imports, duplicated code); revert if tests fail
 12. **Final PR Checkup Gate**: After CI passes, run the full `pdd checkup --pr` against the PR head. If the checkup pushes additional fixes, CI is re-validated on the new head before the workflow returns success
 
@@ -2403,6 +2422,7 @@ The 13-step workflow:
 10. **Architecture & Doc Sync**: Update `architecture.json` metadata and synchronize associated documents (verified by the doc-sync contract; see Step 10.5)
 11. **Identify Issues**: Review changes for problems (part of review loop)
 12. **Fix Issues**: Fix identified issues (part of review loop, max 5 iterations)
+12.5. **Pre-PR Build/Smoke Gate** (issue #1293): Before creating the PR, run the same shared pre-checkup gate the fix path uses. It first drift-syncs code ↔ prompt ↔ `architecture.json` ↔ `.pdd/meta` in the worktree (largely a no-op here since Step 8.5/10 already healed prompt + architecture drift; `.pdd/meta` finalization is completed canonically by the post-merge sync, see #1317), then runs a blocking build/smoke pass over the changed files — compile touched files, import changed modules, probe changed router/app modules for route/router objects (a non-blocking note, not a hard block — best-effort app-wiring smoke that stays with checkup), lint, caller-compatibility sweep, and targeted unit tests by git-diff (Python tests are executed under a hardened, credential-free env; a changed JS/TS test is reported, not run) — so the change/feature PR enters `checkup --pr` already building and wired. A red gate **blocks PR creation in both default and strict mode** (issue #1293: "block — don't hand off to checkup until green"); it does not create the PR and surface the findings for later review
 13. **Create PR**: Create a pull request linking to the issue and surface any unresolved `MANUAL_REVIEW:` flags in the PR body
 
 **Workflow Resumption**: Steps 4 and 7 may pause the workflow to ask clarifying or architectural questions. When this happens, answer the questions in the GitHub issue and run `pdd change` again. The workflow will resume from where it left off, skipping already-completed steps to save tokens.
@@ -2773,6 +2793,7 @@ Options:
 - `--include-docs`: Include documentation files (`.md`, `.txt`, `.rst`) in dependency discovery. Default: disabled.
 - `--no-dedup`: Skip the redundant inline content removal pass.
 - `--concurrency N`: Maximum number of parallel LLM calls for dependency analysis (default: 1).
+- `--compress`: Use AST-based compression for Python dependencies (strips docstrings and comments).
 
 The command uses a two-stage retrieval pipeline when candidates exceed 50:
 1. **Embedding search**: Embeds the prompt and candidate files, retrieving the top-50 candidates by cosine similarity
@@ -3475,7 +3496,9 @@ This tiered approach allows for both shared project configurations and individua
 
 **Note:** You can manually edit this CSV, but running `pdd setup` again is the recommended way to add providers and update models.
 
-**ELO scores are agent-reviewed.** The `coding_arena_elo` column is populated from the checked-in `pdd/data/arena_elo_manifest.json` score manifest plus a curated static fallback for local and niche models. The intended refresh path is agentic: inspect current Arena source rows, record the raw model row, leaderboard/category, publish date, rank, rating bounds, vote count, match reason, and aliases in the manifest, then run the deterministic generator. See [Regenerate Model Catalog](#regenerate-model-catalog-pddgenerate_model_catalogpy) under Utilities.
+If a model added by a newer PDD release still appears to be ignored after upgrading, check for a stale override at `~/.pdd/llm_model.csv` or `<PROJECT_ROOT>/.pdd/llm_model.csv`. These files take precedence over the packaged catalog. Move/delete the stale override or regenerate it with `pdd setup` so selection can see the newer model rows.
+
+**Model ranking is agent-reviewed.** The `model_rank_score` column is the selector score: DeepSWE solve-rate rows are primary and use `10000 + round(solve_rate_percent * 100)`, while models absent from DeepSWE fall back to raw Arena/static ELO. The `coding_arena_elo` column remains raw Arena/static metadata and is not overwritten with fake DeepSWE ELO. The intended refresh path is agentic: inspect current DeepSWE and Arena source rows, record the raw model row, leaderboard/category, publish date, rank, rating bounds, vote count, match reason, and aliases in the respective manifest, then run the deterministic generator. See [Regenerate Model Catalog](#regenerate-model-catalog-pddgenerate_model_catalogpy) under Utilities.
 
 *Note: This file-based configuration primarily affects local operations and utilities. Cloud execution modes likely rely on centrally managed configurations.*
 
@@ -3842,29 +3865,44 @@ python pdd/update_model_costs.py [--csv-path path/to/your/project/llm_model.csv]
 
 ### Regenerate Model Catalog (`pdd/generate_model_catalog.py`)
 
-This script rebuilds the bundled `pdd/data/llm_model.csv` catalog from `litellm.model_cost` metadata, enriched with agent-reviewed coding-arena scores from `pdd/data/arena_elo_manifest.json`. Python generation is intentionally deterministic: it does not scrape or fetch leaderboard data at runtime.
+This script rebuilds the bundled `pdd/data/llm_model.csv` catalog from `litellm.model_cost` metadata, enriched with agent-reviewed coding scores from two checked-in manifests. Python generation is intentionally deterministic: it does not scrape or fetch leaderboard data at runtime.
+
+**Rank resolution order:**
+
+1. `deepswe-solve-rate` — exact normalized alias match in `pdd/data/deepswe_manifest.json`; `model_rank_score = 10000 + round(solve_rate_percent * 100)`.
+2. `arena-elo-fallback` — exact normalized alias match in `pdd/data/arena_elo_manifest.json` for models absent from DeepSWE.
+3. `static` — exact key in the curated `STATIC_ELO_FALLBACK` dict (local-runner roots, niche models, not-yet-reviewed models).
+4. `static-prefix` — longest canonical-prefix match in `STATIC_ELO_FALLBACK`.
+
+If no tier produces a non-zero score the row is excluded (below `ELO_CUTOFF = 1300`).
+
+Raw `coding_arena_elo` is resolved separately from Arena/static sources only. DeepSWE never writes a fake ELO into that column.
 
 It performs the following steps:
-*   **Loads** reviewed scores, aliases, and row-level provenance from `pdd/data/arena_elo_manifest.json`.
-*   **Normalizes** LiteLLM model IDs and applies only exact reviewed aliases from the manifest. Runtime fuzzy matching is intentionally disabled so model identity decisions stay reviewable. Reasoning-effort variants such as `-high`, `-medium`, `-low`, and `-minimal` remain distinct unless the manifest explicitly maps them.
-*   **Falls back** gracefully — if the manifest is missing or malformed, the run still succeeds using a curated static fallback dict for local-runner roots like `lm_studio/`, `ollama/`, aliases, and not-yet-reviewed models.
-*   Applies pricing overrides, deprecation/placeholder filtering, dedup, and a per-provider Pareto filter, then writes the resulting CSV.
+*   **Loads** reviewed scores, aliases, and row-level provenance from both manifests. Each DeepSWE entry carries a `solve_rate` plus `match_reason` explaining the harness, effort level, and date rationale for the mapping.
+*   **Normalizes** LiteLLM model IDs and applies only exact reviewed aliases from the manifests. Runtime fuzzy matching is intentionally disabled so model identity decisions stay reviewable. Reasoning-effort variants such as `-high`, `-medium`, `-low`, and `-minimal` remain distinct unless the manifest explicitly maps them.
+*   **Falls back** gracefully — if either manifest is missing or malformed, the run still succeeds using lower-priority sources or the curated static fallback dict for local-runner roots like `lm_studio/`, `ollama/`, aliases, and not-yet-reviewed models.
+*   Applies pricing overrides, deprecation/placeholder filtering, dedup, and a per-provider Pareto filter that prunes dominated fallback rows while preserving DeepSWE-ranked rows, exact Arena-reviewed rows, and routable static fallback IDs, then writes the resulting CSV.
 *   **Emits** the `interactive_only` column, setting it to `True` for the provider roots that require interactive human auth or a running local server (`github_copilot`, `chatgpt`, `lm_studio`, `ollama`) and `False` for everyone else. Automatic model selection skips `interactive_only` rows unless `PDD_ALLOW_INTERACTIVE` is set (see [Core Environment Variables](#core-environment-variables)).
+*   **Prints** a raw-ELO diagnostic breakdown reporting counts for `arena-exact`, `static`, `static-prefix`, and `none`. DeepSWE provenance is visible per row in `model_rank_source`.
 
 **Usage:**
 
 ```bash
 conda activate pdd
-# Use the checked-in agentic score manifest.
+# Use the checked-in agentic score manifests (DeepSWE primary, Arena fallback).
 python pdd/generate_model_catalog.py [--output path/to/llm_model.csv]
 
-# Test with an alternate reviewed manifest.
+# Test with alternate reviewed manifests.
 python pdd/generate_model_catalog.py --score-manifest path/to/arena_elo_manifest.json
+python pdd/generate_model_catalog.py --deepswe-manifest path/to/deepswe_manifest.json
 ```
 
-To refresh scores, use a PDD agent to inspect the current public Arena sources, update `pdd/data/arena_elo_manifest.json` with exact aliases and provenance, then run the command above. This keeps policy choices such as WebDev vs Text/Coding explicit in review instead of hidden in Python fetch logic.
+To refresh scores, use a PDD agent to inspect the current public DeepSWE and Arena sources, update `pdd/data/deepswe_manifest.json` and/or `pdd/data/arena_elo_manifest.json` with exact aliases, provenance, and match reasons, then run the command above. This keeps policy choices explicit in review instead of hidden in Python fetch logic. DeepSWE entries require a `match_reason` field documenting why the DeepSWE row (harness, effort level, date) maps to the catalog model.
 
-`--refresh-elo` is intentionally not a live Python fetch path. It exits with an instruction to perform the agentic manifest refresh instead of silently producing a stale refresh.
+`--refresh-elo` is intentionally not a live Python fetch path. It exits with an instruction to perform the agentic manifest refresh of both manifests instead of silently producing a stale refresh.
+
+
 
 ## Patents
 
