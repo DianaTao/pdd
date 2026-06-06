@@ -32,6 +32,17 @@ Scenarios
   blocks (exit 2).
 * ``change-off``     — ``.pddrc`` with unquoted ``prompt_gate: off`` (PyYAML loads it
   as boolean ``False``): gate is skipped (exit 0), validating config-based disabling.
+* ``change-cloud``   — **real ``pdd change`` against the PDD cloud backend, no stubs**.
+  ``change_func`` → ``llm_invoke`` routes to the cloud endpoint (``PDD_JWT_TOKEN`` /
+  device-flow auth, ``PDD_CLOUD_ONLY`` = no local fallback), then the real gate runs.
+  Skips cleanly when no cloud credentials are configured.
+
+Cloud scenario — human-runnable::
+
+    export PDD_JWT_TOKEN=<token>          # or device-flow creds; see cloud_regression.sh
+    python scripts/prompt_gate_e2e_demo.py            # change-cloud now runs for real
+    # or just the cloud test:
+    pytest -vv -m real tests/e2e/test_prompt_gate_cloud_change.py
 """
 from __future__ import annotations
 
@@ -68,9 +79,16 @@ class ScenarioResult:
     stdout: str = ""
     stderr: str = ""
     notes: str = ""
+    skipped: bool = False
+    verified: Optional[bool] = None  # when set, overrides the exit-code check
 
     @property
     def ok(self) -> bool:
+        # A skipped scenario (e.g. no cloud auth) is neutral, not a failure.
+        if self.skipped:
+            return True
+        if self.verified is not None:
+            return self.verified
         return self.exit_code == self.expected_exit_code
 
     def gate_excerpt(self, limit: int = 12) -> str:
@@ -346,6 +364,121 @@ def run_generate_agentic(base: Path, *, gate_mode: str, cli_flag: Optional[str])
     )
 
 
+def cloud_auth_available() -> bool:
+    """True when ``pdd`` can reach the cloud backend (matches cloud_regression.sh).
+
+    Cloud auth is either an injected ``PDD_JWT_TOKEN`` or device-flow creds
+    (``NEXT_PUBLIC_FIREBASE_API_KEY``/``FIREBASE_API_KEY`` + ``GITHUB_CLIENT_ID``).
+    ``PDD_FORCE_LOCAL`` (the ``--local`` flag) disables cloud entirely.
+    """
+    if os.environ.get("PDD_FORCE_LOCAL"):
+        return False
+    if os.environ.get("PDD_JWT_TOKEN"):
+        return True
+    firebase = os.environ.get("NEXT_PUBLIC_FIREBASE_API_KEY") or os.environ.get(
+        "FIREBASE_API_KEY"
+    )
+    return bool(firebase and os.environ.get("GITHUB_CLIENT_ID"))
+
+
+def run_change_cloud(base: Path) -> ScenarioResult:
+    """REAL ``pdd change`` against the **PDD cloud** backend (no stubs), then the REAL gate.
+
+    Unlike the other scenarios, nothing is stubbed here: ``change_func`` →
+    ``llm_invoke`` routes to the cloud endpoint because cloud auth is present and
+    ``PDD_CLOUD_ONLY`` disables local fallback, so a successful run is genuine
+    cloud execution. Skips cleanly when no cloud credentials are configured.
+
+    Gate mode is ``warn`` so the run completes (exit 0) regardless of what the
+    cloud model returns — the assertion is that the gate ran on the cloud-written
+    prompt, not the model's exact edit.
+    """
+    name = "change-cloud"
+    if not cloud_auth_available():
+        return ScenarioResult(
+            name=name,
+            command="pdd change --manual ... (real cloud)",
+            exit_code=0,
+            expected_exit_code=0,
+            skipped=True,
+            notes="skipped — no cloud auth. Set PDD_JWT_TOKEN (or device-flow creds) to run.",
+        )
+
+    project = make_project(base, gate_mode="warn")
+    change_prompt = project / "change_python.prompt"
+    change_prompt.write_text(
+        "% Revise the prompt so it explicitly requires the function to validate "
+        "that its input is a positive integer and raise ValueError otherwise.\n",
+        encoding="utf-8",
+    )
+    input_code = project / "module.py"
+    input_code.write_text("def doubler(n):\n    return n * 2\n", encoding="utf-8")
+    input_prompt = project / "prompts" / "doubler_python.prompt"
+    input_prompt.write_text(
+        "% Implement a `doubler(n)` function that returns n * 2.\n",
+        encoding="utf-8",
+    )
+    out_prompt = project / "prompts" / "doubler_python.prompt"
+
+    pdd_args = [
+        sys.executable,
+        "-m",
+        "pdd.cli",
+        "--force",  # global flag: overwrite the in-place prompt without an interactive prompt
+        "change",
+        "--manual",
+        str(change_prompt),
+        str(input_code),
+        str(input_prompt),
+        "--output",
+        str(out_prompt),
+        "--prompt-checkup",
+        "warn",
+    ]
+    # Force cloud execution with no local fallback (mirrors cloud_regression.sh).
+    cloud_env = _cli_env(
+        {
+            "PDD_CLOUD_ONLY": "true",
+            "PDD_NO_LOCAL_FALLBACK": "1",
+            "PDD_FORCE_LOCAL": "",
+        }
+    )
+    before = out_prompt.read_text(encoding="utf-8")
+    proc = subprocess.run(
+        pdd_args,
+        cwd=project,
+        env=cloud_env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=600,
+    )
+    after = out_prompt.read_text(encoding="utf-8") if out_prompt.exists() else ""
+    rewritten = after.strip() != "" and after != before
+    gate_ran = "Prompt checkup" in proc.stdout
+    used_cloud = "JWT token" in proc.stdout or "cloud" in proc.stdout.lower()
+    # A genuine cloud run must: exit 0, actually rewrite the prompt via cloud,
+    # and run the gate on it. Exit 0 alone is not enough (a swallowed cloud-auth
+    # failure also exits 0), so verify the substance.
+    verified = proc.returncode == 0 and rewritten and gate_ran
+    note = (
+        f"PDD_CLOUD_ONLY=true; used cloud: {used_cloud}; prompt rewritten by cloud: "
+        f"{rewritten}; gate ran: {gate_ran}"
+    )
+    return ScenarioResult(
+        name=name,
+        command="PDD_CLOUD_ONLY=true pdd --force change --manual change_python.prompt module.py "
+        "doubler_python.prompt --output prompts/doubler_python.prompt --prompt-checkup warn",
+        exit_code=proc.returncode,
+        expected_exit_code=0,
+        changed_prompts=[str(out_prompt.relative_to(project))],
+        stdout=proc.stdout,
+        stderr=proc.stderr,
+        notes=note,
+        verified=verified,
+    )
+
+
 def all_scenarios(base: Path) -> list[ScenarioResult]:
     """Run every scenario in its own disposable sub-project under *base*."""
     results: list[ScenarioResult] = []
@@ -357,12 +490,14 @@ def all_scenarios(base: Path) -> list[ScenarioResult]:
     results.append(run_change_manual(base / "s_change_off", gate_mode="off", cli_flag=None))
     results.append(run_generate_agentic(base / "s_gen_warn", gate_mode="warn", cli_flag="warn"))
     results.append(run_generate_agentic(base / "s_gen_strict", gate_mode="strict", cli_flag=None))
+    (base / "s_change_cloud").mkdir(exist_ok=True)
+    results.append(run_change_cloud(base / "s_change_cloud"))
     return results
 
 
 def _print_transcript(results: list[ScenarioResult]) -> None:
     for res in results:
-        status = "PASS" if res.ok else "FAIL"
+        status = "SKIP" if res.skipped else ("PASS" if res.ok else "FAIL")
         print("=" * 78)
         print(f"[{status}] {res.name}")
         print(f"  $ {res.command}")
@@ -385,9 +520,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         results = all_scenarios(base)
         _print_transcript(results)
         failures = [r for r in results if not r.ok]
+        skipped = [r for r in results if r.skipped]
+        ran = len(results) - len(skipped)
+        passed = ran - len(failures)
         print(
-            f"\nSummary: {len(results) - len(failures)}/{len(results)} scenarios "
-            f"matched expected exit codes."
+            f"\nSummary: {passed}/{ran} run scenarios matched expected exit codes"
+            + (f"; {len(skipped)} skipped ({', '.join(r.name for r in skipped)})." if skipped else ".")
         )
         # The nested scenario additionally asserts coverage is anchored to the root.
         nested = next((r for r in results if r.name == "checkup-nested"), None)
