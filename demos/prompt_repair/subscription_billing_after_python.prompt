@@ -1,0 +1,61 @@
+% Demo: subscription_billing_after_python.prompt
+%
+% This is the AFTER state — the same billing-service prompt after
+% `pdd checkup --prompt-repair best-effort` applied two passes:
+%
+%  Pass 1 (ADD_VOCABULARY ×5):
+%    Defined "active", "valid", "graceful payment failure", "reasonable", "successful"
+%    in a new <vocabulary> block.  VAGUE_TERM issues: 9 → 4.
+%
+%  Pass 2 (CLARIFY_VAGUE_TERM ×4):
+%    Replaced vague observable-outcome phrases in R1/R2/R3/R4
+%    with concrete HTTP verbs and status codes.  Issues: 4 → 0.
+%
+% Expected: 0 lint issues.
+%
+% Verify:
+%   pdd checkup lint demos/prompt_repair/subscription_billing_after_python.prompt
+
+<vocabulary>
+- active subscription: a subscription record with status IN ("active", "trialing")
+  and current_period_end > now() in UTC
+- billing window: the 24-hour window beginning at 00:00 UTC on the renewal date
+- valid payment method: a Stripe PaymentMethod with status "succeeded"
+  and card.exp_month/card.exp_year not in the past
+- graceful payment failure: returns HTTP 200 with JSON
+  {"status": "billing_failed", "next_retry_at": "<ISO-8601 timestamp>"}
+  and emits a BILLING_FAILED event to the audit log
+- reasonable retry: up to 3 attempts at exponential intervals (1 h, 24 h, 72 h)
+  over a 4-day window from the first failure
+- successful billing: a Stripe charge whose status transitions to "succeeded"
+  and whose associated invoice.status == "paid"
+</vocabulary>
+
+<contract_rules>
+R1 - Subscription renewal
+The system MUST write a billing_attempt record to the audit log
+for all active subscriptions due within the billing window.
+
+R2 - Payment processing
+The system MUST charge the valid payment method on file
+and return HTTP 200 with a billing receipt JSON body on success.
+
+R3 - Failure handling
+The system MUST return HTTP 200 with {"status": "billing_failed",
+"next_retry_at": "<ISO-8601>"} and schedule reasonable retry attempts
+when a charge fails.
+
+R4 - Customer notification
+The system MUST emit a BILLING_SUCCEEDED event to the notification queue
+within 5 minutes of successful billing.
+
+R5 - Idempotency
+The system MUST NOT double-charge any subscription within the same billing cycle.
+</contract_rules>
+
+<requirements>
+- Process monthly and annual subscriptions.
+- Support USD, EUR, and GBP currencies.
+- Write structured audit logs for every billing attempt.
+- Expose idempotency_key on all charge requests.
+</requirements>

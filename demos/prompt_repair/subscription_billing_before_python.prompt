@@ -1,0 +1,36 @@
+% Demo: subscription_billing_before_python.prompt
+%
+% This is the BEFORE state — a realistic billing-service prompt with
+% common ambiguity problems that the prompt repair feature detects and fixes.
+%
+% Run to see all issues:
+%   pdd checkup lint demos/prompt_repair/subscription_billing_before_python.prompt
+%
+% Run to repair automatically:
+%   pdd checkup demos/prompt_repair/subscription_billing_before_python.prompt --prompt-repair best-effort
+%
+% Expected: 6 VAGUE_TERM warnings before repair, 0 after.
+
+<contract_rules>
+R1 - Subscription renewal
+The system MUST process renewals for all active subscriptions due within the billing window.
+
+R2 - Payment processing
+The system MUST charge the valid payment method on file and record a billing receipt.
+
+R3 - Failure handling
+The system MUST handle failed payments gracefully and apply reasonable retry logic.
+
+R4 - Customer notification
+The system MUST notify the customer on successful billing within 5 minutes.
+
+R5 - Idempotency
+The system MUST NOT double-charge any subscription within the same billing cycle.
+</contract_rules>
+
+<requirements>
+- Process monthly and annual subscriptions.
+- Support USD, EUR, and GBP currencies.
+- Write structured audit logs for every billing attempt.
+- Expose idempotency_key on all charge requests.
+</requirements>
